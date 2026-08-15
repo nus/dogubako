@@ -26,6 +26,22 @@ func TestFittedRectKeepsAspect(t *testing.T) {
 	}
 }
 
+func TestDestPreviewHasImageFromSource(t *testing.T) {
+	var p destPreview
+	if p.HasImage() {
+		t.Fatal("empty")
+	}
+	src := image.NewNRGBA(image.Rect(0, 0, 2, 2))
+	p.SetSource(src)
+	if !p.HasImage() {
+		t.Fatal("source should count as an image before GPU upload")
+	}
+	p.SetSource(nil)
+	if p.HasImage() {
+		t.Fatal("cleared")
+	}
+}
+
 func TestScreenToImageRoundTrip(t *testing.T) {
 	fitted := image.Rect(10, 20, 110, 70)
 	imgSize := image.Pt(200, 100)

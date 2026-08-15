@@ -39,7 +39,7 @@ type Root struct {
 	pendingScreenshotSave <-chan dialog.FileResult
 	pendingCapture        <-chan capture.Result
 	captureCancel         context.CancelFunc
-	captureMinimized      bool
+	captureHidden         bool
 
 	layoutItems []guigui.LinearLayoutItem
 }
@@ -58,6 +58,7 @@ func (r *Root) WriteStateKey(context *guigui.Context, w *guigui.StateKeyWriter) 
 	w.WriteString(string(r.model.Lang()))
 	w.WriteUint64(r.model.Image().Generation())
 	w.WriteUint64(r.model.Screenshot().Generation())
+	w.WriteBool(r.model.Screenshot().HasImage())
 	w.WriteBool(r.pendingCapture != nil)
 }
 
@@ -274,11 +275,13 @@ func (r *Root) startCapture() {
 	shot.SetStatus(i18n.StatusCaptureInProgress)
 	delay := time.Duration(shot.DelaySec()) * time.Second
 	if shot.HideWindow() {
-		ebiten.MinimizeWindow()
-		r.captureMinimized = true
+		hideAppWindow()
+		r.captureHidden = true
 		if delay < 400*time.Millisecond {
 			delay = 400 * time.Millisecond
 		}
+	} else {
+		r.restoreCaptureWindow()
 	}
 	ctx, cancel := context.WithTimeout(context.Background(), delay+capture.Timeout(shot.Mode()))
 	r.captureCancel = cancel
@@ -309,29 +312,27 @@ func (r *Root) drainCapture() {
 			r.captureCancel()
 			r.captureCancel = nil
 		}
-		if r.captureMinimized {
-			ebiten.RestoreWindow()
-			r.captureMinimized = false
-		}
+		r.restoreCaptureWindow()
 		shot := r.model.Screenshot()
 		shot.SetCapturing(false)
 		if res.Cancelled || errors.Is(res.Err, capture.ErrCancelled) {
 			shot.SetStatus(i18n.StatusCaptureCancelled)
+			guigui.RequestRebuild()
 			return
 		}
 		if res.Err != nil {
 			if errors.Is(res.Err, capture.ErrTimeout) {
 				shot.SetStatus(i18n.StatusCaptureTimeout)
-				return
-			}
-			if errors.Is(res.Err, capture.ErrNoTool) {
+			} else if errors.Is(res.Err, capture.ErrNoTool) {
 				shot.SetStatus(i18n.StatusCaptureNoTool)
-				return
+			} else {
+				shot.SetStatus(i18n.StatusCaptureFailed, res.Err)
 			}
-			shot.SetStatus(i18n.StatusCaptureFailed, res.Err)
+			guigui.RequestRebuild()
 			return
 		}
 		_ = shot.ApplyCapture(res.Image)
+		guigui.RequestRebuild()
 	default:
 	}
 }
@@ -414,4 +415,23 @@ func ShortcutLabel(context *guigui.Context, key string) string {
 		return "⌘" + key
 	}
 	return "Ctrl+" + key
+}
+
+func hideAppWindow() {
+	ebiten.SetWindowVisible(false)
+}
+
+func (r *Root) restoreCaptureWindow() {
+	if !r.captureHidden {
+		return
+	}
+	r.captureHidden = false
+	if !ebiten.IsWindowVisible() {
+		ebiten.SetWindowVisible(true)
+	}
+	// MinimizeWindow was used previously; RestoreWindow panics if the window is
+	// already normal, so only restore when the window is actually iconified.
+	if ebiten.IsWindowMinimized() {
+		ebiten.RestoreWindow()
+	}
 }

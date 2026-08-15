@@ -44,6 +44,7 @@ type ScreenshotTool struct {
 	previewLabel basicwidget.Text
 	preview      destPreview
 	previewEmpty basicwidget.Text
+	showPreview  bool
 
 	destLabel basicwidget.Text
 	saveAsBtn basicwidget.Button
@@ -64,6 +65,17 @@ type ScreenshotTool struct {
 	prevCol      guigui.LinearLayout
 	bodyRow      guigui.LinearLayout
 	outputRow    guigui.LinearLayout
+}
+
+func (t *ScreenshotTool) WriteStateKey(context *guigui.Context, w *guigui.StateKeyWriter) {
+	v, ok := context.Env(t, EnvKeyModel)
+	if !ok {
+		return
+	}
+	shot := v.(*Model).Screenshot()
+	w.WriteUint64(shot.Generation())
+	w.WriteBool(shot.HasImage())
+	w.WriteBool(shot.Capturing())
 }
 
 func (t *ScreenshotTool) OnCapture(f func(context *guigui.Context)) {
@@ -205,14 +217,15 @@ func (t *ScreenshotTool) Build(context *guigui.Context, adder *guigui.ChildAdder
 	context.SetEnabled(&t.fileList, !busy)
 
 	setBoldText(&t.previewLabel, true)
+	t.showPreview = has
 	if has {
 		sz := model.Size()
 		t.previewLabel.SetValue(i18n.T(lang, i18n.ScreenshotPreviewSz, sz.X, sz.Y))
-		t.preview.SetImage(model.Preview())
+		t.preview.SetSource(model.Image())
 		adder.AddWidget(&t.preview)
 	} else {
 		t.previewLabel.SetValue(i18n.T(lang, i18n.ScreenshotPreview))
-		t.preview.SetImage(nil)
+		t.preview.SetSource(nil)
 		t.previewEmpty.SetMultiline(true)
 		t.previewEmpty.SetWrapMode(basicwidget.WrapModeNormal)
 		t.previewEmpty.SetHorizontalAlign(basicwidget.HorizontalAlignCenter)
@@ -285,7 +298,7 @@ func (t *ScreenshotTool) Layout(context *guigui.Context, widgetBounds *guigui.Wi
 	t.listCol = guigui.LinearLayout{Direction: guigui.LayoutDirectionVertical, Items: t.listColItems, Gap: u / 4}
 
 	previewContent := guigui.Widget(&t.previewEmpty)
-	if t.preview.HasImage() {
+	if t.showPreview {
 		previewContent = &t.preview
 	}
 	t.prevColItems = slices.Delete(t.prevColItems, 0, len(t.prevColItems))
