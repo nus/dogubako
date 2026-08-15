@@ -152,12 +152,16 @@ func (t *ScreenshotTool) Build(context *guigui.Context, adder *guigui.ChildAdder
 	})
 	context.SetEnabled(&t.hideToggle, !busy)
 
-	t.captureBtn.SetText(i18n.T(lang, i18n.ScreenshotCapture))
+	if busy {
+		t.captureBtn.SetText(i18n.T(lang, i18n.ScreenshotCaptureRetry))
+	} else {
+		t.captureBtn.SetText(i18n.T(lang, i18n.ScreenshotCapture))
+	}
 	t.captureBtn.SetType(basicwidget.ButtonTypePrimary)
 	t.captureBtn.OnDown(func(context *guigui.Context) {
 		guigui.DispatchEvent(t, eventScreenshotCapture)
 	})
-	context.SetEnabled(&t.captureBtn, !busy)
+	context.SetEnabled(&t.captureBtn, true)
 
 	setBoldText(&t.listLabel, true)
 	t.listLabel.SetValue(i18n.T(lang, i18n.ScreenshotFiles))

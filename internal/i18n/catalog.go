@@ -38,22 +38,23 @@ const (
 	OutputFormat   Key = "image.output_format"
 	JPEGQuality    Key = "image.jpeg_quality"
 
-	ScreenshotCapture    Key = "screenshot.capture"
-	ScreenshotMode       Key = "screenshot.mode"
-	ScreenshotFull       Key = "screenshot.full"
-	ScreenshotWindow     Key = "screenshot.window"
-	ScreenshotRegion     Key = "screenshot.region"
-	ScreenshotDelay      Key = "screenshot.delay"
-	ScreenshotHideWindow Key = "screenshot.hide_window"
-	ScreenshotEmpty      Key = "screenshot.empty"
-	ScreenshotPreview    Key = "screenshot.preview"
-	ScreenshotPreviewSz  Key = "screenshot.preview_size"
-	ScreenshotDest       Key = "screenshot.dest"
-	ScreenshotFiles      Key = "screenshot.files"
-	ScreenshotSaveAs     Key = "screenshot.save_as"
-	ScreenshotCopy       Key = "screenshot.copy"
-	ScreenshotSendImage  Key = "screenshot.send_image"
-	ScreenshotShowFolder Key = "screenshot.show_folder"
+	ScreenshotCapture      Key = "screenshot.capture"
+	ScreenshotCaptureRetry Key = "screenshot.capture_retry"
+	ScreenshotMode         Key = "screenshot.mode"
+	ScreenshotFull         Key = "screenshot.full"
+	ScreenshotWindow       Key = "screenshot.window"
+	ScreenshotRegion       Key = "screenshot.region"
+	ScreenshotDelay        Key = "screenshot.delay"
+	ScreenshotHideWindow   Key = "screenshot.hide_window"
+	ScreenshotEmpty        Key = "screenshot.empty"
+	ScreenshotPreview      Key = "screenshot.preview"
+	ScreenshotPreviewSz    Key = "screenshot.preview_size"
+	ScreenshotDest         Key = "screenshot.dest"
+	ScreenshotFiles        Key = "screenshot.files"
+	ScreenshotSaveAs       Key = "screenshot.save_as"
+	ScreenshotCopy         Key = "screenshot.copy"
+	ScreenshotSendImage    Key = "screenshot.send_image"
+	ScreenshotShowFolder   Key = "screenshot.show_folder"
 
 	DialogOpen   Key = "dialog.open"
 	DialogSave   Key = "dialog.save"
@@ -79,6 +80,7 @@ const (
 	StatusSaved                    Key = "status.saved"
 	StatusCaptureInProgress        Key = "status.capture_in_progress"
 	StatusCaptureCancelled         Key = "status.capture_cancelled"
+	StatusCaptureTimeout           Key = "status.capture_timeout"
 	StatusCaptureFailed            Key = "status.capture_failed"
 	StatusCaptureNoTool            Key = "status.capture_no_tool"
 	StatusCaptured                 Key = "status.captured"
@@ -121,6 +123,7 @@ var catalogs = map[Lang]map[Key]string{
 		OutputFormat:                   "出力形式",
 		JPEGQuality:                    "JPEG 品質  %d",
 		ScreenshotCapture:              "キャプチャ",
+		ScreenshotCaptureRetry:         "やり直す",
 		ScreenshotMode:                 "対象",
 		ScreenshotFull:                 "画面全体",
 		ScreenshotWindow:               "ウィンドウ",
@@ -159,6 +162,7 @@ var catalogs = map[Lang]map[Key]string{
 		StatusSaved:                    "保存しました: %s",
 		StatusCaptureInProgress:        "キャプチャしています…",
 		StatusCaptureCancelled:         "キャプチャをキャンセルしました",
+		StatusCaptureTimeout:           "キャプチャがタイムアウトしました",
 		StatusCaptureFailed:            "キャプチャに失敗しました: %v",
 		StatusCaptureNoTool:            "画面キャプチャのコマンドが見つかりません。Ubuntu では gnome-screenshot をインストールしてください",
 		StatusCaptured:                 "キャプチャしました（%d×%d）",
@@ -199,6 +203,7 @@ var catalogs = map[Lang]map[Key]string{
 		OutputFormat:                   "Output format",
 		JPEGQuality:                    "JPEG quality  %d",
 		ScreenshotCapture:              "Capture",
+		ScreenshotCaptureRetry:         "Retry",
 		ScreenshotMode:                 "Target",
 		ScreenshotFull:                 "Full screen",
 		ScreenshotWindow:               "Window",
@@ -237,6 +242,7 @@ var catalogs = map[Lang]map[Key]string{
 		StatusSaved:                    "Saved: %s",
 		StatusCaptureInProgress:        "Capturing…",
 		StatusCaptureCancelled:         "Capture cancelled",
+		StatusCaptureTimeout:           "Capture timed out",
 		StatusCaptureFailed:            "Capture failed: %v",
 		StatusCaptureNoTool:            "No screenshot command found. On Ubuntu, install gnome-screenshot.",
 		StatusCaptured:                 "Captured (%d×%d)",

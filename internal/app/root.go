@@ -1,6 +1,7 @@
 package app
 
 import (
+	"context"
 	"errors"
 	"path/filepath"
 	"slices"
@@ -37,6 +38,7 @@ type Root struct {
 	pendingSave           <-chan dialog.FileResult
 	pendingScreenshotSave <-chan dialog.FileResult
 	pendingCapture        <-chan capture.Result
+	captureCancel         context.CancelFunc
 	captureMinimized      bool
 
 	layoutItems []guigui.LinearLayoutItem
@@ -267,9 +269,7 @@ func (r *Root) drainDialogs() {
 
 func (r *Root) startCapture() {
 	shot := r.model.Screenshot()
-	if shot.Capturing() || r.pendingCapture != nil {
-		return
-	}
+	r.cancelPendingCapture()
 	shot.SetCapturing(true)
 	shot.SetStatus(i18n.StatusCaptureInProgress)
 	delay := time.Duration(shot.DelaySec()) * time.Second
@@ -280,7 +280,22 @@ func (r *Root) startCapture() {
 			delay = 400 * time.Millisecond
 		}
 	}
-	r.pendingCapture = capture.Async(shot.Mode(), delay)
+	ctx, cancel := context.WithTimeout(context.Background(), delay+capture.Timeout(shot.Mode()))
+	r.captureCancel = cancel
+	r.pendingCapture = capture.Async(ctx, shot.Mode(), delay)
+}
+
+func (r *Root) cancelPendingCapture() {
+	if r.captureCancel != nil {
+		r.captureCancel()
+		r.captureCancel = nil
+	}
+	if r.pendingCapture == nil {
+		return
+	}
+	stale := r.pendingCapture
+	r.pendingCapture = nil
+	go func() { <-stale }()
 }
 
 func (r *Root) drainCapture() {
@@ -290,6 +305,10 @@ func (r *Root) drainCapture() {
 	select {
 	case res := <-r.pendingCapture:
 		r.pendingCapture = nil
+		if r.captureCancel != nil {
+			r.captureCancel()
+			r.captureCancel = nil
+		}
 		if r.captureMinimized {
 			ebiten.RestoreWindow()
 			r.captureMinimized = false
@@ -301,6 +320,10 @@ func (r *Root) drainCapture() {
 			return
 		}
 		if res.Err != nil {
+			if errors.Is(res.Err, capture.ErrTimeout) {
+				shot.SetStatus(i18n.StatusCaptureTimeout)
+				return
+			}
 			if errors.Is(res.Err, capture.ErrNoTool) {
 				shot.SetStatus(i18n.StatusCaptureNoTool)
 				return

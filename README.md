@@ -46,10 +46,10 @@ Linux では `~/.config/user-dirs.dirs` を読むので、ホーム直下に英�
 - S: 保存先へもう一度保存（別ファイル名）
 - C: クリップボードにコピー
 
-Ubuntu では `gnome-screenshot` があると一番確実です。無ければ `spectacle` / `maim` / `scrot` / `grim` / ImageMagick の `import` の順で探します。
+Ubuntu ではデスクトップに合ったコマンドを優先します（GNOME なら `gnome-screenshot`、それ以外では `maim` / `scrot` など）。1つ目が画像を書かずに終わったときは次のコマンドを試します。範囲選択が止まったときは「やり直す」で中断して再試行できます。
 
 ```sh
-sudo apt install gnome-screenshot
+sudo apt install gnome-screenshot scrot
 ```
 
 macOS ではシステムの `screencapture` を使います。初回は「画面収録」の許可が必要です（システム設定 → プライバシーとセキュリティ）。
