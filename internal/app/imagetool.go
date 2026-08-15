@@ -32,8 +32,9 @@ type ImageTool struct {
 	afterImage    destPreview
 	afterEmpty    basicwidget.Text
 
-	formPanel basicwidget.Panel
-	form      basicwidget.Form
+	resizePanel editPanel
+	cropPanel   editPanel
+	formatPanel editPanel
 
 	sectionSize     basicwidget.Text
 	scaleText       basicwidget.Text
@@ -59,15 +60,14 @@ type ImageTool struct {
 	cropHInput      guigui.WidgetWithSize[*basicwidget.NumberInput]
 	resetCropButton basicwidget.Button
 
-	sectionOut   basicwidget.Text
-	formatText   basicwidget.Text
-	format       basicwidget.SegmentedControl[imageproc.Format]
-	qualityText  basicwidget.Text
-	quality      basicwidget.Slider
-	qualityValue basicwidget.Text
-	saveButton   basicwidget.Button
-	copyButton   basicwidget.Button
-	outputHint   basicwidget.Text
+	sectionOut  basicwidget.Text
+	formatText  basicwidget.Text
+	format      basicwidget.SegmentedControl[imageproc.Format]
+	qualityText basicwidget.Text
+	quality     basicwidget.Slider
+	saveButton  basicwidget.Button
+	copyButton  basicwidget.Button
+	outputHint  basicwidget.Text
 
 	status basicwidget.Text
 
@@ -75,12 +75,14 @@ type ImageTool struct {
 	previewItems []guigui.LinearLayoutItem
 	beforeItems  []guigui.LinearLayoutItem
 	afterItems   []guigui.LinearLayoutItem
+	editItems    []guigui.LinearLayoutItem
 	outputItems  []guigui.LinearLayoutItem
 	layoutItems  []guigui.LinearLayoutItem
 	beforeLayout guigui.LinearLayout
 	afterLayout  guigui.LinearLayout
 	previewRow   guigui.LinearLayout
 	toolbar      guigui.LinearLayout
+	editRow      guigui.LinearLayout
 	outputRow    guigui.LinearLayout
 }
 
@@ -107,7 +109,9 @@ func (t *ImageTool) Build(context *guigui.Context, adder *guigui.ChildAdder) err
 	adder.AddWidget(&t.beforeLabel)
 	adder.AddWidget(&t.beforePreview)
 	adder.AddWidget(&t.afterLabel)
-	adder.AddWidget(&t.formPanel)
+	adder.AddWidget(&t.resizePanel)
+	adder.AddWidget(&t.cropPanel)
+	adder.AddWidget(&t.formatPanel)
 	adder.AddWidget(&t.saveButton)
 	adder.AddWidget(&t.copyButton)
 	adder.AddWidget(&t.outputHint)
@@ -119,7 +123,7 @@ func (t *ImageTool) Build(context *guigui.Context, adder *guigui.ChildAdder) err
 	}
 	model := v.(*Model).Image()
 	u := basicwidget.UnitSize(context)
-	fieldW := 8 * u
+	fieldW := 5 * u
 	has := model.HasSource()
 
 	t.openButton.SetText("ファイルを開く")
@@ -162,10 +166,7 @@ func (t *ImageTool) Build(context *guigui.Context, adder *guigui.ChildAdder) err
 		adder.AddWidget(&t.afterEmpty)
 	}
 
-	t.configureForm(context, model, fieldW)
-	t.formPanel.SetContent(&t.form)
-	t.formPanel.SetAutoBorder(true)
-	t.formPanel.SetContentConstraints(basicwidget.PanelContentConstraintsFixedWidth)
+	t.configureForms(context, model, fieldW)
 
 	t.saveButton.SetText("ファイルに保存")
 	t.saveButton.SetType(basicwidget.ButtonTypePrimary)
@@ -186,7 +187,7 @@ func (t *ImageTool) Build(context *guigui.Context, adder *guigui.ChildAdder) err
 	return nil
 }
 
-func (t *ImageTool) configureForm(context *guigui.Context, model *ImageModel, fieldW int) {
+func (t *ImageTool) configureForms(context *guigui.Context, model *ImageModel, fieldW int) {
 	t.sectionSize.SetValue("拡大縮小")
 	setBoldText(&t.sectionSize, true)
 
@@ -304,7 +305,6 @@ func (t *ImageTool) configureForm(context *guigui.Context, model *ImageModel, fi
 	})
 	context.SetEnabled(&t.format, model.HasSource())
 
-	t.qualityText.SetValue("JPEG 品質")
 	t.quality.SetMinimumValue(1)
 	t.quality.SetMaximumValue(100)
 	t.quality.SetValue(model.JPEGQuality())
@@ -312,16 +312,17 @@ func (t *ImageTool) configureForm(context *guigui.Context, model *ImageModel, fi
 		model.SetJPEGQuality(value)
 	})
 	context.SetEnabled(&t.quality, model.HasSource() && model.Format() == imageproc.FormatJPEG)
-	t.qualityValue.SetValue(fmt.Sprintf("%d", model.JPEGQuality()))
-	t.qualityValue.SetHorizontalAlign(basicwidget.HorizontalAlignEnd)
+	t.qualityText.SetValue(fmt.Sprintf("JPEG 品質  %d", model.JPEGQuality()))
 
-	t.form.SetItems([]basicwidget.FormItem{
+	t.resizePanel.form.SetItems([]basicwidget.FormItem{
 		{PrimaryWidget: &t.sectionSize},
 		{PrimaryWidget: &t.scaleText, SecondaryWidget: &t.scaleInput},
 		{PrimaryWidget: &t.widthText, SecondaryWidget: &t.widthInput},
 		{PrimaryWidget: &t.heightText, SecondaryWidget: &t.heightInput},
 		{PrimaryWidget: &t.keepAspectText, SecondaryWidget: &t.keepAspect},
 		{SecondaryWidget: &t.resetSizeButton},
+	})
+	t.cropPanel.form.SetItems([]basicwidget.FormItem{
 		{PrimaryWidget: &t.sectionCrop},
 		{PrimaryWidget: &t.cropEnabledText, SecondaryWidget: &t.cropEnabled},
 		{PrimaryWidget: &t.cropXText, SecondaryWidget: &t.cropXInput},
@@ -329,10 +330,11 @@ func (t *ImageTool) configureForm(context *guigui.Context, model *ImageModel, fi
 		{PrimaryWidget: &t.cropWText, SecondaryWidget: &t.cropWInput},
 		{PrimaryWidget: &t.cropHText, SecondaryWidget: &t.cropHInput},
 		{SecondaryWidget: &t.resetCropButton},
+	})
+	t.formatPanel.form.SetItems([]basicwidget.FormItem{
 		{PrimaryWidget: &t.sectionOut},
 		{PrimaryWidget: &t.formatText, SecondaryWidget: &t.format},
 		{PrimaryWidget: &t.qualityText, SecondaryWidget: &t.quality},
-		{PrimaryWidget: &t.qualityValue},
 	})
 }
 
@@ -394,11 +396,19 @@ func (t *ImageTool) Layout(context *guigui.Context, widgetBounds *guigui.WidgetB
 	)
 	t.outputRow = guigui.LinearLayout{Direction: guigui.LayoutDirectionHorizontal, Items: t.outputItems, Gap: u / 2}
 
+	t.editItems = slices.Delete(t.editItems, 0, len(t.editItems))
+	t.editItems = append(t.editItems,
+		guigui.LinearLayoutItem{Widget: &t.resizePanel, Size: guigui.FlexibleSize(1)},
+		guigui.LinearLayoutItem{Widget: &t.cropPanel, Size: guigui.FlexibleSize(1)},
+		guigui.LinearLayoutItem{Widget: &t.formatPanel, Size: guigui.FlexibleSize(1)},
+	)
+	t.editRow = guigui.LinearLayout{Direction: guigui.LayoutDirectionHorizontal, Items: t.editItems, Gap: u / 2}
+
 	t.layoutItems = slices.Delete(t.layoutItems, 0, len(t.layoutItems))
 	t.layoutItems = append(t.layoutItems,
 		guigui.LinearLayoutItem{Size: guigui.FixedSize(u), Layout: &t.toolbar},
-		guigui.LinearLayoutItem{Size: guigui.FlexibleSize(2), Layout: &t.previewRow},
-		guigui.LinearLayoutItem{Widget: &t.formPanel, Size: guigui.FlexibleSize(1)},
+		guigui.LinearLayoutItem{Size: guigui.FlexibleSize(1), Layout: &t.previewRow},
+		guigui.LinearLayoutItem{Layout: &t.editRow},
 		guigui.LinearLayoutItem{Size: guigui.FixedSize(u), Layout: &t.outputRow},
 		guigui.LinearLayoutItem{Widget: &t.status, Size: guigui.FixedSize(u)},
 	)
@@ -413,4 +423,31 @@ func (t *ImageTool) Layout(context *guigui.Context, widgetBounds *guigui.WidgetB
 			Bottom: u / 2,
 		},
 	}).LayoutWidgets(context, widgetBounds.Bounds(), layouter)
+}
+
+// editPanel is a bordered form group that reports the form's intrinsic height
+// so the parent can keep every control on screen without scrolling.
+type editPanel struct {
+	guigui.DefaultWidget
+
+	panel basicwidget.Panel
+	form  basicwidget.Form
+}
+
+func (p *editPanel) Build(context *guigui.Context, adder *guigui.ChildAdder) error {
+	adder.AddWidget(&p.panel)
+	p.panel.SetContent(&p.form)
+	p.panel.SetAutoBorder(false)
+	p.panel.SetBorders(basicwidget.PanelBorders{Start: true, Top: true, End: true, Bottom: true})
+	p.panel.SetContentConstraints(basicwidget.PanelContentConstraintsFixedWidth)
+	p.panel.SetBackgroundStyle(basicwidget.PanelBackgroundStyleSecondary)
+	return nil
+}
+
+func (p *editPanel) Layout(context *guigui.Context, widgetBounds *guigui.WidgetBounds, layouter *guigui.ChildLayouter) {
+	layouter.LayoutWidget(&p.panel, widgetBounds.Bounds())
+}
+
+func (p *editPanel) Measure(context *guigui.Context, constraints guigui.Constraints) image.Point {
+	return p.form.Measure(context, constraints)
 }
