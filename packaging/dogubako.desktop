@@ -1,0 +1,11 @@
+[Desktop Entry]
+Type=Application
+Name=道具箱
+Name[en]=Dogubako
+Comment=Everyday workspace tools
+Comment[ja]=日常作業向けツール群
+Exec=dogubako
+Icon=applications-graphics
+Terminal=false
+Categories=Utility;Graphics;
+StartupNotify=true
