@@ -6,6 +6,8 @@ import (
 
 	"github.com/guigui-gui/guigui"
 	"github.com/guigui-gui/guigui/basicwidget"
+
+	"github.com/nus/dogubako/internal/i18n"
 )
 
 // Sidebar is the left tool-access menu.
@@ -34,6 +36,7 @@ type sidebarContent struct {
 
 	title basicwidget.Text
 	list  basicwidget.List[ToolID]
+	lang  basicwidget.SegmentedControl[i18n.Lang]
 
 	size        image.Point
 	layoutItems []guigui.LinearLayoutItem
@@ -46,22 +49,24 @@ func (s *sidebarContent) setSize(size image.Point) {
 func (s *sidebarContent) Build(context *guigui.Context, adder *guigui.ChildAdder) error {
 	adder.AddWidget(&s.title)
 	adder.AddWidget(&s.list)
-
-	s.title.SetValue("道具箱")
-	setBoldText(&s.title, true)
-	s.title.SetHorizontalAlign(basicwidget.HorizontalAlignCenter)
-	s.title.SetVerticalAlign(basicwidget.VerticalAlignMiddle)
+	adder.AddWidget(&s.lang)
 
 	v, ok := context.Env(s, EnvKeyModel)
 	if !ok {
 		return nil
 	}
 	model := v.(*Model)
+	lang := model.Lang()
+
+	s.title.SetValue(i18n.T(lang, i18n.AppTitle))
+	setBoldText(&s.title, true)
+	s.title.SetHorizontalAlign(basicwidget.HorizontalAlignCenter)
+	s.title.SetVerticalAlign(basicwidget.VerticalAlignMiddle)
 
 	items := make([]basicwidget.ListItem[ToolID], 0, len(Tools))
 	for _, tool := range Tools {
 		items = append(items, basicwidget.ListItem[ToolID]{
-			Text:  tool.Title,
+			Text:  tool.Title(lang),
 			Value: tool.ID,
 		})
 	}
@@ -76,6 +81,19 @@ func (s *sidebarContent) Build(context *guigui.Context, adder *guigui.ChildAdder
 		}
 		model.SetMode(item.Value)
 	})
+
+	s.lang.SetItems([]basicwidget.SegmentedControlItem[i18n.Lang]{
+		{Text: "日本語", Value: i18n.JA},
+		{Text: "English", Value: i18n.EN},
+	})
+	s.lang.SelectItemByValue(lang)
+	s.lang.OnItemSelected(func(context *guigui.Context, index int) {
+		item, ok := s.lang.ItemByIndex(index)
+		if !ok {
+			return
+		}
+		model.SetLang(item.Value)
+	})
 	return nil
 }
 
@@ -85,11 +103,12 @@ func (s *sidebarContent) layout(context *guigui.Context) guigui.LinearLayout {
 	s.layoutItems = append(s.layoutItems,
 		guigui.LinearLayoutItem{Widget: &s.title, Size: guigui.FixedSize(u)},
 		guigui.LinearLayoutItem{Widget: &s.list, Size: guigui.FlexibleSize(1)},
+		guigui.LinearLayoutItem{Widget: &s.lang, Size: guigui.FixedSize(u)},
 	)
 	return guigui.LinearLayout{
 		Direction: guigui.LayoutDirectionVertical,
 		Items:     s.layoutItems,
-		Padding:   guigui.Padding{Top: u / 4},
+		Padding:   guigui.Padding{Top: u / 4, Bottom: u / 4, Start: u / 4, End: u / 4},
 	}
 }
 

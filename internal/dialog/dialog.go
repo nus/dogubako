@@ -21,7 +21,8 @@ type FileFilter struct {
 	Extensions  []string
 }
 
-var errNoFileDialog = errors.New("ファイルダイアログを開けません。Ubuntu では libgtk-3-0 または zenity をインストールしてください")
+// ErrNoFileDialog is returned when neither a native nor an external file dialog is available.
+var ErrNoFileDialog = errors.New("file dialog unavailable")
 
 // OpenFileAsync shows a file-open dialog on a new goroutine.
 // On Ubuntu it uses GTK 3, then zenity, then kdialog.
@@ -65,7 +66,7 @@ func openFileSync(title string, filter *FileFilter) FileResult {
 	if res, ok := tryExternal(kdialogOpenArgs(title, filter)); ok {
 		return res
 	}
-	return FileResult{Err: errNoFileDialog}
+	return FileResult{Err: ErrNoFileDialog}
 }
 
 func saveFileSync(title, suggested string, filter *FileFilter) FileResult {
@@ -87,7 +88,7 @@ func saveFileSync(title, suggested string, filter *FileFilter) FileResult {
 	if res, ok := tryExternal(kdialogSaveArgs(title, suggested, filter)); ok {
 		return res
 	}
-	return FileResult{Err: errNoFileDialog}
+	return FileResult{Err: ErrNoFileDialog}
 }
 
 func tryNative(fn func() (string, error)) (FileResult, bool) {

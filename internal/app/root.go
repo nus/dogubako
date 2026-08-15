@@ -1,7 +1,7 @@
 package app
 
 import (
-	"fmt"
+	"errors"
 	"slices"
 
 	"github.com/hajimehoshi/ebiten/v2"
@@ -12,6 +12,7 @@ import (
 	"github.com/guigui-gui/guigui/clipboard"
 
 	"github.com/nus/dogubako/internal/dialog"
+	"github.com/nus/dogubako/internal/i18n"
 	"github.com/nus/dogubako/internal/imageproc"
 )
 
@@ -44,6 +45,7 @@ func (r *Root) Env(context *guigui.Context, key guigui.EnvKey, source *guigui.En
 
 func (r *Root) WriteStateKey(context *guigui.Context, w *guigui.StateKeyWriter) {
 	w.WriteString(string(r.model.Mode()))
+	w.WriteString(string(r.model.Lang()))
 	w.WriteUint64(r.model.Image().Generation())
 }
 
@@ -63,6 +65,7 @@ func (r *Root) Build(context *guigui.Context, adder *guigui.ChildAdder) error {
 		adder.AddWidget(content)
 	}
 	context.SetButtonInputReceptive(r, true)
+	ebiten.SetWindowTitle(i18n.T(r.model.Lang(), i18n.AppTitle))
 
 	r.imageTool.OnOpenFile(func(context *guigui.Context) {
 		r.startOpen()
@@ -86,7 +89,7 @@ func (r *Root) Layout(context *guigui.Context, widgetBounds *guigui.WidgetBounds
 	r.layoutItems = append(r.layoutItems,
 		guigui.LinearLayoutItem{
 			Widget: &r.sidebar,
-			Size:   guigui.FixedSize(7 * u),
+			Size:   guigui.FixedSize(8 * u),
 		},
 		guigui.LinearLayoutItem{
 			Widget: r.contentWidget(),
@@ -132,8 +135,9 @@ func (r *Root) startOpen() {
 	if r.pendingOpen != nil {
 		return
 	}
-	r.pendingOpen = dialog.OpenFileAsync("画像を開く", &dialog.FileFilter{
-		Description: "Images",
+	lang := r.model.Lang()
+	r.pendingOpen = dialog.OpenFileAsync(i18n.T(lang, i18n.DialogOpen), &dialog.FileFilter{
+		Description: i18n.T(lang, i18n.FilterImages),
 		Extensions:  []string{"png", "jpg", "jpeg", "gif"},
 	})
 }
@@ -146,8 +150,9 @@ func (r *Root) startSave() {
 	if r.model.Image().Format() == imageproc.FormatJPEG {
 		ext = "jpg"
 	}
-	r.pendingSave = dialog.SaveFileAsync("画像を保存", r.model.Image().SuggestedFilename(), &dialog.FileFilter{
-		Description: "Image",
+	lang := r.model.Lang()
+	r.pendingSave = dialog.SaveFileAsync(i18n.T(lang, i18n.DialogSave), r.model.Image().SuggestedFilename(), &dialog.FileFilter{
+		Description: i18n.T(lang, i18n.FilterImage),
 		Extensions:  []string{ext},
 	})
 }
@@ -155,7 +160,7 @@ func (r *Root) startSave() {
 func (r *Root) pasteClipboard() {
 	contents, err := clipboard.Read()
 	if err != nil {
-		r.model.Image().SetStatus("クリップボードを読めませんでした")
+		r.model.Image().SetStatus(i18n.StatusClipboardReadFailed)
 		return
 	}
 	_ = r.model.Image().LoadClipboardPNG(contents.PNG)
@@ -163,7 +168,7 @@ func (r *Root) pasteClipboard() {
 
 func (r *Root) copyClipboard() {
 	if !r.model.Image().HasSource() {
-		r.model.Image().SetStatus("コピーする画像がありません")
+		r.model.Image().SetStatus(i18n.StatusNoImageToCopy)
 		return
 	}
 	data, err := r.model.Image().ExportPNG()
@@ -171,10 +176,10 @@ func (r *Root) copyClipboard() {
 		return
 	}
 	if err := clipboard.Write(clipboard.Contents{PNG: data}); err != nil {
-		r.model.Image().SetStatus("クリップボードへのコピーに失敗しました")
+		r.model.Image().SetStatus(i18n.StatusClipboardCopyFailed)
 		return
 	}
-	r.model.Image().SetStatus("クリップボードにコピーしました")
+	r.model.Image().SetStatus(i18n.StatusClipboardCopied)
 }
 
 func (r *Root) drainDialogs() {
@@ -184,7 +189,7 @@ func (r *Root) drainDialogs() {
 			r.pendingOpen = nil
 			if res.Cancelled || res.Err != nil {
 				if res.Err != nil {
-					r.model.Image().SetStatus(fmt.Sprintf("ファイルを開けませんでした: %v", res.Err))
+					r.setDialogStatus(true, res.Err)
 				}
 				break
 			}
@@ -198,7 +203,7 @@ func (r *Root) drainDialogs() {
 			r.pendingSave = nil
 			if res.Cancelled || res.Err != nil {
 				if res.Err != nil {
-					r.model.Image().SetStatus(fmt.Sprintf("保存ダイアログに失敗しました: %v", res.Err))
+					r.setDialogStatus(false, res.Err)
 				}
 				break
 			}
@@ -206,6 +211,18 @@ func (r *Root) drainDialogs() {
 		default:
 		}
 	}
+}
+
+func (r *Root) setDialogStatus(open bool, err error) {
+	if errors.Is(err, dialog.ErrNoFileDialog) {
+		r.model.Image().SetStatus(i18n.StatusNoFileDialog)
+		return
+	}
+	if open {
+		r.model.Image().SetStatus(i18n.StatusOpenFailed, err)
+		return
+	}
+	r.model.Image().SetStatus(i18n.StatusSaveDialogFailed, err)
 }
 
 func shortcutModifierPressed(context *guigui.Context) bool {

@@ -8,6 +8,7 @@ import (
 	"path/filepath"
 	"testing"
 
+	"github.com/nus/dogubako/internal/i18n"
 	"github.com/nus/dogubako/internal/imageproc"
 )
 
@@ -70,5 +71,47 @@ func TestSuggestedFilename(t *testing.T) {
 	m.params.Format = imageproc.FormatPNG
 	if got := m.SuggestedFilename(); got != "photo-edited.png" {
 		t.Fatalf("got %q", got)
+	}
+}
+
+func TestStatusTextTranslates(t *testing.T) {
+	var m ImageModel
+	m.SetStatus(i18n.StatusClipboardCopied)
+	if got := m.StatusText(i18n.JA); got != "クリップボードにコピーしました" {
+		t.Fatalf("ja = %q", got)
+	}
+	if got := m.StatusText(i18n.EN); got != "Copied to the clipboard" {
+		t.Fatalf("en = %q", got)
+	}
+
+	m.SetStatus(i18n.StatusLoaded, "a.png", 8, 4)
+	if got := m.StatusText(i18n.EN); got != "Loaded a.png (8×4)" {
+		t.Fatalf("en loaded = %q", got)
+	}
+}
+
+func TestToolTitle(t *testing.T) {
+	tool := Tool{ID: ToolImage}
+	if got := tool.Title(i18n.JA); got != "画像" {
+		t.Fatalf("ja = %q", got)
+	}
+	if got := tool.Title(i18n.EN); got != "Image" {
+		t.Fatalf("en = %q", got)
+	}
+}
+
+func TestModelSetLang(t *testing.T) {
+	dir := t.TempDir()
+	restore := i18n.OverrideUserConfigDir(func() (string, error) { return dir, nil })
+	t.Cleanup(restore)
+
+	var m Model
+	m.SetLang(i18n.EN)
+	if m.Lang() != i18n.EN {
+		t.Fatalf("lang = %q", m.Lang())
+	}
+	m.SetLang(i18n.JA)
+	if m.Lang() != i18n.JA {
+		t.Fatalf("lang = %q", m.Lang())
 	}
 }

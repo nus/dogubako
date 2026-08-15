@@ -11,6 +11,7 @@ import (
 
 	"github.com/hajimehoshi/ebiten/v2"
 
+	"github.com/nus/dogubako/internal/i18n"
 	"github.com/nus/dogubako/internal/imageproc"
 )
 
@@ -23,19 +24,45 @@ const (
 
 // Tool is a sidebar entry.
 type Tool struct {
-	ID    ToolID
-	Title string
+	ID ToolID
 }
 
 // Tools is the ordered sidebar catalog. Add new tools here.
 var Tools = []Tool{
-	{ID: ToolImage, Title: "画像"},
+	{ID: ToolImage},
+}
+
+// Title returns the localized sidebar label for this tool.
+func (t Tool) Title(lang i18n.Lang) string {
+	switch t.ID {
+	case ToolImage:
+		return i18n.T(lang, i18n.ToolImage)
+	default:
+		return string(t.ID)
+	}
 }
 
 // Model is the application-wide state provided to widgets via Env.
 type Model struct {
+	lang  i18n.Lang
 	mode  ToolID
 	image ImageModel
+}
+
+func (m *Model) Lang() i18n.Lang {
+	if m.lang == "" {
+		m.lang = i18n.Load()
+	}
+	return m.lang
+}
+
+func (m *Model) SetLang(lang i18n.Lang) {
+	lang = i18n.Normalize(lang)
+	if m.Lang() == lang {
+		return
+	}
+	m.lang = lang
+	_ = i18n.Save(lang)
 }
 
 func (m *Model) Mode() ToolID {
@@ -73,19 +100,35 @@ type ImageModel struct {
 	srcPreview *ebiten.Image
 	dstPreview *ebiten.Image
 
-	status string
+	status statusMsg
+}
+
+type statusMsg struct {
+	key  i18n.Key
+	args []any
 }
 
 const previewMaxEdge = 2048
 
 func (m *ImageModel) Generation() uint64 { return m.generation }
-func (m *ImageModel) Status() string     { return m.status }
 
-func (m *ImageModel) SetStatus(status string) {
-	if m.status == status {
+func (m *ImageModel) StatusText(lang i18n.Lang) string {
+	if m.status.key == "" {
+		return ""
+	}
+	return i18n.T(lang, m.status.key, m.status.args...)
+}
+
+func (m *ImageModel) SetStatus(key i18n.Key, args ...any) {
+	if m.status.key == key && fmt.Sprint(m.status.args...) == fmt.Sprint(args...) {
 		return
 	}
-	m.status = status
+	m.status.key = key
+	if len(args) == 0 {
+		m.status.args = nil
+	} else {
+		m.status.args = append([]any(nil), args...)
+	}
 	m.generation++
 }
 
@@ -172,11 +215,11 @@ func (m *ImageModel) LoadPath(path string) error {
 func (m *ImageModel) LoadReader(r io.Reader, name string) error {
 	img, format, err := imageproc.Decode(r)
 	if err != nil {
-		m.SetStatus(fmt.Sprintf("読み込みに失敗しました: %v", err))
+		m.SetStatus(i18n.StatusLoadFailed, err)
 		return err
 	}
 	m.setSource(img, name, format)
-	m.SetStatus(fmt.Sprintf("%s を読み込みました（%d×%d）", name, img.Bounds().Dx(), img.Bounds().Dy()))
+	m.SetStatus(i18n.StatusLoaded, name, img.Bounds().Dx(), img.Bounds().Dy())
 	return nil
 }
 
@@ -211,7 +254,7 @@ func (m *ImageModel) LoadDropped(fsys fs.FS) error {
 		loadErr = walkErr
 	}
 	if !found && loadErr == nil {
-		m.SetStatus("ドロップされたファイルに画像がありません")
+		m.SetStatus(i18n.StatusDropNoImage)
 		return fmt.Errorf("no image in dropped files")
 	}
 	return loadErr
@@ -219,47 +262,47 @@ func (m *ImageModel) LoadDropped(fsys fs.FS) error {
 
 func (m *ImageModel) LoadClipboardPNG(png []byte) error {
 	if len(png) == 0 {
-		m.SetStatus("クリップボードに画像がありません")
+		m.SetStatus(i18n.StatusClipboardNoImage)
 		return fmt.Errorf("clipboard has no png")
 	}
 	img, format, err := imageproc.DecodeBytes(png)
 	if err != nil {
-		m.SetStatus(fmt.Sprintf("クリップボードの画像を読めません: %v", err))
+		m.SetStatus(i18n.StatusClipboardImageReadFailed, err)
 		return err
 	}
 	m.setSource(img, "clipboard.png", format)
-	m.SetStatus(fmt.Sprintf("クリップボードから貼り付けました（%d×%d）", img.Bounds().Dx(), img.Bounds().Dy()))
+	m.SetStatus(i18n.StatusPasted, img.Bounds().Dx(), img.Bounds().Dy())
 	return nil
 }
 
 func (m *ImageModel) SavePath(path string) error {
 	img, err := m.Processed()
 	if err != nil {
-		m.SetStatus(fmt.Sprintf("書き出せません: %v", err))
+		m.SetStatus(i18n.StatusExportFailed, err)
 		return err
 	}
 	data, err := imageproc.Encode(img, m.Format(), m.JPEGQuality())
 	if err != nil {
-		m.SetStatus(fmt.Sprintf("エンコードに失敗しました: %v", err))
+		m.SetStatus(i18n.StatusEncodeFailed, err)
 		return err
 	}
 	if err := os.WriteFile(path, data, 0o644); err != nil {
-		m.SetStatus(fmt.Sprintf("保存に失敗しました: %v", err))
+		m.SetStatus(i18n.StatusSaveFailed, err)
 		return err
 	}
-	m.SetStatus(fmt.Sprintf("保存しました: %s", path))
+	m.SetStatus(i18n.StatusSaved, path)
 	return nil
 }
 
 func (m *ImageModel) ExportPNG() ([]byte, error) {
 	img, err := m.Processed()
 	if err != nil {
-		m.SetStatus(fmt.Sprintf("書き出せません: %v", err))
+		m.SetStatus(i18n.StatusExportFailed, err)
 		return nil, err
 	}
 	data, err := imageproc.EncodePNG(img)
 	if err != nil {
-		m.SetStatus(fmt.Sprintf("エンコードに失敗しました: %v", err))
+		m.SetStatus(i18n.StatusEncodeFailed, err)
 		return nil, err
 	}
 	return data, nil

@@ -1,13 +1,13 @@
 package app
 
 import (
-	"fmt"
 	"image"
 	"slices"
 
 	"github.com/guigui-gui/guigui"
 	"github.com/guigui-gui/guigui/basicwidget"
 
+	"github.com/nus/dogubako/internal/i18n"
 	"github.com/nus/dogubako/internal/imageproc"
 )
 
@@ -121,28 +121,30 @@ func (t *ImageTool) Build(context *guigui.Context, adder *guigui.ChildAdder) err
 	if !ok {
 		return nil
 	}
-	model := v.(*Model).Image()
+	appModel := v.(*Model)
+	model := appModel.Image()
+	lang := appModel.Lang()
 	u := basicwidget.UnitSize(context)
 	fieldW := 5 * u
 	has := model.HasSource()
 
-	t.openButton.SetText("ファイルを開く")
+	t.openButton.SetText(i18n.T(lang, i18n.OpenFile))
 	t.openButton.OnDown(func(context *guigui.Context) {
 		guigui.DispatchEvent(t, eventOpenFile)
 	})
-	t.pasteButton.SetText("クリップボードから貼り付け")
+	t.pasteButton.SetText(i18n.T(lang, i18n.PasteClipboard))
 	t.pasteButton.OnDown(func(context *guigui.Context) {
 		guigui.DispatchEvent(t, eventPaste)
 	})
-	t.hint.SetValue("ファイル指定・ドロップ・" + ShortcutLabel(context, "V") + " で入力")
+	t.hint.SetValue(i18n.T(lang, i18n.InputHint, ShortcutLabel(context, "V")))
 	t.hint.SetVerticalAlign(basicwidget.VerticalAlignMiddle)
 
 	srcSize := model.SourceSize()
 	setBoldText(&t.beforeLabel, true)
 	if has {
-		t.beforeLabel.SetValue(fmt.Sprintf("加工前  %d×%d", srcSize.X, srcSize.Y))
+		t.beforeLabel.SetValue(i18n.T(lang, i18n.BeforeSize, srcSize.X, srcSize.Y))
 	} else {
-		t.beforeLabel.SetValue("加工前")
+		t.beforeLabel.SetValue(i18n.T(lang, i18n.Before))
 	}
 	t.beforePreview.SetImage(model.SourcePreview(), srcSize)
 	t.beforePreview.SetCrop(model.Crop(), model.CropEnabled())
@@ -152,46 +154,46 @@ func (t *ImageTool) Build(context *guigui.Context, adder *guigui.ChildAdder) err
 
 	setBoldText(&t.afterLabel, true)
 	if out, err := model.Processed(); err == nil && out != nil {
-		t.afterLabel.SetValue(fmt.Sprintf("加工後  %d×%d  %s", out.Bounds().Dx(), out.Bounds().Dy(), model.Format()))
+		t.afterLabel.SetValue(i18n.T(lang, i18n.AfterSize, out.Bounds().Dx(), out.Bounds().Dy(), model.Format()))
 		t.afterImage.SetImage(model.ResultPreview())
 		adder.AddWidget(&t.afterImage)
 	} else {
-		t.afterLabel.SetValue("加工後")
+		t.afterLabel.SetValue(i18n.T(lang, i18n.After))
 		t.afterImage.SetImage(nil)
 		t.afterEmpty.SetMultiline(true)
 		t.afterEmpty.SetWrapMode(basicwidget.WrapModeNormal)
 		t.afterEmpty.SetHorizontalAlign(basicwidget.HorizontalAlignCenter)
 		t.afterEmpty.SetVerticalAlign(basicwidget.VerticalAlignMiddle)
-		t.afterEmpty.SetValue("画像を開くか、ウィンドウへドロップしてください。")
+		t.afterEmpty.SetValue(i18n.T(lang, i18n.AfterEmpty))
 		adder.AddWidget(&t.afterEmpty)
 	}
 
-	t.configureForms(context, model, fieldW)
+	t.configureForms(context, model, lang, fieldW)
 
-	t.saveButton.SetText("ファイルに保存")
+	t.saveButton.SetText(i18n.T(lang, i18n.SaveFile))
 	t.saveButton.SetType(basicwidget.ButtonTypePrimary)
 	t.saveButton.OnDown(func(context *guigui.Context) {
 		guigui.DispatchEvent(t, eventSaveFile)
 	})
 	context.SetEnabled(&t.saveButton, has)
-	t.copyButton.SetText("クリップボードにコピー")
+	t.copyButton.SetText(i18n.T(lang, i18n.CopyClipboard))
 	t.copyButton.OnDown(func(context *guigui.Context) {
 		guigui.DispatchEvent(t, eventCopy)
 	})
 	context.SetEnabled(&t.copyButton, has)
-	t.outputHint.SetValue("出力はファイルまたはクリップボード")
+	t.outputHint.SetValue(i18n.T(lang, i18n.OutputHint))
 	t.outputHint.SetVerticalAlign(basicwidget.VerticalAlignMiddle)
 
-	t.status.SetValue(model.Status())
+	t.status.SetValue(model.StatusText(lang))
 	t.status.SetVerticalAlign(basicwidget.VerticalAlignMiddle)
 	return nil
 }
 
-func (t *ImageTool) configureForms(context *guigui.Context, model *ImageModel, fieldW int) {
-	t.sectionSize.SetValue("拡大縮小")
+func (t *ImageTool) configureForms(context *guigui.Context, model *ImageModel, lang i18n.Lang, fieldW int) {
+	t.sectionSize.SetValue(i18n.T(lang, i18n.Resize))
 	setBoldText(&t.sectionSize, true)
 
-	t.scaleText.SetValue("倍率 (%)")
+	t.scaleText.SetValue(i18n.T(lang, i18n.ScalePercent))
 	configureIntInput(t.scaleInput.Widget(), 1, 1000, 1, model.ScalePercent(), func(v int, committed bool) {
 		if committed {
 			model.SetScalePercent(v)
@@ -200,7 +202,7 @@ func (t *ImageTool) configureForms(context *guigui.Context, model *ImageModel, f
 	t.scaleInput.SetFixedWidth(fieldW)
 	context.SetEnabled(&t.scaleInput, model.HasSource())
 
-	t.widthText.SetValue("幅 (px)")
+	t.widthText.SetValue(i18n.T(lang, i18n.WidthPx))
 	configureIntInput(t.widthInput.Widget(), 1, imageproc.MaxDimension, 1, model.Width(), func(v int, committed bool) {
 		if committed {
 			model.SetWidth(v)
@@ -209,7 +211,7 @@ func (t *ImageTool) configureForms(context *guigui.Context, model *ImageModel, f
 	t.widthInput.SetFixedWidth(fieldW)
 	context.SetEnabled(&t.widthInput, model.HasSource())
 
-	t.heightText.SetValue("高さ (px)")
+	t.heightText.SetValue(i18n.T(lang, i18n.HeightPx))
 	configureIntInput(t.heightInput.Widget(), 1, imageproc.MaxDimension, 1, model.Height(), func(v int, committed bool) {
 		if committed {
 			model.SetHeight(v)
@@ -218,23 +220,23 @@ func (t *ImageTool) configureForms(context *guigui.Context, model *ImageModel, f
 	t.heightInput.SetFixedWidth(fieldW)
 	context.SetEnabled(&t.heightInput, model.HasSource())
 
-	t.keepAspectText.SetValue("縦横比を維持")
+	t.keepAspectText.SetValue(i18n.T(lang, i18n.KeepAspect))
 	t.keepAspect.SetValue(model.KeepAspect())
 	t.keepAspect.OnValueChanged(func(context *guigui.Context, value bool) {
 		model.SetKeepAspect(value)
 	})
 	context.SetEnabled(&t.keepAspect, model.HasSource())
 
-	t.resetSizeButton.SetText("元のサイズに戻す")
+	t.resetSizeButton.SetText(i18n.T(lang, i18n.ResetSize))
 	t.resetSizeButton.OnDown(func(context *guigui.Context) {
 		model.ResetSize()
 	})
 	context.SetEnabled(&t.resetSizeButton, model.HasSource())
 
-	t.sectionCrop.SetValue("切り取り")
+	t.sectionCrop.SetValue(i18n.T(lang, i18n.Crop))
 	setBoldText(&t.sectionCrop, true)
 
-	t.cropEnabledText.SetValue("切り取りを使う")
+	t.cropEnabledText.SetValue(i18n.T(lang, i18n.CropEnable))
 	t.cropEnabled.SetValue(model.CropEnabled())
 	t.cropEnabled.OnValueChanged(func(context *guigui.Context, value bool) {
 		model.SetCropEnabled(value)
@@ -243,7 +245,7 @@ func (t *ImageTool) configureForms(context *guigui.Context, model *ImageModel, f
 
 	crop := model.Crop()
 	src := model.SourceSize()
-	t.cropXText.SetValue("X")
+	t.cropXText.SetValue(i18n.T(lang, i18n.CropX))
 	configureIntInput(t.cropXInput.Widget(), 0, max(0, src.X-1), 1, crop.Min.X, func(v int, committed bool) {
 		if committed {
 			model.SetCropX(v)
@@ -251,7 +253,7 @@ func (t *ImageTool) configureForms(context *guigui.Context, model *ImageModel, f
 	})
 	t.cropXInput.SetFixedWidth(fieldW)
 
-	t.cropYText.SetValue("Y")
+	t.cropYText.SetValue(i18n.T(lang, i18n.CropY))
 	configureIntInput(t.cropYInput.Widget(), 0, max(0, src.Y-1), 1, crop.Min.Y, func(v int, committed bool) {
 		if committed {
 			model.SetCropY(v)
@@ -259,7 +261,7 @@ func (t *ImageTool) configureForms(context *guigui.Context, model *ImageModel, f
 	})
 	t.cropYInput.SetFixedWidth(fieldW)
 
-	t.cropWText.SetValue("幅")
+	t.cropWText.SetValue(i18n.T(lang, i18n.Width))
 	configureIntInput(t.cropWInput.Widget(), 1, max(1, src.X), 1, max(1, crop.Dx()), func(v int, committed bool) {
 		if committed {
 			model.SetCropWidth(v)
@@ -267,7 +269,7 @@ func (t *ImageTool) configureForms(context *guigui.Context, model *ImageModel, f
 	})
 	t.cropWInput.SetFixedWidth(fieldW)
 
-	t.cropHText.SetValue("高さ")
+	t.cropHText.SetValue(i18n.T(lang, i18n.Height))
 	configureIntInput(t.cropHInput.Widget(), 1, max(1, src.Y), 1, max(1, crop.Dy()), func(v int, committed bool) {
 		if committed {
 			model.SetCropHeight(v)
@@ -281,16 +283,16 @@ func (t *ImageTool) configureForms(context *guigui.Context, model *ImageModel, f
 	context.SetEnabled(&t.cropWInput, cropOn)
 	context.SetEnabled(&t.cropHInput, cropOn)
 
-	t.resetCropButton.SetText("切り取りをリセット")
+	t.resetCropButton.SetText(i18n.T(lang, i18n.ResetCrop))
 	t.resetCropButton.OnDown(func(context *guigui.Context) {
 		model.ResetCrop()
 	})
 	context.SetEnabled(&t.resetCropButton, cropOn)
 
-	t.sectionOut.SetValue("形式")
+	t.sectionOut.SetValue(i18n.T(lang, i18n.Format))
 	setBoldText(&t.sectionOut, true)
 
-	t.formatText.SetValue("出力形式")
+	t.formatText.SetValue(i18n.T(lang, i18n.OutputFormat))
 	t.format.SetItems([]basicwidget.SegmentedControlItem[imageproc.Format]{
 		{Text: "PNG", Value: imageproc.FormatPNG},
 		{Text: "JPEG", Value: imageproc.FormatJPEG},
@@ -312,7 +314,7 @@ func (t *ImageTool) configureForms(context *guigui.Context, model *ImageModel, f
 		model.SetJPEGQuality(value)
 	})
 	context.SetEnabled(&t.quality, model.HasSource() && model.Format() == imageproc.FormatJPEG)
-	t.qualityText.SetValue(fmt.Sprintf("JPEG 品質  %d", model.JPEGQuality()))
+	t.qualityText.SetValue(i18n.T(lang, i18n.JPEGQuality, model.JPEGQuality()))
 
 	t.resizePanel.form.SetItems([]basicwidget.FormItem{
 		{PrimaryWidget: &t.sectionSize},
