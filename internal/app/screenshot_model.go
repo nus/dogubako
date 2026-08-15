@@ -5,6 +5,8 @@ import (
 	"image"
 	"os"
 	"path/filepath"
+	"slices"
+	"strings"
 	"time"
 
 	"github.com/hajimehoshi/ebiten/v2"
@@ -34,8 +36,19 @@ type ScreenshotModel struct {
 	destDir   string
 	destErr   error
 	lastSaved string
+	selected  string
+
+	files          []ScreenshotFile
+	jumpToSelected bool
 
 	status statusMsg
+}
+
+// ScreenshotFile is one image in the save folder.
+type ScreenshotFile struct {
+	Name    string
+	Path    string
+	ModTime time.Time
 }
 
 func (m *ScreenshotModel) Generation() uint64 { return m.generation }
@@ -84,6 +97,83 @@ func (m *ScreenshotModel) SetImage(img image.Image) {
 	if img != nil {
 		m.SetStatus(i18n.StatusCaptured, img.Bounds().Dx(), img.Bounds().Dy())
 	}
+}
+
+// ApplyCapture stores img and writes it into the default screenshot folder.
+func (m *ScreenshotModel) ApplyCapture(img image.Image) error {
+	if img == nil {
+		return fmt.Errorf("no image")
+	}
+	m.image = img
+	m.preview = nil
+	m.generation++
+	return m.SaveDefault()
+}
+
+func (m *ScreenshotModel) Files() []ScreenshotFile {
+	return m.files
+}
+
+func (m *ScreenshotModel) SelectedPath() string {
+	if m.selected != "" {
+		return m.selected
+	}
+	return m.lastSaved
+}
+
+func (m *ScreenshotModel) TakeJumpToSelected() bool {
+	if !m.jumpToSelected {
+		return false
+	}
+	m.jumpToSelected = false
+	return true
+}
+
+func (m *ScreenshotModel) RefreshFiles() {
+	dir := m.DestDir()
+	if dir == "" {
+		if len(m.files) == 0 {
+			return
+		}
+		m.files = nil
+		m.generation++
+		return
+	}
+	next, err := listScreenshotFiles(dir)
+	if err != nil {
+		next = nil
+	}
+	if screenshotFilesEqual(m.files, next) {
+		return
+	}
+	m.files = next
+	m.generation++
+}
+
+func (m *ScreenshotModel) LoadPath(path string) error {
+	if path == "" {
+		return fmt.Errorf("no path")
+	}
+	if m.selected == path && m.image != nil {
+		return nil
+	}
+	f, err := os.Open(path)
+	if err != nil {
+		m.SetStatus(i18n.StatusLoadFailed, err)
+		return err
+	}
+	defer f.Close()
+	img, _, err := imageproc.Decode(f)
+	if err != nil {
+		m.SetStatus(i18n.StatusLoadFailed, err)
+		return err
+	}
+	m.image = img
+	m.preview = nil
+	m.selected = path
+	m.lastSaved = path
+	m.SetStatus(i18n.StatusLoaded, filepath.Base(path), img.Bounds().Dx(), img.Bounds().Dy())
+	return nil
 }
 
 func (m *ScreenshotModel) Mode() capture.Mode {
@@ -206,7 +296,10 @@ func (m *ScreenshotModel) SavePath(path string) error {
 		return err
 	}
 	m.lastSaved = path
+	m.selected = path
+	m.jumpToSelected = true
 	m.SetStatus(i18n.StatusSaved, path)
+	m.RefreshFiles()
 	return nil
 }
 
@@ -224,3 +317,47 @@ func (m *ScreenshotModel) ExportPNG() ([]byte, error) {
 }
 
 func (m *ScreenshotModel) LastSaved() string { return m.lastSaved }
+
+func listScreenshotFiles(dir string) ([]ScreenshotFile, error) {
+	entries, err := os.ReadDir(dir)
+	if err != nil {
+		return nil, err
+	}
+	files := make([]ScreenshotFile, 0, len(entries))
+	for _, e := range entries {
+		if e.IsDir() || !isImageFilename(e.Name()) {
+			continue
+		}
+		info, err := e.Info()
+		if err != nil {
+			continue
+		}
+		files = append(files, ScreenshotFile{
+			Name:    e.Name(),
+			Path:    filepath.Join(dir, e.Name()),
+			ModTime: info.ModTime(),
+		})
+	}
+	slices.SortFunc(files, func(a, b ScreenshotFile) int {
+		if a.ModTime.After(b.ModTime) {
+			return -1
+		}
+		if a.ModTime.Before(b.ModTime) {
+			return 1
+		}
+		return strings.Compare(a.Name, b.Name)
+	})
+	return files, nil
+}
+
+func screenshotFilesEqual(a, b []ScreenshotFile) bool {
+	if len(a) != len(b) {
+		return false
+	}
+	for i := range a {
+		if a[i].Path != b[i].Path || !a[i].ModTime.Equal(b[i].ModTime) {
+			return false
+		}
+	}
+	return true
+}

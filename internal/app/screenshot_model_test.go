@@ -55,6 +55,49 @@ func TestScreenshotModelDefaultsAndSave(t *testing.T) {
 	}
 }
 
+func TestApplyCaptureAutoSavesAndLists(t *testing.T) {
+	home := t.TempDir()
+	restore := userdir.Override("linux", home, nil)
+	t.Cleanup(restore)
+
+	first := image.NewNRGBA(image.Rect(0, 0, 3, 2))
+	second := image.NewNRGBA(image.Rect(0, 0, 5, 4))
+	var m ScreenshotModel
+	if err := m.ApplyCapture(first); err != nil {
+		t.Fatal(err)
+	}
+	if len(m.Files()) != 1 {
+		t.Fatalf("files after first = %d", len(m.Files()))
+	}
+	if got := m.StatusText(i18n.EN); !strings.HasPrefix(got, "Saved: ") {
+		t.Fatalf("status = %q", got)
+	}
+	firstPath := m.LastSaved()
+
+	if err := m.ApplyCapture(second); err != nil {
+		t.Fatal(err)
+	}
+	if len(m.Files()) != 2 {
+		t.Fatalf("files after second = %d", len(m.Files()))
+	}
+	if m.Files()[0].Path != m.LastSaved() {
+		t.Fatalf("newest should be first: %+v", m.Files())
+	}
+
+	if err := m.LoadPath(firstPath); err != nil {
+		t.Fatal(err)
+	}
+	if m.Size() != (image.Point{X: 3, Y: 2}) {
+		t.Fatalf("loaded size = %v", m.Size())
+	}
+	if m.SelectedPath() != firstPath {
+		t.Fatalf("selected = %q", m.SelectedPath())
+	}
+	if got := m.StatusText(i18n.EN); !strings.Contains(got, "Loaded") {
+		t.Fatalf("loaded status = %q", got)
+	}
+}
+
 func TestScreenshotModelSaveWithoutImage(t *testing.T) {
 	var m ScreenshotModel
 	if err := m.SavePath(filepath.Join(t.TempDir(), "x.png")); err == nil {

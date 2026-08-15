@@ -12,7 +12,6 @@ import (
 
 var (
 	eventScreenshotCapture    = guigui.GenerateEventKey()
-	eventScreenshotSave       = guigui.GenerateEventKey()
 	eventScreenshotSaveAs     = guigui.GenerateEventKey()
 	eventScreenshotCopy       = guigui.GenerateEventKey()
 	eventScreenshotSendImage  = guigui.GenerateEventKey()
@@ -31,31 +30,36 @@ type ScreenshotTool struct {
 	hideToggle basicwidget.Toggle
 	captureBtn basicwidget.Button
 
+	listLabel basicwidget.Text
+	fileList  basicwidget.List[string]
+
 	previewLabel basicwidget.Text
 	preview      destPreview
 	previewEmpty basicwidget.Text
 
 	destLabel basicwidget.Text
-	saveBtn   basicwidget.Button
 	saveAsBtn basicwidget.Button
 	copyBtn   basicwidget.Button
 	sendBtn   basicwidget.Button
 	folderBtn basicwidget.Button
 	status    basicwidget.Text
 
+	fileItems    []basicwidget.ListItem[string]
 	toolbarItems []guigui.LinearLayoutItem
+	listColItems []guigui.LinearLayoutItem
+	prevColItems []guigui.LinearLayoutItem
+	bodyItems    []guigui.LinearLayoutItem
 	outputItems  []guigui.LinearLayoutItem
 	layoutItems  []guigui.LinearLayoutItem
 	toolbar      guigui.LinearLayout
+	listCol      guigui.LinearLayout
+	prevCol      guigui.LinearLayout
+	bodyRow      guigui.LinearLayout
 	outputRow    guigui.LinearLayout
 }
 
 func (t *ScreenshotTool) OnCapture(f func(context *guigui.Context)) {
 	guigui.SetEventHandler(t, eventScreenshotCapture, f)
-}
-
-func (t *ScreenshotTool) OnSave(f func(context *guigui.Context)) {
-	guigui.SetEventHandler(t, eventScreenshotSave, f)
 }
 
 func (t *ScreenshotTool) OnSaveAs(f func(context *guigui.Context)) {
@@ -82,9 +86,10 @@ func (t *ScreenshotTool) Build(context *guigui.Context, adder *guigui.ChildAdder
 	adder.AddWidget(&t.hideText)
 	adder.AddWidget(&t.hideToggle)
 	adder.AddWidget(&t.captureBtn)
+	adder.AddWidget(&t.listLabel)
+	adder.AddWidget(&t.fileList)
 	adder.AddWidget(&t.previewLabel)
 	adder.AddWidget(&t.destLabel)
-	adder.AddWidget(&t.saveBtn)
 	adder.AddWidget(&t.saveAsBtn)
 	adder.AddWidget(&t.copyBtn)
 	adder.AddWidget(&t.sendBtn)
@@ -101,6 +106,8 @@ func (t *ScreenshotTool) Build(context *guigui.Context, adder *guigui.ChildAdder
 	u := basicwidget.UnitSize(context)
 	has := model.HasImage()
 	busy := model.Capturing()
+
+	model.RefreshFiles()
 
 	t.modeText.SetValue(i18n.T(lang, i18n.ScreenshotMode))
 	t.modeText.SetVerticalAlign(basicwidget.VerticalAlignMiddle)
@@ -144,6 +151,37 @@ func (t *ScreenshotTool) Build(context *guigui.Context, adder *guigui.ChildAdder
 	})
 	context.SetEnabled(&t.captureBtn, !busy)
 
+	setBoldText(&t.listLabel, true)
+	t.listLabel.SetValue(i18n.T(lang, i18n.ScreenshotFiles))
+	files := model.Files()
+	t.fileItems = slices.Delete(t.fileItems, 0, len(t.fileItems))
+	for _, f := range files {
+		t.fileItems = append(t.fileItems, basicwidget.ListItem[string]{
+			Text:  f.Name,
+			Value: f.Path,
+		})
+	}
+	t.fileList.SetStyle(basicwidget.ListStyleNormal)
+	t.fileList.SetHighlightVisibleWhenUnfocused(true)
+	t.fileList.SetItemHeight(u)
+	t.fileList.SetItems(t.fileItems)
+	if sel := model.SelectedPath(); sel != "" {
+		t.fileList.SelectItemByValue(sel)
+		if model.TakeJumpToSelected() {
+			if idx := t.fileList.IndexByValue(sel); idx >= 0 {
+				t.fileList.ForceEnsureItemVisibleByIndex(idx)
+			}
+		}
+	}
+	t.fileList.OnItemSelected(func(context *guigui.Context, index int) {
+		item, ok := t.fileList.ItemByIndex(index)
+		if !ok || item.Value == "" {
+			return
+		}
+		_ = model.LoadPath(item.Value)
+	})
+	context.SetEnabled(&t.fileList, !busy)
+
 	setBoldText(&t.previewLabel, true)
 	if has {
 		sz := model.Size()
@@ -167,12 +205,6 @@ func (t *ScreenshotTool) Build(context *guigui.Context, adder *guigui.ChildAdder
 	}
 	t.destLabel.SetValue(i18n.T(lang, i18n.ScreenshotDest, dest))
 	t.destLabel.SetVerticalAlign(basicwidget.VerticalAlignMiddle)
-
-	t.saveBtn.SetText(i18n.T(lang, i18n.ScreenshotSave))
-	t.saveBtn.OnDown(func(context *guigui.Context) {
-		guigui.DispatchEvent(t, eventScreenshotSave)
-	})
-	context.SetEnabled(&t.saveBtn, has && !busy)
 
 	t.saveAsBtn.SetText(i18n.T(lang, i18n.ScreenshotSaveAs))
 	t.saveAsBtn.OnDown(func(context *guigui.Context) {
@@ -223,14 +255,33 @@ func (t *ScreenshotTool) Layout(context *guigui.Context, widgetBounds *guigui.Wi
 		Gap:       u / 4,
 	}
 
+	t.listColItems = slices.Delete(t.listColItems, 0, len(t.listColItems))
+	t.listColItems = append(t.listColItems,
+		guigui.LinearLayoutItem{Widget: &t.listLabel, Size: guigui.FixedSize(u)},
+		guigui.LinearLayoutItem{Widget: &t.fileList, Size: guigui.FlexibleSize(1)},
+	)
+	t.listCol = guigui.LinearLayout{Direction: guigui.LayoutDirectionVertical, Items: t.listColItems, Gap: u / 4}
+
 	previewContent := guigui.Widget(&t.previewEmpty)
 	if t.preview.HasImage() {
 		previewContent = &t.preview
 	}
+	t.prevColItems = slices.Delete(t.prevColItems, 0, len(t.prevColItems))
+	t.prevColItems = append(t.prevColItems,
+		guigui.LinearLayoutItem{Widget: &t.previewLabel, Size: guigui.FixedSize(u)},
+		guigui.LinearLayoutItem{Widget: previewContent, Size: guigui.FlexibleSize(1)},
+	)
+	t.prevCol = guigui.LinearLayout{Direction: guigui.LayoutDirectionVertical, Items: t.prevColItems, Gap: u / 4}
+
+	t.bodyItems = slices.Delete(t.bodyItems, 0, len(t.bodyItems))
+	t.bodyItems = append(t.bodyItems,
+		guigui.LinearLayoutItem{Size: guigui.FixedSize(14 * u), Layout: &t.listCol},
+		guigui.LinearLayoutItem{Size: guigui.FlexibleSize(1), Layout: &t.prevCol},
+	)
+	t.bodyRow = guigui.LinearLayout{Direction: guigui.LayoutDirectionHorizontal, Items: t.bodyItems, Gap: u / 2}
 
 	t.outputItems = slices.Delete(t.outputItems, 0, len(t.outputItems))
 	t.outputItems = append(t.outputItems,
-		guigui.LinearLayoutItem{Widget: &t.saveBtn},
 		guigui.LinearLayoutItem{Widget: &t.saveAsBtn},
 		guigui.LinearLayoutItem{Widget: &t.copyBtn},
 		guigui.LinearLayoutItem{Widget: &t.sendBtn},
@@ -246,8 +297,7 @@ func (t *ScreenshotTool) Layout(context *guigui.Context, widgetBounds *guigui.Wi
 	t.layoutItems = slices.Delete(t.layoutItems, 0, len(t.layoutItems))
 	t.layoutItems = append(t.layoutItems,
 		guigui.LinearLayoutItem{Size: guigui.FixedSize(u), Layout: &t.toolbar},
-		guigui.LinearLayoutItem{Widget: &t.previewLabel, Size: guigui.FixedSize(u)},
-		guigui.LinearLayoutItem{Widget: previewContent, Size: guigui.FlexibleSize(1)},
+		guigui.LinearLayoutItem{Size: guigui.FlexibleSize(1), Layout: &t.bodyRow},
 		guigui.LinearLayoutItem{Size: guigui.FixedSize(u), Layout: &t.outputRow},
 		guigui.LinearLayoutItem{Widget: &t.status, Size: guigui.FixedSize(u)},
 	)

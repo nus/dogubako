@@ -2,6 +2,7 @@ package app
 
 import (
 	"errors"
+	"path/filepath"
 	"slices"
 	"time"
 
@@ -90,9 +91,6 @@ func (r *Root) Build(context *guigui.Context, adder *guigui.ChildAdder) error {
 	})
 	r.screenshotTool.OnCapture(func(context *guigui.Context) {
 		r.startCapture()
-	})
-	r.screenshotTool.OnSave(func(context *guigui.Context) {
-		_ = r.model.Screenshot().SaveDefault()
 	})
 	r.screenshotTool.OnSaveAs(func(context *guigui.Context) {
 		r.startScreenshotSave()
@@ -310,7 +308,7 @@ func (r *Root) drainCapture() {
 			shot.SetStatus(i18n.StatusCaptureFailed, res.Err)
 			return
 		}
-		shot.SetImage(res.Image)
+		_ = shot.ApplyCapture(res.Image)
 	default:
 	}
 }
@@ -339,12 +337,16 @@ func (r *Root) copyScreenshot() {
 }
 
 func (r *Root) sendScreenshotToImage() {
-	img := r.model.Screenshot().Image()
+	shot := r.model.Screenshot()
+	img := shot.Image()
 	if img == nil {
-		r.model.Screenshot().SetStatus(i18n.StatusNoCaptureToSave)
+		shot.SetStatus(i18n.StatusNoCaptureToSave)
 		return
 	}
-	name := r.model.Screenshot().SuggestedFilename()
+	name := filepath.Base(shot.SelectedPath())
+	if name == "" || name == "." {
+		name = shot.SuggestedFilename()
+	}
 	_ = r.model.Image().LoadImage(img, name)
 	r.model.SetMode(ToolImage)
 }

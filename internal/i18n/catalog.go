@@ -49,7 +49,7 @@ const (
 	ScreenshotPreview    Key = "screenshot.preview"
 	ScreenshotPreviewSz  Key = "screenshot.preview_size"
 	ScreenshotDest       Key = "screenshot.dest"
-	ScreenshotSave       Key = "screenshot.save"
+	ScreenshotFiles      Key = "screenshot.files"
 	ScreenshotSaveAs     Key = "screenshot.save_as"
 	ScreenshotCopy       Key = "screenshot.copy"
 	ScreenshotSendImage  Key = "screenshot.send_image"
@@ -127,11 +127,11 @@ var catalogs = map[Lang]map[Key]string{
 		ScreenshotRegion:               "範囲選択",
 		ScreenshotDelay:                "遅延 (秒)",
 		ScreenshotHideWindow:           "このウィンドウを隠す",
-		ScreenshotEmpty:                "キャプチャするとここにプレビューが表示されます。",
+		ScreenshotEmpty:                "キャプチャするか、左のリストから画像を選んでください。",
 		ScreenshotPreview:              "プレビュー",
 		ScreenshotPreviewSz:            "プレビュー  %d×%d",
 		ScreenshotDest:                 "保存先  %s",
-		ScreenshotSave:                 "保存",
+		ScreenshotFiles:                "保存済み",
 		ScreenshotSaveAs:               "名前を付けて保存",
 		ScreenshotCopy:                 "クリップボードにコピー",
 		ScreenshotSendImage:            "画像ツールへ送る",
@@ -205,11 +205,11 @@ var catalogs = map[Lang]map[Key]string{
 		ScreenshotRegion:               "Region",
 		ScreenshotDelay:                "Delay (s)",
 		ScreenshotHideWindow:           "Hide this window",
-		ScreenshotEmpty:                "Capture a screenshot to see a preview here.",
+		ScreenshotEmpty:                "Capture a screenshot, or choose one from the list.",
 		ScreenshotPreview:              "Preview",
 		ScreenshotPreviewSz:            "Preview  %d×%d",
 		ScreenshotDest:                 "Save to  %s",
-		ScreenshotSave:                 "Save",
+		ScreenshotFiles:                "Saved",
 		ScreenshotSaveAs:               "Save As",
 		ScreenshotCopy:                 "Copy to Clipboard",
 		ScreenshotSendImage:            "Send to Image tool",
