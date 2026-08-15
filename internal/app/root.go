@@ -1,6 +1,7 @@
 package app
 
 import (
+	"fmt"
 	"slices"
 
 	"github.com/hajimehoshi/ebiten/v2"
@@ -183,7 +184,7 @@ func (r *Root) drainDialogs() {
 			r.pendingOpen = nil
 			if res.Cancelled || res.Err != nil {
 				if res.Err != nil {
-					r.model.Image().SetStatus("ファイルを開けませんでした")
+					r.model.Image().SetStatus(fmt.Sprintf("ファイルを開けませんでした: %v", res.Err))
 				}
 				break
 			}
@@ -197,7 +198,7 @@ func (r *Root) drainDialogs() {
 			r.pendingSave = nil
 			if res.Cancelled || res.Err != nil {
 				if res.Err != nil {
-					r.model.Image().SetStatus("保存ダイアログに失敗しました")
+					r.model.Image().SetStatus(fmt.Sprintf("保存ダイアログに失敗しました: %v", res.Err))
 				}
 				break
 			}
