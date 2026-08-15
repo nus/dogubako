@@ -19,7 +19,8 @@ import (
 type ToolID string
 
 const (
-	ToolImage ToolID = "image"
+	ToolImage      ToolID = "image"
+	ToolScreenshot ToolID = "screenshot"
 )
 
 // Tool is a sidebar entry.
@@ -30,6 +31,7 @@ type Tool struct {
 // Tools is the ordered sidebar catalog. Add new tools here.
 var Tools = []Tool{
 	{ID: ToolImage},
+	{ID: ToolScreenshot},
 }
 
 // Title returns the localized sidebar label for this tool.
@@ -37,6 +39,8 @@ func (t Tool) Title(lang i18n.Lang) string {
 	switch t.ID {
 	case ToolImage:
 		return i18n.T(lang, i18n.ToolImage)
+	case ToolScreenshot:
+		return i18n.T(lang, i18n.ToolScreenshot)
 	default:
 		return string(t.ID)
 	}
@@ -44,9 +48,10 @@ func (t Tool) Title(lang i18n.Lang) string {
 
 // Model is the application-wide state provided to widgets via Env.
 type Model struct {
-	lang  i18n.Lang
-	mode  ToolID
-	image ImageModel
+	lang       i18n.Lang
+	mode       ToolID
+	image      ImageModel
+	screenshot ScreenshotModel
 }
 
 func (m *Model) Lang() i18n.Lang {
@@ -78,6 +83,10 @@ func (m *Model) SetMode(mode ToolID) {
 
 func (m *Model) Image() *ImageModel {
 	return &m.image
+}
+
+func (m *Model) Screenshot() *ScreenshotModel {
+	return &m.screenshot
 }
 
 // ImageModel holds the first tool: resize, crop, and JPEG/PNG conversion.
@@ -272,6 +281,18 @@ func (m *ImageModel) LoadClipboardPNG(png []byte) error {
 	}
 	m.setSource(img, "clipboard.png", format)
 	m.SetStatus(i18n.StatusPasted, img.Bounds().Dx(), img.Bounds().Dy())
+	return nil
+}
+
+func (m *ImageModel) LoadImage(img image.Image, name string) error {
+	if img == nil {
+		return fmt.Errorf("no image")
+	}
+	if name == "" {
+		name = "screenshot.png"
+	}
+	m.setSource(img, name, imageproc.FormatPNG)
+	m.SetStatus(i18n.StatusLoaded, name, img.Bounds().Dx(), img.Bounds().Dy())
 	return nil
 }
 
