@@ -124,19 +124,30 @@ func (p *sourcePreview) HandlePointingInput(context *guigui.Context, widgetBound
 type destPreview struct {
 	guigui.DefaultWidget
 
+	source     image.Image
 	image      *ebiten.Image
 	generation uint64
 }
 
 func (p *destPreview) SetImage(img *ebiten.Image) {
-	if p.image == img {
+	if p.image == img && p.source == nil {
 		return
 	}
 	p.image = img
+	p.source = nil
 	p.generation++
 }
 
-func (p *destPreview) HasImage() bool { return p.image != nil }
+func (p *destPreview) SetSource(img image.Image) {
+	if p.source == img {
+		return
+	}
+	p.source = img
+	p.image = nil
+	p.generation++
+}
+
+func (p *destPreview) HasImage() bool { return p.source != nil || p.image != nil }
 
 func (p *destPreview) WriteStateKey(context *guigui.Context, w *guigui.StateKeyWriter) {
 	w.WriteUint64(p.generation)
@@ -145,6 +156,9 @@ func (p *destPreview) WriteStateKey(context *guigui.Context, w *guigui.StateKeyW
 func (p *destPreview) Draw(context *guigui.Context, widgetBounds *guigui.WidgetBounds, dst *ebiten.Image) {
 	b := widgetBounds.Bounds()
 	drawCheckerboard(dst, b)
+	if p.image == nil && p.source != nil {
+		p.image = previewImage(p.source)
+	}
 	if p.image == nil {
 		return
 	}

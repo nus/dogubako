@@ -6,8 +6,9 @@ import "fmt"
 type Key string
 
 const (
-	AppTitle  Key = "app.title"
-	ToolImage Key = "tool.image"
+	AppTitle       Key = "app.title"
+	ToolImage      Key = "tool.image"
+	ToolScreenshot Key = "tool.screenshot"
 
 	OpenFile       Key = "image.open_file"
 	PasteClipboard Key = "image.paste_clipboard"
@@ -37,6 +38,24 @@ const (
 	OutputFormat   Key = "image.output_format"
 	JPEGQuality    Key = "image.jpeg_quality"
 
+	ScreenshotCapture      Key = "screenshot.capture"
+	ScreenshotCaptureRetry Key = "screenshot.capture_retry"
+	ScreenshotMode         Key = "screenshot.mode"
+	ScreenshotFull         Key = "screenshot.full"
+	ScreenshotWindow       Key = "screenshot.window"
+	ScreenshotRegion       Key = "screenshot.region"
+	ScreenshotDelay        Key = "screenshot.delay"
+	ScreenshotHideWindow   Key = "screenshot.hide_window"
+	ScreenshotEmpty        Key = "screenshot.empty"
+	ScreenshotPreview      Key = "screenshot.preview"
+	ScreenshotPreviewSz    Key = "screenshot.preview_size"
+	ScreenshotDest         Key = "screenshot.dest"
+	ScreenshotFiles        Key = "screenshot.files"
+	ScreenshotSaveAs       Key = "screenshot.save_as"
+	ScreenshotCopy         Key = "screenshot.copy"
+	ScreenshotSendImage    Key = "screenshot.send_image"
+	ScreenshotShowFolder   Key = "screenshot.show_folder"
+
 	DialogOpen   Key = "dialog.open"
 	DialogSave   Key = "dialog.save"
 	FilterImages Key = "dialog.filter_images"
@@ -59,12 +78,23 @@ const (
 	StatusEncodeFailed             Key = "status.encode_failed"
 	StatusSaveFailed               Key = "status.save_failed"
 	StatusSaved                    Key = "status.saved"
+	StatusCaptureInProgress        Key = "status.capture_in_progress"
+	StatusCaptureCancelled         Key = "status.capture_cancelled"
+	StatusCaptureTimeout           Key = "status.capture_timeout"
+	StatusCaptureFailed            Key = "status.capture_failed"
+	StatusCaptureNoTool            Key = "status.capture_no_tool"
+	StatusCaptured                 Key = "status.captured"
+	StatusNoCaptureToSave          Key = "status.no_capture_to_save"
+	StatusNoCaptureToCopy          Key = "status.no_capture_to_copy"
+	StatusDestFailed               Key = "status.dest_failed"
+	StatusFolderOpenFailed         Key = "status.folder_open_failed"
 )
 
 var catalogs = map[Lang]map[Key]string{
 	JA: {
 		AppTitle:                       "道具箱",
 		ToolImage:                      "画像",
+		ToolScreenshot:                 "画面キャプチャ",
 		OpenFile:                       "ファイルを開く",
 		PasteClipboard:                 "クリップボードから貼り付け",
 		InputHint:                      "ファイル指定・ドロップ・%s で入力",
@@ -92,6 +122,23 @@ var catalogs = map[Lang]map[Key]string{
 		Format:                         "形式",
 		OutputFormat:                   "出力形式",
 		JPEGQuality:                    "JPEG 品質  %d",
+		ScreenshotCapture:              "キャプチャ",
+		ScreenshotCaptureRetry:         "やり直す",
+		ScreenshotMode:                 "対象",
+		ScreenshotFull:                 "画面全体",
+		ScreenshotWindow:               "ウィンドウ",
+		ScreenshotRegion:               "範囲選択",
+		ScreenshotDelay:                "遅延 (秒)",
+		ScreenshotHideWindow:           "このウィンドウを隠す",
+		ScreenshotEmpty:                "キャプチャするか、左のリストから画像を選んでください。",
+		ScreenshotPreview:              "プレビュー",
+		ScreenshotPreviewSz:            "プレビュー  %d×%d",
+		ScreenshotDest:                 "保存先  %s",
+		ScreenshotFiles:                "保存済み",
+		ScreenshotSaveAs:               "名前を付けて保存",
+		ScreenshotCopy:                 "クリップボードにコピー",
+		ScreenshotSendImage:            "画像ツールへ送る",
+		ScreenshotShowFolder:           "フォルダを開く",
 		DialogOpen:                     "画像を開く",
 		DialogSave:                     "画像を保存",
 		FilterImages:                   "画像",
@@ -113,10 +160,21 @@ var catalogs = map[Lang]map[Key]string{
 		StatusEncodeFailed:             "エンコードに失敗しました: %v",
 		StatusSaveFailed:               "保存に失敗しました: %v",
 		StatusSaved:                    "保存しました: %s",
+		StatusCaptureInProgress:        "キャプチャしています…",
+		StatusCaptureCancelled:         "キャプチャをキャンセルしました",
+		StatusCaptureTimeout:           "キャプチャがタイムアウトしました",
+		StatusCaptureFailed:            "キャプチャに失敗しました: %v",
+		StatusCaptureNoTool:            "画面キャプチャのコマンドが見つかりません。Ubuntu では gnome-screenshot をインストールしてください",
+		StatusCaptured:                 "キャプチャしました（%d×%d）",
+		StatusNoCaptureToSave:          "保存するキャプチャがありません",
+		StatusNoCaptureToCopy:          "コピーするキャプチャがありません",
+		StatusDestFailed:               "保存先を用意できませんでした: %v",
+		StatusFolderOpenFailed:         "フォルダを開けませんでした: %v",
 	},
 	EN: {
 		AppTitle:                       "Dogubako",
 		ToolImage:                      "Image",
+		ToolScreenshot:                 "Screenshot",
 		OpenFile:                       "Open File",
 		PasteClipboard:                 "Paste from Clipboard",
 		InputHint:                      "Open, drop, or paste with %s",
@@ -144,6 +202,23 @@ var catalogs = map[Lang]map[Key]string{
 		Format:                         "Format",
 		OutputFormat:                   "Output format",
 		JPEGQuality:                    "JPEG quality  %d",
+		ScreenshotCapture:              "Capture",
+		ScreenshotCaptureRetry:         "Retry",
+		ScreenshotMode:                 "Target",
+		ScreenshotFull:                 "Full screen",
+		ScreenshotWindow:               "Window",
+		ScreenshotRegion:               "Region",
+		ScreenshotDelay:                "Delay (s)",
+		ScreenshotHideWindow:           "Hide this window",
+		ScreenshotEmpty:                "Capture a screenshot, or choose one from the list.",
+		ScreenshotPreview:              "Preview",
+		ScreenshotPreviewSz:            "Preview  %d×%d",
+		ScreenshotDest:                 "Save to  %s",
+		ScreenshotFiles:                "Saved",
+		ScreenshotSaveAs:               "Save As",
+		ScreenshotCopy:                 "Copy to Clipboard",
+		ScreenshotSendImage:            "Send to Image tool",
+		ScreenshotShowFolder:           "Open Folder",
 		DialogOpen:                     "Open Image",
 		DialogSave:                     "Save Image",
 		FilterImages:                   "Images",
@@ -165,6 +240,16 @@ var catalogs = map[Lang]map[Key]string{
 		StatusEncodeFailed:             "Encoding failed: %v",
 		StatusSaveFailed:               "Failed to save: %v",
 		StatusSaved:                    "Saved: %s",
+		StatusCaptureInProgress:        "Capturing…",
+		StatusCaptureCancelled:         "Capture cancelled",
+		StatusCaptureTimeout:           "Capture timed out",
+		StatusCaptureFailed:            "Capture failed: %v",
+		StatusCaptureNoTool:            "No screenshot command found. On Ubuntu, install gnome-screenshot.",
+		StatusCaptured:                 "Captured (%d×%d)",
+		StatusNoCaptureToSave:          "No screenshot to save",
+		StatusNoCaptureToCopy:          "No screenshot to copy",
+		StatusDestFailed:               "Could not prepare the save folder: %v",
+		StatusFolderOpenFailed:         "Could not open the folder: %v",
 	},
 }
 

@@ -24,6 +24,36 @@
 - V: クリップボードから貼り付け
 - C: クリップボードにコピー
 
+### 画面キャプチャ
+
+- 画面全体 / ウィンドウ / 範囲選択
+- 遅延（秒）と、キャプチャ前にこのウィンドウを隠すオプション
+- キャプチャした画像は保存先へ自動保存
+- 保存先フォルダの画像をサムネイル付きリストで表示し、クリックでプレビュー
+- クリップボードへコピー、名前を付けて保存、画像ツールへ送る
+
+既定の保存先:
+
+| 環境 | 場所 |
+| --- | --- |
+| macOS | `~/Pictures/Screenshots` |
+| Ubuntu | `XDG_SCREENSHOTS_DIR`、なければ「ピクチャ」フォルダ（日本語環境では多くの場合 `~/画像`）の `Screenshots` |
+
+Linux では `~/.config/user-dirs.dirs` を読むので、ホーム直下に英語の `Pictures` を新しく作りません。macOS の Cmd-Shift-3 既定であるデスクトップは使いません。
+
+ショートカット（macOS は ⌘、Ubuntu は Ctrl）:
+
+- S: 保存先へもう一度保存（別ファイル名）
+- C: クリップボードにコピー
+
+Ubuntu ではデスクトップに合ったコマンドを優先します（GNOME なら `gnome-screenshot`、それ以外では `maim` / `scrot` など）。1つ目が画像を書かずに終わったときは次のコマンドを試します。範囲選択が止まったときは「やり直す」で中断して再試行できます。
+
+```sh
+sudo apt install gnome-screenshot scrot
+```
+
+macOS ではシステムの `screencapture` を使います。初回は「画面収録」の許可が必要です（システム設定 → プライバシーとセキュリティ）。
+
 ## 必要環境
 
 - Go 1.25 以降（ソースからビルドする場合）
@@ -88,7 +118,9 @@ make test
 ## ディレクトリ
 
 - `cmd/dogubako` — エントリポイント
-- `internal/app` — シェル（サイドメニューとメインパネル）と画像ツール UI
+- `internal/app` — シェル（サイドメニューとメインパネル）、画像ツール、画面キャプチャ
 - `internal/imageproc` — リサイズ・切り取り・エンコード
+- `internal/capture` — OS の画面キャプチャコマンド呼び出し
+- `internal/userdir` — ピクチャ / スクリーンショットフォルダの解決
 - `internal/dialog` — ファイルダイアログ（GTK / zenity / kdialog）
 - `packaging` — Ubuntu 向け `.desktop`
