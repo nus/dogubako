@@ -1,0 +1,416 @@
+package app
+
+import (
+	"fmt"
+	"image"
+	"slices"
+
+	"github.com/guigui-gui/guigui"
+	"github.com/guigui-gui/guigui/basicwidget"
+
+	"github.com/nus/dogubako/internal/imageproc"
+)
+
+var (
+	eventOpenFile = guigui.GenerateEventKey()
+	eventSaveFile = guigui.GenerateEventKey()
+	eventPaste    = guigui.GenerateEventKey()
+	eventCopy     = guigui.GenerateEventKey()
+)
+
+// ImageTool is the first workspace tool: resize, crop, and JPEG/PNG convert.
+type ImageTool struct {
+	guigui.DefaultWidget
+
+	openButton  basicwidget.Button
+	pasteButton basicwidget.Button
+	hint        basicwidget.Text
+
+	beforeLabel   basicwidget.Text
+	beforePreview sourcePreview
+	afterLabel    basicwidget.Text
+	afterImage    destPreview
+	afterEmpty    basicwidget.Text
+
+	formPanel basicwidget.Panel
+	form      basicwidget.Form
+
+	sectionSize     basicwidget.Text
+	scaleText       basicwidget.Text
+	scaleInput      guigui.WidgetWithSize[*basicwidget.NumberInput]
+	widthText       basicwidget.Text
+	widthInput      guigui.WidgetWithSize[*basicwidget.NumberInput]
+	heightText      basicwidget.Text
+	heightInput     guigui.WidgetWithSize[*basicwidget.NumberInput]
+	keepAspectText  basicwidget.Text
+	keepAspect      basicwidget.Toggle
+	resetSizeButton basicwidget.Button
+
+	sectionCrop     basicwidget.Text
+	cropEnabledText basicwidget.Text
+	cropEnabled     basicwidget.Toggle
+	cropXText       basicwidget.Text
+	cropXInput      guigui.WidgetWithSize[*basicwidget.NumberInput]
+	cropYText       basicwidget.Text
+	cropYInput      guigui.WidgetWithSize[*basicwidget.NumberInput]
+	cropWText       basicwidget.Text
+	cropWInput      guigui.WidgetWithSize[*basicwidget.NumberInput]
+	cropHText       basicwidget.Text
+	cropHInput      guigui.WidgetWithSize[*basicwidget.NumberInput]
+	resetCropButton basicwidget.Button
+
+	sectionOut   basicwidget.Text
+	formatText   basicwidget.Text
+	format       basicwidget.SegmentedControl[imageproc.Format]
+	qualityText  basicwidget.Text
+	quality      basicwidget.Slider
+	qualityValue basicwidget.Text
+	saveButton   basicwidget.Button
+	copyButton   basicwidget.Button
+	outputHint   basicwidget.Text
+
+	status basicwidget.Text
+
+	toolbarItems []guigui.LinearLayoutItem
+	previewItems []guigui.LinearLayoutItem
+	beforeItems  []guigui.LinearLayoutItem
+	afterItems   []guigui.LinearLayoutItem
+	outputItems  []guigui.LinearLayoutItem
+	layoutItems  []guigui.LinearLayoutItem
+	beforeLayout guigui.LinearLayout
+	afterLayout  guigui.LinearLayout
+	previewRow   guigui.LinearLayout
+	toolbar      guigui.LinearLayout
+	outputRow    guigui.LinearLayout
+}
+
+func (t *ImageTool) OnOpenFile(f func(context *guigui.Context)) {
+	guigui.SetEventHandler(t, eventOpenFile, f)
+}
+
+func (t *ImageTool) OnSaveFile(f func(context *guigui.Context)) {
+	guigui.SetEventHandler(t, eventSaveFile, f)
+}
+
+func (t *ImageTool) OnPaste(f func(context *guigui.Context)) {
+	guigui.SetEventHandler(t, eventPaste, f)
+}
+
+func (t *ImageTool) OnCopy(f func(context *guigui.Context)) {
+	guigui.SetEventHandler(t, eventCopy, f)
+}
+
+func (t *ImageTool) Build(context *guigui.Context, adder *guigui.ChildAdder) error {
+	adder.AddWidget(&t.openButton)
+	adder.AddWidget(&t.pasteButton)
+	adder.AddWidget(&t.hint)
+	adder.AddWidget(&t.beforeLabel)
+	adder.AddWidget(&t.beforePreview)
+	adder.AddWidget(&t.afterLabel)
+	adder.AddWidget(&t.formPanel)
+	adder.AddWidget(&t.saveButton)
+	adder.AddWidget(&t.copyButton)
+	adder.AddWidget(&t.outputHint)
+	adder.AddWidget(&t.status)
+
+	v, ok := context.Env(t, EnvKeyModel)
+	if !ok {
+		return nil
+	}
+	model := v.(*Model).Image()
+	u := basicwidget.UnitSize(context)
+	fieldW := 8 * u
+	has := model.HasSource()
+
+	t.openButton.SetText("ファイルを開く")
+	t.openButton.OnDown(func(context *guigui.Context) {
+		guigui.DispatchEvent(t, eventOpenFile)
+	})
+	t.pasteButton.SetText("クリップボードから貼り付け")
+	t.pasteButton.OnDown(func(context *guigui.Context) {
+		guigui.DispatchEvent(t, eventPaste)
+	})
+	t.hint.SetValue("ファイル指定・ドロップ・" + ShortcutLabel(context, "V") + " で入力")
+	t.hint.SetVerticalAlign(basicwidget.VerticalAlignMiddle)
+
+	srcSize := model.SourceSize()
+	setBoldText(&t.beforeLabel, true)
+	if has {
+		t.beforeLabel.SetValue(fmt.Sprintf("加工前  %d×%d", srcSize.X, srcSize.Y))
+	} else {
+		t.beforeLabel.SetValue("加工前")
+	}
+	t.beforePreview.SetImage(model.SourcePreview(), srcSize)
+	t.beforePreview.SetCrop(model.Crop(), model.CropEnabled())
+	t.beforePreview.OnCropChanged(func(rect image.Rectangle) {
+		model.SetCrop(rect)
+	})
+
+	setBoldText(&t.afterLabel, true)
+	if out, err := model.Processed(); err == nil && out != nil {
+		t.afterLabel.SetValue(fmt.Sprintf("加工後  %d×%d  %s", out.Bounds().Dx(), out.Bounds().Dy(), model.Format()))
+		t.afterImage.SetImage(model.ResultPreview())
+		adder.AddWidget(&t.afterImage)
+	} else {
+		t.afterLabel.SetValue("加工後")
+		t.afterImage.SetImage(nil)
+		t.afterEmpty.SetMultiline(true)
+		t.afterEmpty.SetWrapMode(basicwidget.WrapModeNormal)
+		t.afterEmpty.SetHorizontalAlign(basicwidget.HorizontalAlignCenter)
+		t.afterEmpty.SetVerticalAlign(basicwidget.VerticalAlignMiddle)
+		t.afterEmpty.SetValue("画像を開くか、ウィンドウへドロップしてください。")
+		adder.AddWidget(&t.afterEmpty)
+	}
+
+	t.configureForm(context, model, fieldW)
+	t.formPanel.SetContent(&t.form)
+	t.formPanel.SetAutoBorder(true)
+	t.formPanel.SetContentConstraints(basicwidget.PanelContentConstraintsFixedWidth)
+
+	t.saveButton.SetText("ファイルに保存")
+	t.saveButton.SetType(basicwidget.ButtonTypePrimary)
+	t.saveButton.OnDown(func(context *guigui.Context) {
+		guigui.DispatchEvent(t, eventSaveFile)
+	})
+	context.SetEnabled(&t.saveButton, has)
+	t.copyButton.SetText("クリップボードにコピー")
+	t.copyButton.OnDown(func(context *guigui.Context) {
+		guigui.DispatchEvent(t, eventCopy)
+	})
+	context.SetEnabled(&t.copyButton, has)
+	t.outputHint.SetValue("出力はファイルまたはクリップボード")
+	t.outputHint.SetVerticalAlign(basicwidget.VerticalAlignMiddle)
+
+	t.status.SetValue(model.Status())
+	t.status.SetVerticalAlign(basicwidget.VerticalAlignMiddle)
+	return nil
+}
+
+func (t *ImageTool) configureForm(context *guigui.Context, model *ImageModel, fieldW int) {
+	t.sectionSize.SetValue("拡大縮小")
+	setBoldText(&t.sectionSize, true)
+
+	t.scaleText.SetValue("倍率 (%)")
+	configureIntInput(t.scaleInput.Widget(), 1, 1000, 1, model.ScalePercent(), func(v int, committed bool) {
+		if committed {
+			model.SetScalePercent(v)
+		}
+	})
+	t.scaleInput.SetFixedWidth(fieldW)
+	context.SetEnabled(&t.scaleInput, model.HasSource())
+
+	t.widthText.SetValue("幅 (px)")
+	configureIntInput(t.widthInput.Widget(), 1, imageproc.MaxDimension, 1, model.Width(), func(v int, committed bool) {
+		if committed {
+			model.SetWidth(v)
+		}
+	})
+	t.widthInput.SetFixedWidth(fieldW)
+	context.SetEnabled(&t.widthInput, model.HasSource())
+
+	t.heightText.SetValue("高さ (px)")
+	configureIntInput(t.heightInput.Widget(), 1, imageproc.MaxDimension, 1, model.Height(), func(v int, committed bool) {
+		if committed {
+			model.SetHeight(v)
+		}
+	})
+	t.heightInput.SetFixedWidth(fieldW)
+	context.SetEnabled(&t.heightInput, model.HasSource())
+
+	t.keepAspectText.SetValue("縦横比を維持")
+	t.keepAspect.SetValue(model.KeepAspect())
+	t.keepAspect.OnValueChanged(func(context *guigui.Context, value bool) {
+		model.SetKeepAspect(value)
+	})
+	context.SetEnabled(&t.keepAspect, model.HasSource())
+
+	t.resetSizeButton.SetText("元のサイズに戻す")
+	t.resetSizeButton.OnDown(func(context *guigui.Context) {
+		model.ResetSize()
+	})
+	context.SetEnabled(&t.resetSizeButton, model.HasSource())
+
+	t.sectionCrop.SetValue("切り取り")
+	setBoldText(&t.sectionCrop, true)
+
+	t.cropEnabledText.SetValue("切り取りを使う")
+	t.cropEnabled.SetValue(model.CropEnabled())
+	t.cropEnabled.OnValueChanged(func(context *guigui.Context, value bool) {
+		model.SetCropEnabled(value)
+	})
+	context.SetEnabled(&t.cropEnabled, model.HasSource())
+
+	crop := model.Crop()
+	src := model.SourceSize()
+	t.cropXText.SetValue("X")
+	configureIntInput(t.cropXInput.Widget(), 0, max(0, src.X-1), 1, crop.Min.X, func(v int, committed bool) {
+		if committed {
+			model.SetCropX(v)
+		}
+	})
+	t.cropXInput.SetFixedWidth(fieldW)
+
+	t.cropYText.SetValue("Y")
+	configureIntInput(t.cropYInput.Widget(), 0, max(0, src.Y-1), 1, crop.Min.Y, func(v int, committed bool) {
+		if committed {
+			model.SetCropY(v)
+		}
+	})
+	t.cropYInput.SetFixedWidth(fieldW)
+
+	t.cropWText.SetValue("幅")
+	configureIntInput(t.cropWInput.Widget(), 1, max(1, src.X), 1, max(1, crop.Dx()), func(v int, committed bool) {
+		if committed {
+			model.SetCropWidth(v)
+		}
+	})
+	t.cropWInput.SetFixedWidth(fieldW)
+
+	t.cropHText.SetValue("高さ")
+	configureIntInput(t.cropHInput.Widget(), 1, max(1, src.Y), 1, max(1, crop.Dy()), func(v int, committed bool) {
+		if committed {
+			model.SetCropHeight(v)
+		}
+	})
+	t.cropHInput.SetFixedWidth(fieldW)
+
+	cropOn := model.HasSource() && model.CropEnabled()
+	context.SetEnabled(&t.cropXInput, cropOn)
+	context.SetEnabled(&t.cropYInput, cropOn)
+	context.SetEnabled(&t.cropWInput, cropOn)
+	context.SetEnabled(&t.cropHInput, cropOn)
+
+	t.resetCropButton.SetText("切り取りをリセット")
+	t.resetCropButton.OnDown(func(context *guigui.Context) {
+		model.ResetCrop()
+	})
+	context.SetEnabled(&t.resetCropButton, cropOn)
+
+	t.sectionOut.SetValue("形式")
+	setBoldText(&t.sectionOut, true)
+
+	t.formatText.SetValue("出力形式")
+	t.format.SetItems([]basicwidget.SegmentedControlItem[imageproc.Format]{
+		{Text: "PNG", Value: imageproc.FormatPNG},
+		{Text: "JPEG", Value: imageproc.FormatJPEG},
+	})
+	t.format.SelectItemByValue(model.Format())
+	t.format.OnItemSelected(func(context *guigui.Context, index int) {
+		item, ok := t.format.ItemByIndex(index)
+		if !ok {
+			return
+		}
+		model.SetFormat(item.Value)
+	})
+	context.SetEnabled(&t.format, model.HasSource())
+
+	t.qualityText.SetValue("JPEG 品質")
+	t.quality.SetMinimumValue(1)
+	t.quality.SetMaximumValue(100)
+	t.quality.SetValue(model.JPEGQuality())
+	t.quality.OnValueChanged(func(context *guigui.Context, value int) {
+		model.SetJPEGQuality(value)
+	})
+	context.SetEnabled(&t.quality, model.HasSource() && model.Format() == imageproc.FormatJPEG)
+	t.qualityValue.SetValue(fmt.Sprintf("%d", model.JPEGQuality()))
+	t.qualityValue.SetHorizontalAlign(basicwidget.HorizontalAlignEnd)
+
+	t.form.SetItems([]basicwidget.FormItem{
+		{PrimaryWidget: &t.sectionSize},
+		{PrimaryWidget: &t.scaleText, SecondaryWidget: &t.scaleInput},
+		{PrimaryWidget: &t.widthText, SecondaryWidget: &t.widthInput},
+		{PrimaryWidget: &t.heightText, SecondaryWidget: &t.heightInput},
+		{PrimaryWidget: &t.keepAspectText, SecondaryWidget: &t.keepAspect},
+		{SecondaryWidget: &t.resetSizeButton},
+		{PrimaryWidget: &t.sectionCrop},
+		{PrimaryWidget: &t.cropEnabledText, SecondaryWidget: &t.cropEnabled},
+		{PrimaryWidget: &t.cropXText, SecondaryWidget: &t.cropXInput},
+		{PrimaryWidget: &t.cropYText, SecondaryWidget: &t.cropYInput},
+		{PrimaryWidget: &t.cropWText, SecondaryWidget: &t.cropWInput},
+		{PrimaryWidget: &t.cropHText, SecondaryWidget: &t.cropHInput},
+		{SecondaryWidget: &t.resetCropButton},
+		{PrimaryWidget: &t.sectionOut},
+		{PrimaryWidget: &t.formatText, SecondaryWidget: &t.format},
+		{PrimaryWidget: &t.qualityText, SecondaryWidget: &t.quality},
+		{PrimaryWidget: &t.qualityValue},
+	})
+}
+
+func configureIntInput(n *basicwidget.NumberInput, minV, maxV, step, value int, on func(int, bool)) {
+	n.SetMinimumValue(minV)
+	n.SetMaximumValue(maxV)
+	n.SetStep(step)
+	n.SetValue(value)
+	n.OnValueChanged(func(context *guigui.Context, v int, committed bool) {
+		on(v, committed)
+	})
+}
+
+func (t *ImageTool) Layout(context *guigui.Context, widgetBounds *guigui.WidgetBounds, layouter *guigui.ChildLayouter) {
+	u := basicwidget.UnitSize(context)
+
+	t.toolbarItems = slices.Delete(t.toolbarItems, 0, len(t.toolbarItems))
+	t.toolbarItems = append(t.toolbarItems,
+		guigui.LinearLayoutItem{Widget: &t.openButton},
+		guigui.LinearLayoutItem{Widget: &t.pasteButton},
+		guigui.LinearLayoutItem{Widget: &t.hint, Size: guigui.FlexibleSize(1)},
+	)
+	t.toolbar = guigui.LinearLayout{
+		Direction: guigui.LayoutDirectionHorizontal,
+		Items:     t.toolbarItems,
+		Gap:       u / 2,
+	}
+
+	afterContent := guigui.Widget(&t.afterEmpty)
+	if t.afterImage.HasImage() {
+		afterContent = &t.afterImage
+	}
+	t.beforeItems = slices.Delete(t.beforeItems, 0, len(t.beforeItems))
+	t.beforeItems = append(t.beforeItems,
+		guigui.LinearLayoutItem{Widget: &t.beforeLabel, Size: guigui.FixedSize(u)},
+		guigui.LinearLayoutItem{Widget: &t.beforePreview, Size: guigui.FlexibleSize(1)},
+	)
+	t.beforeLayout = guigui.LinearLayout{Direction: guigui.LayoutDirectionVertical, Items: t.beforeItems, Gap: u / 4}
+
+	t.afterItems = slices.Delete(t.afterItems, 0, len(t.afterItems))
+	t.afterItems = append(t.afterItems,
+		guigui.LinearLayoutItem{Widget: &t.afterLabel, Size: guigui.FixedSize(u)},
+		guigui.LinearLayoutItem{Widget: afterContent, Size: guigui.FlexibleSize(1)},
+	)
+	t.afterLayout = guigui.LinearLayout{Direction: guigui.LayoutDirectionVertical, Items: t.afterItems, Gap: u / 4}
+
+	t.previewItems = slices.Delete(t.previewItems, 0, len(t.previewItems))
+	t.previewItems = append(t.previewItems,
+		guigui.LinearLayoutItem{Size: guigui.FlexibleSize(1), Layout: &t.beforeLayout},
+		guigui.LinearLayoutItem{Size: guigui.FlexibleSize(1), Layout: &t.afterLayout},
+	)
+	t.previewRow = guigui.LinearLayout{Direction: guigui.LayoutDirectionHorizontal, Items: t.previewItems, Gap: u}
+
+	t.outputItems = slices.Delete(t.outputItems, 0, len(t.outputItems))
+	t.outputItems = append(t.outputItems,
+		guigui.LinearLayoutItem{Widget: &t.saveButton},
+		guigui.LinearLayoutItem{Widget: &t.copyButton},
+		guigui.LinearLayoutItem{Widget: &t.outputHint, Size: guigui.FlexibleSize(1)},
+	)
+	t.outputRow = guigui.LinearLayout{Direction: guigui.LayoutDirectionHorizontal, Items: t.outputItems, Gap: u / 2}
+
+	t.layoutItems = slices.Delete(t.layoutItems, 0, len(t.layoutItems))
+	t.layoutItems = append(t.layoutItems,
+		guigui.LinearLayoutItem{Size: guigui.FixedSize(u), Layout: &t.toolbar},
+		guigui.LinearLayoutItem{Size: guigui.FlexibleSize(2), Layout: &t.previewRow},
+		guigui.LinearLayoutItem{Widget: &t.formPanel, Size: guigui.FlexibleSize(1)},
+		guigui.LinearLayoutItem{Size: guigui.FixedSize(u), Layout: &t.outputRow},
+		guigui.LinearLayoutItem{Widget: &t.status, Size: guigui.FixedSize(u)},
+	)
+	(guigui.LinearLayout{
+		Direction: guigui.LayoutDirectionVertical,
+		Items:     t.layoutItems,
+		Gap:       u / 2,
+		Padding: guigui.Padding{
+			Start:  u / 2,
+			Top:    u / 2,
+			End:    u / 2,
+			Bottom: u / 2,
+		},
+	}).LayoutWidgets(context, widgetBounds.Bounds(), layouter)
+}
