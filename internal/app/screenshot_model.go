@@ -17,7 +17,10 @@ import (
 	"github.com/nus/dogubako/internal/userdir"
 )
 
-const maxCaptureDelaySec = 10
+const (
+	maxCaptureDelaySec = 10
+	thumbMaxEdge       = 128
+)
 
 // ScreenshotModel holds the screen-capture tool state.
 type ScreenshotModel struct {
@@ -39,9 +42,15 @@ type ScreenshotModel struct {
 	selected  string
 
 	files          []ScreenshotFile
+	thumbs         map[string]thumbEntry
 	jumpToSelected bool
 
 	status statusMsg
+}
+
+type thumbEntry struct {
+	mod time.Time
+	img *image.NRGBA
 }
 
 // ScreenshotFile is one image in the save folder.
@@ -136,6 +145,7 @@ func (m *ScreenshotModel) RefreshFiles() {
 			return
 		}
 		m.files = nil
+		m.thumbs = nil
 		m.generation++
 		return
 	}
@@ -144,10 +154,56 @@ func (m *ScreenshotModel) RefreshFiles() {
 		next = nil
 	}
 	if screenshotFilesEqual(m.files, next) {
+		m.ensureThumbs()
 		return
 	}
 	m.files = next
+	m.ensureThumbs()
 	m.generation++
+}
+
+func (m *ScreenshotModel) Thumbnail(path string) image.Image {
+	if path == "" || m.thumbs == nil {
+		return nil
+	}
+	e, ok := m.thumbs[path]
+	if !ok {
+		return nil
+	}
+	return e.img
+}
+
+func (m *ScreenshotModel) ensureThumbs() {
+	if m.thumbs == nil {
+		m.thumbs = make(map[string]thumbEntry)
+	}
+	live := make(map[string]struct{}, len(m.files))
+	for _, f := range m.files {
+		live[f.Path] = struct{}{}
+		if e, ok := m.thumbs[f.Path]; ok && e.img != nil && e.mod.Equal(f.ModTime) {
+			continue
+		}
+		m.thumbs[f.Path] = thumbEntry{mod: f.ModTime, img: loadThumb(f.Path)}
+	}
+	for p := range m.thumbs {
+		if _, ok := live[p]; !ok {
+			delete(m.thumbs, p)
+		}
+	}
+}
+
+func (m *ScreenshotModel) rememberThumb(path string, img image.Image) {
+	if path == "" || img == nil {
+		return
+	}
+	if m.thumbs == nil {
+		m.thumbs = make(map[string]thumbEntry)
+	}
+	mod := time.Now()
+	if fi, err := os.Stat(path); err == nil {
+		mod = fi.ModTime()
+	}
+	m.thumbs[path] = thumbEntry{mod: mod, img: makeThumb(img)}
 }
 
 func (m *ScreenshotModel) LoadPath(path string) error {
@@ -298,6 +354,7 @@ func (m *ScreenshotModel) SavePath(path string) error {
 	m.lastSaved = path
 	m.selected = path
 	m.jumpToSelected = true
+	m.rememberThumb(path, m.image)
 	m.SetStatus(i18n.StatusSaved, path)
 	m.RefreshFiles()
 	return nil
@@ -360,4 +417,34 @@ func screenshotFilesEqual(a, b []ScreenshotFile) bool {
 		}
 	}
 	return true
+}
+
+func loadThumb(path string) *image.NRGBA {
+	f, err := os.Open(path)
+	if err != nil {
+		return nil
+	}
+	defer f.Close()
+	img, _, err := imageproc.Decode(f)
+	if err != nil {
+		return nil
+	}
+	return makeThumb(img)
+}
+
+func makeThumb(img image.Image) *image.NRGBA {
+	if img == nil {
+		return nil
+	}
+	size := img.Bounds().Size()
+	if size.X <= 0 || size.Y <= 0 {
+		return nil
+	}
+	if size.X <= thumbMaxEdge && size.Y <= thumbMaxEdge {
+		return imageproc.Resize(img, size.X, size.Y)
+	}
+	scale := float64(thumbMaxEdge) / float64(max(size.X, size.Y))
+	w := max(1, int(float64(size.X)*scale+0.5))
+	h := max(1, int(float64(size.Y)*scale+0.5))
+	return imageproc.Resize(img, w, h)
 }

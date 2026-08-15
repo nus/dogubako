@@ -98,6 +98,37 @@ func TestApplyCaptureAutoSavesAndLists(t *testing.T) {
 	}
 }
 
+func TestThumbnailIsCreatedForSavedFiles(t *testing.T) {
+	home := t.TempDir()
+	restore := userdir.Override("linux", home, nil)
+	t.Cleanup(restore)
+
+	src := image.NewNRGBA(image.Rect(0, 0, 200, 100))
+	for y := 0; y < 100; y++ {
+		for x := 0; x < 200; x++ {
+			src.SetNRGBA(x, y, color.NRGBA{R: 255, A: 255})
+		}
+	}
+	var m ScreenshotModel
+	if err := m.ApplyCapture(src); err != nil {
+		t.Fatal(err)
+	}
+	thumb := m.Thumbnail(m.LastSaved())
+	if thumb == nil {
+		t.Fatal("expected thumbnail")
+	}
+	sz := thumb.Bounds().Size()
+	if sz.X > thumbMaxEdge || sz.Y > thumbMaxEdge {
+		t.Fatalf("thumb too large: %v", sz)
+	}
+	if sz.X != thumbMaxEdge {
+		t.Fatalf("width = %d, want %d", sz.X, thumbMaxEdge)
+	}
+	if m.Thumbnail("/missing.png") != nil {
+		t.Fatal("missing path should have no thumb")
+	}
+}
+
 func TestScreenshotModelSaveWithoutImage(t *testing.T) {
 	var m ScreenshotModel
 	if err := m.SavePath(filepath.Join(t.TempDir(), "x.png")); err == nil {

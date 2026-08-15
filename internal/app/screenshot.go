@@ -1,7 +1,12 @@
 package app
 
 import (
+	"image"
+	"image/color"
 	"slices"
+	"time"
+
+	"github.com/hajimehoshi/ebiten/v2"
 
 	"github.com/guigui-gui/guigui"
 	"github.com/guigui-gui/guigui/basicwidget"
@@ -32,6 +37,9 @@ type ScreenshotTool struct {
 
 	listLabel basicwidget.Text
 	fileList  basicwidget.List[string]
+	rows      guigui.WidgetSlice[*fileRow]
+	thumbGPU  map[string]*ebiten.Image
+	thumbMod  map[string]int64
 
 	previewLabel basicwidget.Text
 	preview      destPreview
@@ -154,16 +162,26 @@ func (t *ScreenshotTool) Build(context *guigui.Context, adder *guigui.ChildAdder
 	setBoldText(&t.listLabel, true)
 	t.listLabel.SetValue(i18n.T(lang, i18n.ScreenshotFiles))
 	files := model.Files()
+	t.rows.SetLen(len(files))
 	t.fileItems = slices.Delete(t.fileItems, 0, len(t.fileItems))
-	for _, f := range files {
+	liveThumbs := make(map[string]struct{}, len(files))
+	for i, f := range files {
+		liveThumbs[f.Path] = struct{}{}
+		row := t.rows.At(i)
+		row.Set(f.Name, t.gpuThumb(f.Path, model.Thumbnail(f.Path), f.ModTime))
 		t.fileItems = append(t.fileItems, basicwidget.ListItem[string]{
-			Text:  f.Name,
-			Value: f.Path,
+			Content: row,
+			Value:   f.Path,
 		})
+	}
+	for p := range t.thumbGPU {
+		if _, ok := liveThumbs[p]; !ok {
+			delete(t.thumbGPU, p)
+			delete(t.thumbMod, p)
+		}
 	}
 	t.fileList.SetStyle(basicwidget.ListStyleNormal)
 	t.fileList.SetHighlightVisibleWhenUnfocused(true)
-	t.fileList.SetItemHeight(u)
 	t.fileList.SetItems(t.fileItems)
 	if sel := model.SelectedPath(); sel != "" {
 		t.fileList.SelectItemByValue(sel)
@@ -275,7 +293,7 @@ func (t *ScreenshotTool) Layout(context *guigui.Context, widgetBounds *guigui.Wi
 
 	t.bodyItems = slices.Delete(t.bodyItems, 0, len(t.bodyItems))
 	t.bodyItems = append(t.bodyItems,
-		guigui.LinearLayoutItem{Size: guigui.FixedSize(14 * u), Layout: &t.listCol},
+		guigui.LinearLayoutItem{Size: guigui.FixedSize(16 * u), Layout: &t.listCol},
 		guigui.LinearLayoutItem{Size: guigui.FlexibleSize(1), Layout: &t.prevCol},
 	)
 	t.bodyRow = guigui.LinearLayout{Direction: guigui.LayoutDirectionHorizontal, Items: t.bodyItems, Gap: u / 2}
@@ -312,4 +330,82 @@ func (t *ScreenshotTool) Layout(context *guigui.Context, widgetBounds *guigui.Wi
 			Bottom: u / 2,
 		},
 	}).LayoutWidgets(context, widgetBounds.Bounds(), layouter)
+}
+
+func (t *ScreenshotTool) gpuThumb(path string, src image.Image, mod time.Time) *ebiten.Image {
+	if src == nil || path == "" {
+		return nil
+	}
+	if t.thumbGPU == nil {
+		t.thumbGPU = make(map[string]*ebiten.Image)
+		t.thumbMod = make(map[string]int64)
+	}
+	nano := mod.UnixNano()
+	if t.thumbMod[path] == nano {
+		return t.thumbGPU[path]
+	}
+	img := ebiten.NewImageFromImage(src)
+	t.thumbGPU[path] = img
+	t.thumbMod[path] = nano
+	return img
+}
+
+type fileRow struct {
+	guigui.DefaultWidget
+
+	thumb basicwidget.Image
+	name  basicwidget.Text
+
+	layoutItems []guigui.LinearLayoutItem
+	layout      guigui.LinearLayout
+}
+
+func (r *fileRow) Set(name string, thumb *ebiten.Image) {
+	r.name.SetValue(name)
+	r.thumb.SetImage(thumb)
+}
+
+func (r *fileRow) Build(context *guigui.Context, adder *guigui.ChildAdder) error {
+	adder.AddWidget(&r.thumb)
+	adder.AddWidget(&r.name)
+	r.name.SetVerticalAlign(basicwidget.VerticalAlignMiddle)
+	r.name.SetWrapMode(basicwidget.WrapModeAnywhere)
+	return nil
+}
+
+func (r *fileRow) layoutRow(context *guigui.Context) guigui.LinearLayout {
+	u := basicwidget.UnitSize(context)
+	r.layoutItems = slices.Delete(r.layoutItems, 0, len(r.layoutItems))
+	r.layoutItems = append(r.layoutItems,
+		guigui.LinearLayoutItem{Widget: &r.thumb, Size: guigui.FixedSize(3 * u)},
+		guigui.LinearLayoutItem{Widget: &r.name, Size: guigui.FlexibleSize(1)},
+	)
+	r.layout = guigui.LinearLayout{
+		Direction: guigui.LayoutDirectionHorizontal,
+		Items:     r.layoutItems,
+		Gap:       u / 4,
+	}
+	return r.layout
+}
+
+func (r *fileRow) Layout(context *guigui.Context, widgetBounds *guigui.WidgetBounds, layouter *guigui.ChildLayouter) {
+	var clr color.Color
+	if v, ok := context.Env(r, basicwidget.EnvKeyListItemColorType); ok {
+		if ct, ok := v.(basicwidget.ListItemColorType); ok {
+			clr = ct.TextColor(context)
+		}
+	}
+	var style basicwidget.TextStyle
+	if clr != nil {
+		style.SetColor(clr)
+	}
+	r.name.SetBaseStyle(&style)
+	r.layoutRow(context).LayoutWidgets(context, widgetBounds.Bounds(), layouter)
+}
+
+func (r *fileRow) Measure(context *guigui.Context, constraints guigui.Constraints) image.Point {
+	u := basicwidget.UnitSize(context)
+	s := r.layoutRow(context).Measure(context, constraints)
+	s.Y = 3 * u
+	return s
 }
