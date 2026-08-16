@@ -575,7 +575,8 @@ func makeVolumeDescriptor(typ byte, volName string, joliet bool, total, pathSize
 		copy(vd[8:40], padUTF16("APPLE COMPUTER", 16))
 	} else {
 		copy(vd[8:40], sys)
-		vol = padD(volName, 32)
+		// PVD only allows A–Z / 0–9 / _. Japanese names live in the Joliet SVD.
+		vol = padD(isoVolumeID(volName), 32)
 	}
 	copy(vd[40:72], vol)
 	putBoth32(vd[80:88], total)
@@ -736,6 +737,20 @@ func padA(s string, n int) []byte {
 		}
 	}
 	return padSpaces(b.String(), n)
+}
+
+func isoVolumeID(s string) string {
+	var b strings.Builder
+	for _, r := range strings.ToUpper(s) {
+		switch {
+		case r >= 'A' && r <= 'Z', r >= '0' && r <= '9', r == '_':
+			b.WriteRune(r)
+		}
+	}
+	if b.Len() == 0 {
+		return "DOGUBAKO"
+	}
+	return b.String()
 }
 
 func padD(s string, n int) []byte {

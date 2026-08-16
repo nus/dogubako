@@ -5,6 +5,7 @@ import (
 	"encoding/binary"
 	"os"
 	"path/filepath"
+	"strings"
 	"testing"
 	"time"
 )
@@ -48,6 +49,10 @@ func TestWriteImageISO9660(t *testing.T) {
 	if pvd[0] != 1 || !bytes.Equal(pvd[1:6], []byte("CD001")) {
 		t.Fatalf("missing PVD: type=%d id=%q", pvd[0], pvd[1:6])
 	}
+	volID := strings.TrimSpace(string(pvd[40:72]))
+	if volID != "DOGUBAKO" {
+		t.Fatalf("PVD volume id: %q", volID)
+	}
 	svd := data[17*sectorSize : 18*sectorSize]
 	if svd[0] != 2 || !bytes.Equal(svd[88:91], []byte{0x25, 0x2F, 0x45}) {
 		t.Fatalf("missing Joliet SVD")
@@ -72,6 +77,15 @@ func TestWriteImageISO9660(t *testing.T) {
 	}
 	if !bytes.Contains(data, []byte("#!/bin/sh\necho ok\n")) {
 		t.Fatal("payload missing")
+	}
+}
+
+func TestISOVolumeID(t *testing.T) {
+	if got := isoVolumeID("道具箱"); got != "DOGUBAKO" {
+		t.Fatalf("japanese: %q", got)
+	}
+	if got := isoVolumeID("Dogubako"); got != "DOGUBAKO" {
+		t.Fatalf("ascii: %q", got)
 	}
 }
 
