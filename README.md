@@ -101,10 +101,12 @@ make build-ubuntu
 | macOS Intel（アプリ） | `dist/macos/amd64/Dogubako.app` |
 | macOS Apple Silicon（DMG） | `dist/Dogubako-0.1.0-macos-arm64.dmg` |
 | macOS Intel（DMG） | `dist/Dogubako-0.1.0-macos-amd64.dmg` |
+| macOS Universal（アプリ） | `dist/macos/universal/Dogubako.app` |
+| macOS Universal（DMG） | `dist/Dogubako-0.1.0-macos-universal.dmg` |
 | Ubuntu amd64 | `dist/dogubako-linux-amd64` |
 | Ubuntu arm64 | `dist/dogubako-linux-arm64` |
 
-バージョンは `make package-macos VERSION=1.2.3` で変えられます。Mac 上で `lipo` があるときは、加えて `dist/macos/universal/Dogubako.app` と `dist/Dogubako-<version>-macos-universal.dmg` も作ります。
+バージョンは `make package-macos VERSION=1.2.3` で変えられます。Universal バイナリは [konoui/lipo](https://github.com/konoui/lipo) で作るので、macOS の `lipo` は不要です。
 
 `.dmg` を開いて **Dogubako** を Applications へドラッグします。日本語環境では Finder 上の名前は「道具箱」です。署名していない配布物は、初回だけコントロールキーを押しながら開くか、右クリック → 開く、で Gatekeeper を通します。
 

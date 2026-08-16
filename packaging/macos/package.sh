@@ -75,14 +75,12 @@ make_apps() {
 		assemble_app "$arch" "$binary" "$DIST/macos/${arch}/${APP_NAME}.app" "$icns"
 	done
 
-	if command -v lipo >/dev/null 2>&1; then
-		local uni="$DIST/${BIN_NAME}-darwin-universal"
-		lipo -create \
-			"$(need_bin arm64)" \
-			"$(need_bin amd64)" \
-			-output "$uni"
-		assemble_app universal "$uni" "$DIST/macos/universal/${APP_NAME}.app" "$icns"
-	fi
+	local uni="$DIST/${BIN_NAME}-darwin-universal"
+	(cd "$REPO_ROOT" && go run ./packaging/macos/cmd/lipo \
+		-o "$uni" \
+		"$(need_bin arm64)" \
+		"$(need_bin amd64)")
+	assemble_app universal "$uni" "$DIST/macos/universal/${APP_NAME}.app" "$icns"
 }
 
 stage_dmg_root() {
