@@ -1,4 +1,4 @@
-.PHONY: test vet build build-macos build-ubuntu app-macos dmg-macos package-macos
+.PHONY: test vet build build-macos build-ubuntu app-macos dmg-macos package-macos appimage-ubuntu package-ubuntu
 
 GO ?= go
 VERSION ?= 0.1.0
@@ -34,3 +34,9 @@ dmg-macos: build-macos
 	./packaging/macos/package.sh dmg
 
 package-macos: dmg-macos
+
+# AppImage for amd64 and arm64 (any Linux host with squashfs-tools).
+appimage-ubuntu: build-ubuntu
+	./packaging/linux/package.sh appimage
+
+package-ubuntu: appimage-ubuntu

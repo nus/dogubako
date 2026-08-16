@@ -89,6 +89,9 @@ make package-macos
 
 # Ubuntu / Linux 向け（amd64 / arm64）
 make build-ubuntu
+
+# Ubuntu 向け AppImage（amd64 / arm64）
+make package-ubuntu
 ```
 
 成果物は `dist/` に出力されます。
@@ -105,8 +108,12 @@ make build-ubuntu
 | macOS Universal（DMG） | `dist/Dogubako-0.1.0-macos-universal.dmg` |
 | Ubuntu amd64 | `dist/dogubako-linux-amd64` |
 | Ubuntu arm64 | `dist/dogubako-linux-arm64` |
+| Ubuntu amd64（AppImage） | `dist/Dogubako-0.1.0-linux-amd64.AppImage` |
+| Ubuntu arm64（AppImage） | `dist/Dogubako-0.1.0-linux-arm64.AppImage` |
 
-バージョンは `make package-macos VERSION=1.2.3` で変えられます。Universal バイナリは [konoui/lipo](https://github.com/konoui/lipo) で作るので、macOS の `lipo` は不要です。
+バージョンは `make package-macos VERSION=1.2.3` や `make package-ubuntu VERSION=1.2.3` で変えられます。Universal バイナリは [konoui/lipo](https://github.com/konoui/lipo) で作るので、macOS の `lipo` は不要です。
+
+`make package-ubuntu` には `squashfs-tools`（`mksquashfs`）が必要です。AppImage のランタイムはビルド時に [type2-runtime](https://github.com/AppImage/type2-runtime) から取得します。オフラインで作るときは `APPIMAGE_RUNTIME_x86_64` / `APPIMAGE_RUNTIME_aarch64` に ELF を渡します。
 
 `.dmg` を開いて **Dogubako** を Applications へドラッグします。日本語環境では Finder 上の名前は「道具箱」です。署名していない配布物は、初回だけコントロールキーを押しながら開くか、右クリック → 開く、で Gatekeeper を通します。
 
@@ -118,7 +125,20 @@ MACOS_SIGN_IDENTITY="Developer ID Application: …" make package-macos
 
 `make package-macos` は Linux からも実行できます。その場合の `.dmg` は ISO 9660 / Joliet / Rock Ridge で、macOS の DiskImageMounter が開けます。Finder 向けの UDZO（HFS+）イメージは macOS 上の `hdiutil` で作られます。
 
-Ubuntu では実行ビットを付けて起動します。
+Ubuntu では AppImage に実行ビットを付けて起動します。GTK / OpenGL / X11 はホストのデスクトップ環境のものを使います（上記の実行時パッケージ）。
+
+```sh
+chmod +x dist/Dogubako-0.1.0-linux-amd64.AppImage
+./dist/Dogubako-0.1.0-linux-amd64.AppImage
+```
+
+FUSE でマウントできないときは次でも起動できます。
+
+```sh
+./dist/Dogubako-0.1.0-linux-amd64.AppImage --appimage-extract-and-run
+```
+
+単体バイナリで起動する場合は実行ビットを付けます。
 
 ```sh
 chmod +x dist/dogubako-linux-amd64
@@ -144,4 +164,4 @@ make test
 - `internal/capture` — OS の画面キャプチャコマンド呼び出し
 - `internal/userdir` — ピクチャ / スクリーンショットフォルダの解決
 - `internal/dialog` — ファイルダイアログ（GTK / zenity / kdialog）
-- `packaging` — Ubuntu 向け `.desktop`、macOS 向け `.app` / `.dmg`
+- `packaging` — Ubuntu 向け `.desktop` / AppImage、macOS 向け `.app` / `.dmg`

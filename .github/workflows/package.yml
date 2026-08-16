@@ -14,14 +14,23 @@ jobs:
       - uses: actions/setup-go@v5
         with:
           go-version-file: go.mod
+      - name: Install packaging tools
+        run: sudo apt-get update && sudo apt-get install -y squashfs-tools
       - name: Test
         run: make test
-      - name: Package DMG
-        run: make package-macos
-      - name: Upload
+      - name: Package
+        run: |
+          make package-macos
+          make package-ubuntu
+      - name: Upload macOS
         uses: actions/upload-artifact@v4
         with:
           name: dogubako-macos
           path: |
             dist/*.dmg
             dist/macos/*/Dogubako.app
+      - name: Upload Ubuntu
+        uses: actions/upload-artifact@v4
+        with:
+          name: dogubako-ubuntu
+          path: dist/*.AppImage
