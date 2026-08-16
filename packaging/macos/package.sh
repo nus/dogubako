@@ -143,6 +143,13 @@ make_dmgs() {
 	make_one_dmg universal
 }
 
+cleanup_intermediates() {
+	rm -f "$DIST/${BIN_NAME}-darwin-arm64" \
+		"$DIST/${BIN_NAME}-darwin-amd64" \
+		"$DIST/${BIN_NAME}-darwin-universal"
+	rm -rf "$DIST/macos"
+}
+
 case $CMD in
 app)
 	make_apps
@@ -150,10 +157,12 @@ app)
 dmg)
 	make_apps
 	make_dmgs
+	cleanup_intermediates
 	;;
 all)
 	make_apps
 	make_dmgs
+	cleanup_intermediates
 	;;
 *)
 	die "unknown command: $CMD (expected app, dmg, or all)"

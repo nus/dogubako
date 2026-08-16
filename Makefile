@@ -28,14 +28,14 @@ build-ubuntu:
 app-macos: build-macos
 	./packaging/macos/package.sh app
 
-# Universal .dmg next to the Universal .app. On macOS this uses hdiutil (UDZO).
-# Elsewhere an ISO 9660 image that DiskImageMounter can open is written.
+# Universal .dmg (intermediates cleaned after packaging).
+# On macOS this uses hdiutil (UDZO); elsewhere an ISO 9660 image is written.
 dmg-macos: build-macos
 	./packaging/macos/package.sh dmg
 
 package-macos: dmg-macos
 
-# AppImage for amd64 and arm64 (any Linux host with squashfs-tools).
+# AppImage for amd64 and arm64 (intermediates cleaned after packaging).
 appimage-ubuntu: build-ubuntu
 	./packaging/linux/package.sh appimage
 
