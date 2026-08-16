@@ -21,7 +21,7 @@ BIN_NAME=dogubako
 ARCHES=(amd64 arm64)
 RUNTIME_RELEASE_URL=${APPIMAGE_RUNTIME_BASE_URL:-https://github.com/AppImage/type2-runtime/releases/download/continuous}
 
-log() { printf '%s\n' "$*"; }
+log() { printf '%s\n' "$*" >&2; }
 die() { printf 'error: %s\n' "$*" >&2; exit 1; }
 
 runtime_arch() {
@@ -106,10 +106,15 @@ fetch_runtime() {
 	if [[ ! -s $dest ]]; then
 		mkdir -p "$(dirname "$dest")"
 		local url="${RUNTIME_RELEASE_URL}/runtime-${rarch}"
+		local tmp="${dest}.part"
 		log "downloading AppImage runtime ${rarch}"
-		curl -fL --retry 4 --retry-all-errors --retry-delay 2 -o "$dest" "$url" \
-			|| die "failed to download $url"
+		curl -fL --retry 4 --retry-all-errors --retry-delay 2 -o "$tmp" "$url" \
+			|| { rm -f "$tmp"; die "failed to download $url"; }
+		mv "$tmp" "$dest"
 	fi
+	local magic
+	magic=$(head -c 4 "$dest" | od -An -tx1 | tr -d ' \n')
+	[[ $magic == 7f454c46 ]] || die "runtime is not an ELF file: $dest"
 	printf '%s\n' "$dest"
 }
 
