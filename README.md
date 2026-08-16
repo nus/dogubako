@@ -149,6 +149,8 @@ chmod +x dist/dogubako-linux-amd64
 
 ```sh
 sudo install -m 755 dist/dogubako-linux-amd64 /usr/local/bin/dogubako
+mkdir -p ~/.local/share/icons/hicolor/1024x1024/apps
+install -m 644 internal/appicon/icon.png ~/.local/share/icons/hicolor/1024x1024/apps/dogubako.png
 cp packaging/dogubako.desktop ~/.local/share/applications/
 ```
 
@@ -160,6 +162,7 @@ make test
 
 - `cmd/dogubako` — エントリポイント
 - `internal/app` — シェル（サイドメニューとメインパネル）、画像ツール、画面キャプチャ
+- `internal/appicon` — アプリ／パッケージ用アイコン
 - `internal/imageproc` — リサイズ・切り取り・エンコード
 - `internal/capture` — OS の画面キャプチャコマンド呼び出し
 - `internal/userdir` — ピクチャ / スクリーンショットフォルダの解決

@@ -72,3 +72,25 @@ func TestWritePNGRejectsSize(t *testing.T) {
 		t.Fatal("expected error")
 	}
 }
+
+func TestWritePNGUsesArtwork(t *testing.T) {
+	dir := t.TempDir()
+	path := filepath.Join(dir, "dogubako.png")
+	if err := writePNG(path, 64); err != nil {
+		t.Fatal(err)
+	}
+	f, err := os.Open(path)
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer f.Close()
+	img, err := png.Decode(f)
+	if err != nil {
+		t.Fatal(err)
+	}
+	c := img.At(0, 0)
+	r, g, b, a := c.RGBA()
+	if r>>8 < 200 || g>>8 < 200 || b>>8 < 200 || a>>8 < 200 {
+		t.Fatalf("expected light corner, got %v", c)
+	}
+}
