@@ -145,6 +145,11 @@ make_appimages() {
 	done
 }
 
+cleanup_intermediates() {
+	rm -f "$DIST/${BIN_NAME}-linux-amd64" "$DIST/${BIN_NAME}-linux-arm64"
+	rm -rf "$DIST/linux"
+}
+
 case $CMD in
 appdir)
 	make_appdirs
@@ -152,10 +157,12 @@ appdir)
 appimage)
 	make_appdirs
 	make_appimages
+	cleanup_intermediates
 	;;
 all)
 	make_appdirs
 	make_appimages
+	cleanup_intermediates
 	;;
 *)
 	die "unknown command: $CMD (expected appdir, appimage, or all)"

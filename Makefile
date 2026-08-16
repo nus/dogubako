@@ -24,18 +24,18 @@ build-ubuntu:
 	CGO_ENABLED=0 GOOS=linux GOARCH=amd64 $(GO) build -o dist/dogubako-linux-amd64 ./cmd/dogubako
 	CGO_ENABLED=0 GOOS=linux GOARCH=arm64 $(GO) build -o dist/dogubako-linux-arm64 ./cmd/dogubako
 
-# Dogubako.app for Apple Silicon and Intel (any host).
+# Dogubako.app for Apple Silicon, Intel, and Universal (any host).
 app-macos: build-macos
 	./packaging/macos/package.sh app
 
-# .dmg next to the .app. On macOS this uses hdiutil (UDZO).
-# Elsewhere an ISO 9660 image that DiskImageMounter can open is written.
+# Universal .dmg (intermediates cleaned after packaging).
+# On macOS this uses hdiutil (UDZO); elsewhere an ISO 9660 image is written.
 dmg-macos: build-macos
 	./packaging/macos/package.sh dmg
 
 package-macos: dmg-macos
 
-# AppImage for amd64 and arm64 (any Linux host with squashfs-tools).
+# AppImage for amd64 and arm64 (intermediates cleaned after packaging).
 appimage-ubuntu: build-ubuntu
 	./packaging/linux/package.sh appimage
 

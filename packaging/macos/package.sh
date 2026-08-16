@@ -1,5 +1,5 @@
 #!/usr/bin/env bash
-# Build Dogubako.app bundles and .dmg disk images for macOS.
+# Build Dogubako.app bundles and a Universal .dmg for macOS.
 #
 # Usage:
 #   packaging/macos/package.sh [app|dmg|all]
@@ -8,6 +8,9 @@
 #   VERSION                 bundle version (default: 0.1.0)
 #   DIST                    output directory (default: dist)
 #   MACOS_SIGN_IDENTITY     codesign identity; "-" for ad-hoc (macOS only)
+#
+# Per-arch .app bundles are built as intermediates. The distribution package
+# is the Universal .dmg only.
 set -euo pipefail
 
 SCRIPT_DIR=$(CDPATH= cd -- "$(dirname -- "$0")" && pwd)
@@ -135,13 +138,16 @@ make_one_dmg() {
 }
 
 make_dmgs() {
-	local arch
-	for arch in "${ARCHES[@]}"; do
-		make_one_dmg "$arch"
-	done
-	if [[ -d $DIST/macos/universal/${APP_NAME}.app ]]; then
-		make_one_dmg universal
-	fi
+	# Distribution package is universal only (covers Apple Silicon and Intel).
+	[[ -d $DIST/macos/universal/${APP_NAME}.app ]] || die "missing universal app (run: $0 app)"
+	make_one_dmg universal
+}
+
+cleanup_intermediates() {
+	rm -f "$DIST/${BIN_NAME}-darwin-arm64" \
+		"$DIST/${BIN_NAME}-darwin-amd64" \
+		"$DIST/${BIN_NAME}-darwin-universal"
+	rm -rf "$DIST/macos"
 }
 
 case $CMD in
@@ -151,10 +157,12 @@ app)
 dmg)
 	make_apps
 	make_dmgs
+	cleanup_intermediates
 	;;
 all)
 	make_apps
 	make_dmgs
+	cleanup_intermediates
 	;;
 *)
 	die "unknown command: $CMD (expected app, dmg, or all)"

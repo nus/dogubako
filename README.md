@@ -81,14 +81,8 @@ sudo apt install zenity
 # 開発中のホスト向け
 make build
 
-# macOS 向け（arm64 / amd64）
-make build-macos
-
-# macOS 向け .app と配布用 .dmg
+# macOS 向け Universal DMG
 make package-macos
-
-# Ubuntu / Linux 向け（amd64 / arm64）
-make build-ubuntu
 
 # Ubuntu 向け AppImage（amd64 / arm64）
 make package-ubuntu
@@ -98,20 +92,17 @@ make package-ubuntu
 
 | 環境 | 成果物 |
 | --- | --- |
-| macOS Apple Silicon | `dist/dogubako-darwin-arm64` |
-| macOS Intel | `dist/dogubako-darwin-amd64` |
-| macOS Apple Silicon（アプリ） | `dist/macos/arm64/Dogubako.app` |
-| macOS Intel（アプリ） | `dist/macos/amd64/Dogubako.app` |
-| macOS Apple Silicon（DMG） | `dist/Dogubako-0.1.0-macos-arm64.dmg` |
-| macOS Intel（DMG） | `dist/Dogubako-0.1.0-macos-amd64.dmg` |
-| macOS Universal（アプリ） | `dist/macos/universal/Dogubako.app` |
 | macOS Universal（DMG） | `dist/Dogubako-0.1.0-macos-universal.dmg` |
-| Ubuntu amd64 | `dist/dogubako-linux-amd64` |
-| Ubuntu arm64 | `dist/dogubako-linux-arm64` |
 | Ubuntu amd64（AppImage） | `dist/Dogubako-0.1.0-linux-amd64.AppImage` |
 | Ubuntu arm64（AppImage） | `dist/Dogubako-0.1.0-linux-arm64.AppImage` |
 
-バージョンは `make package-macos VERSION=1.2.3` や `make package-ubuntu VERSION=1.2.3` で変えられます。Universal バイナリは [konoui/lipo](https://github.com/konoui/lipo) で作るので、macOS の `lipo` は不要です。
+`v*` タグを push すると GitHub Actions がパッケージを作り、GitHub Release の Assets に次を載せます。
+
+- `Dogubako-<version>-macos-universal.dmg`
+- `Dogubako-<version>-linux-amd64.AppImage`
+- `Dogubako-<version>-linux-arm64.AppImage`
+
+バージョンは `make package-macos VERSION=1.2.3` や `make package-ubuntu VERSION=1.2.3` で変えられます。Universal バイナリは [konoui/lipo](https://github.com/konoui/lipo) で作るので、macOS の `lipo` は不要です。macOS の配布パッケージは Universal DMG のみです。
 
 `make package-ubuntu` には `squashfs-tools`（`mksquashfs`）が必要です。AppImage のランタイムはビルド時に [type2-runtime](https://github.com/AppImage/type2-runtime) から取得します。オフラインで作るときは `APPIMAGE_RUNTIME_x86_64` / `APPIMAGE_RUNTIME_aarch64` に ELF を渡します。
 
@@ -123,7 +114,7 @@ Apple Developer 証明書がある場合は、Mac 上で署名できます。
 MACOS_SIGN_IDENTITY="Developer ID Application: …" make package-macos
 ```
 
-`make package-macos` は Linux からも実行できます。その場合の `.dmg` は ISO 9660 / Joliet / Rock Ridge で、macOS の DiskImageMounter が開けます。Finder 向けの UDZO（HFS+）イメージは macOS 上の `hdiutil` で作られます。
+`make package-macos` は Linux からも実行できます。その場合の `.dmg` は ISO 9660 / Joliet / Rock Ridge で、macOS の DiskImageMounter が開けます。GitHub Release の DMG は macOS runner 上の `hdiutil` で作る UDZO（HFS+）イメージで、開くと Applications へドラッグできる構成です。
 
 Ubuntu では AppImage に実行ビットを付けて起動します。GTK / OpenGL / X11 はホストのデスクトップ環境のものを使います（上記の実行時パッケージ）。
 
@@ -138,17 +129,16 @@ FUSE でマウントできないときは次でも起動できます。
 ./dist/Dogubako-0.1.0-linux-amd64.AppImage --appimage-extract-and-run
 ```
 
-単体バイナリで起動する場合は実行ビットを付けます。
+開発用の単体バイナリは `make build` で作れます。
 
 ```sh
-chmod +x dist/dogubako-linux-amd64
-./dist/dogubako-linux-amd64
+./dist/dogubako
 ```
 
 アプリケーションメニューに出す場合は、バイナリを `PATH` の通る場所へ置き、デスクトップエントリをコピーします。
 
 ```sh
-sudo install -m 755 dist/dogubako-linux-amd64 /usr/local/bin/dogubako
+sudo install -m 755 dist/dogubako /usr/local/bin/dogubako
 mkdir -p ~/.local/share/icons/hicolor/1024x1024/apps
 install -m 644 internal/appicon/icon.png ~/.local/share/icons/hicolor/1024x1024/apps/dogubako.png
 cp packaging/dogubako.desktop ~/.local/share/applications/
