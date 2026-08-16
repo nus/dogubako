@@ -1,0 +1,27 @@
+name: package
+
+on:
+  workflow_dispatch:
+  push:
+    tags:
+      - "v*"
+
+jobs:
+  linux:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-go@v5
+        with:
+          go-version-file: go.mod
+      - name: Test
+        run: make test
+      - name: Package DMG
+        run: make package-macos
+      - name: Upload
+        uses: actions/upload-artifact@v4
+        with:
+          name: dogubako-macos
+          path: |
+            dist/*.dmg
+            dist/macos/*/Dogubako.app
