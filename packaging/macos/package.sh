@@ -1,5 +1,5 @@
 #!/usr/bin/env bash
-# Build Dogubako.app bundles and .dmg disk images for macOS.
+# Build Dogubako.app bundles and a Universal .dmg for macOS.
 #
 # Usage:
 #   packaging/macos/package.sh [app|dmg|all]
@@ -8,6 +8,9 @@
 #   VERSION                 bundle version (default: 0.1.0)
 #   DIST                    output directory (default: dist)
 #   MACOS_SIGN_IDENTITY     codesign identity; "-" for ad-hoc (macOS only)
+#
+# Per-arch .app bundles are built as intermediates. The distribution package
+# is the Universal .dmg only.
 set -euo pipefail
 
 SCRIPT_DIR=$(CDPATH= cd -- "$(dirname -- "$0")" && pwd)
