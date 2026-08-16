@@ -1,0 +1,3 @@
+CFBundleDisplayName = "道具箱";
+CFBundleName = "道具箱";
+NSScreenCaptureUsageDescription = "画面キャプチャを保存するために、画面収録へのアクセスが必要です。";

@@ -1,0 +1,3 @@
+CFBundleDisplayName = "Dogubako";
+CFBundleName = "Dogubako";
+NSScreenCaptureUsageDescription = "Dogubako needs Screen Recording access to capture the screen.";

@@ -84,18 +84,37 @@ make build
 # macOS 向け（arm64 / amd64）
 make build-macos
 
+# macOS 向け .app と配布用 .dmg
+make package-macos
+
 # Ubuntu / Linux 向け（amd64 / arm64）
 make build-ubuntu
 ```
 
 成果物は `dist/` に出力されます。
 
-| 環境 | バイナリ |
+| 環境 | 成果物 |
 | --- | --- |
 | macOS Apple Silicon | `dist/dogubako-darwin-arm64` |
 | macOS Intel | `dist/dogubako-darwin-amd64` |
+| macOS Apple Silicon（アプリ） | `dist/macos/arm64/Dogubako.app` |
+| macOS Intel（アプリ） | `dist/macos/amd64/Dogubako.app` |
+| macOS Apple Silicon（DMG） | `dist/Dogubako-0.1.0-macos-arm64.dmg` |
+| macOS Intel（DMG） | `dist/Dogubako-0.1.0-macos-amd64.dmg` |
 | Ubuntu amd64 | `dist/dogubako-linux-amd64` |
 | Ubuntu arm64 | `dist/dogubako-linux-arm64` |
+
+バージョンは `make package-macos VERSION=1.2.3` で変えられます。Mac 上で `lipo` があるときは、加えて `dist/macos/universal/Dogubako.app` と `dist/Dogubako-<version>-macos-universal.dmg` も作ります。
+
+`.dmg` を開いて **Dogubako** を Applications へドラッグします。日本語環境では Finder 上の名前は「道具箱」です。署名していない配布物は、初回だけコントロールキーを押しながら開くか、右クリック → 開く、で Gatekeeper を通します。
+
+Apple Developer 証明書がある場合は、Mac 上で署名できます。
+
+```sh
+MACOS_SIGN_IDENTITY="Developer ID Application: …" make package-macos
+```
+
+`make package-macos` は Linux からも実行できます。その場合の `.dmg` は ISO 9660 / Joliet / Rock Ridge で、macOS の DiskImageMounter が開けます。Finder 向けの UDZO（HFS+）イメージは macOS 上の `hdiutil` で作られます。
 
 Ubuntu では実行ビットを付けて起動します。
 
@@ -123,4 +142,4 @@ make test
 - `internal/capture` — OS の画面キャプチャコマンド呼び出し
 - `internal/userdir` — ピクチャ / スクリーンショットフォルダの解決
 - `internal/dialog` — ファイルダイアログ（GTK / zenity / kdialog）
-- `packaging` — Ubuntu 向け `.desktop`
+- `packaging` — Ubuntu 向け `.desktop`、macOS 向け `.app` / `.dmg`
