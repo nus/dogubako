@@ -1,4 +1,4 @@
-// Command genicon writes a toolbox-style ICNS for the macOS app bundle.
+// Command genicon writes a toolbox-style icon as ICNS (macOS) or PNG (Linux).
 package main
 
 import (
@@ -9,15 +9,39 @@ import (
 	"image/color"
 	"image/png"
 	"os"
+	"path/filepath"
+	"strings"
 )
 
 func main() {
-	out := flag.String("o", "dogubako.icns", "output .icns path")
+	out := flag.String("o", "dogubako.icns", "output .icns or .png path")
+	size := flag.Int("size", 256, "png pixel size (ignored for icns)")
 	flag.Parse()
-	if err := writeICNS(*out); err != nil {
+	if err := writeIcon(*out, *size); err != nil {
 		fmt.Fprintln(os.Stderr, err)
 		os.Exit(1)
 	}
+}
+
+func writeIcon(path string, pngSize int) error {
+	switch strings.ToLower(filepath.Ext(path)) {
+	case ".png":
+		return writePNG(path, pngSize)
+	default:
+		return writeICNS(path)
+	}
+}
+
+func writePNG(path string, size int) error {
+	if size < 16 || size > 1024 {
+		return fmt.Errorf("png size must be 16..1024, got %d", size)
+	}
+	f, err := os.Create(path)
+	if err != nil {
+		return err
+	}
+	defer f.Close()
+	return png.Encode(f, scaleImage(renderIcon(1024), size))
 }
 
 func writeICNS(path string) error {

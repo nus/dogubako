@@ -31,7 +31,7 @@ need_bin() {
 
 generate_icon() {
 	local dest=$1
-	(cd "$REPO_ROOT" && go run ./packaging/macos/cmd/genicon -o "$dest")
+	(cd "$REPO_ROOT" && go run ./packaging/cmd/genicon -o "$dest")
 }
 
 assemble_app() {
