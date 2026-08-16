@@ -6,8 +6,11 @@ on:
     tags:
       - "v*"
 
+permissions:
+  contents: write
+
 jobs:
-  linux:
+  package:
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v4
@@ -16,21 +19,37 @@ jobs:
           go-version-file: go.mod
       - name: Install packaging tools
         run: sudo apt-get update && sudo apt-get install -y squashfs-tools
+      - name: Resolve version
+        id: version
+        run: |
+          if [[ "${GITHUB_REF_TYPE}" == "tag" && "${GITHUB_REF_NAME}" == v* ]]; then
+            version="${GITHUB_REF_NAME#v}"
+          else
+            version="0.0.0-dev"
+          fi
+          echo "version=${version}" >>"$GITHUB_OUTPUT"
       - name: Test
         run: make test
       - name: Package
+        env:
+          VERSION: ${{ steps.version.outputs.version }}
         run: |
           make package-macos
           make package-ubuntu
-      - name: Upload macOS
+      - name: Upload build artifacts
         uses: actions/upload-artifact@v4
         with:
-          name: dogubako-macos
+          name: dogubako-packages
           path: |
-            dist/*.dmg
-            dist/macos/*/Dogubako.app
-      - name: Upload Ubuntu
-        uses: actions/upload-artifact@v4
+            dist/Dogubako-*-macos-universal.dmg
+            dist/Dogubako-*-linux-amd64.AppImage
+            dist/Dogubako-*-linux-arm64.AppImage
+      - name: Attach assets to GitHub Release
+        if: github.ref_type == 'tag'
+        uses: softprops/action-gh-release@v2
         with:
-          name: dogubako-ubuntu
-          path: dist/*.AppImage
+          files: |
+            dist/Dogubako-*-macos-universal.dmg
+            dist/Dogubako-*-linux-amd64.AppImage
+            dist/Dogubako-*-linux-arm64.AppImage
+          fail_on_unmatched_files: true

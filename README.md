@@ -84,7 +84,7 @@ make build
 # macOS 向け（arm64 / amd64）
 make build-macos
 
-# macOS 向け .app と配布用 .dmg
+# macOS 向け Universal .app と配布用 .dmg
 make package-macos
 
 # Ubuntu / Linux 向け（amd64 / arm64）
@@ -100,10 +100,6 @@ make package-ubuntu
 | --- | --- |
 | macOS Apple Silicon | `dist/dogubako-darwin-arm64` |
 | macOS Intel | `dist/dogubako-darwin-amd64` |
-| macOS Apple Silicon（アプリ） | `dist/macos/arm64/Dogubako.app` |
-| macOS Intel（アプリ） | `dist/macos/amd64/Dogubako.app` |
-| macOS Apple Silicon（DMG） | `dist/Dogubako-0.1.0-macos-arm64.dmg` |
-| macOS Intel（DMG） | `dist/Dogubako-0.1.0-macos-amd64.dmg` |
 | macOS Universal（アプリ） | `dist/macos/universal/Dogubako.app` |
 | macOS Universal（DMG） | `dist/Dogubako-0.1.0-macos-universal.dmg` |
 | Ubuntu amd64 | `dist/dogubako-linux-amd64` |
@@ -111,7 +107,13 @@ make package-ubuntu
 | Ubuntu amd64（AppImage） | `dist/Dogubako-0.1.0-linux-amd64.AppImage` |
 | Ubuntu arm64（AppImage） | `dist/Dogubako-0.1.0-linux-arm64.AppImage` |
 
-バージョンは `make package-macos VERSION=1.2.3` や `make package-ubuntu VERSION=1.2.3` で変えられます。Universal バイナリは [konoui/lipo](https://github.com/konoui/lipo) で作るので、macOS の `lipo` は不要です。
+`v*` タグを push すると GitHub Actions がパッケージを作り、GitHub Release の Assets に次を載せます。
+
+- `Dogubako-<version>-macos-universal.dmg`
+- `Dogubako-<version>-linux-amd64.AppImage`
+- `Dogubako-<version>-linux-arm64.AppImage`
+
+バージョンは `make package-macos VERSION=1.2.3` や `make package-ubuntu VERSION=1.2.3` で変えられます。Universal バイナリは [konoui/lipo](https://github.com/konoui/lipo) で作るので、macOS の `lipo` は不要です。macOS の配布パッケージは Universal DMG のみです。
 
 `make package-ubuntu` には `squashfs-tools`（`mksquashfs`）が必要です。AppImage のランタイムはビルド時に [type2-runtime](https://github.com/AppImage/type2-runtime) から取得します。オフラインで作るときは `APPIMAGE_RUNTIME_x86_64` / `APPIMAGE_RUNTIME_aarch64` に ELF を渡します。
 

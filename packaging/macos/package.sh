@@ -135,13 +135,9 @@ make_one_dmg() {
 }
 
 make_dmgs() {
-	local arch
-	for arch in "${ARCHES[@]}"; do
-		make_one_dmg "$arch"
-	done
-	if [[ -d $DIST/macos/universal/${APP_NAME}.app ]]; then
-		make_one_dmg universal
-	fi
+	# Distribution package is universal only (covers Apple Silicon and Intel).
+	[[ -d $DIST/macos/universal/${APP_NAME}.app ]] || die "missing universal app (run: $0 app)"
+	make_one_dmg universal
 }
 
 case $CMD in
