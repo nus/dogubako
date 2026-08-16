@@ -10,7 +10,36 @@ permissions:
   contents: write
 
 jobs:
-  package:
+  macos:
+    runs-on: macos-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-go@v5
+        with:
+          go-version-file: go.mod
+      - name: Resolve version
+        id: version
+        run: |
+          if [[ "${GITHUB_REF_TYPE}" == "tag" && "${GITHUB_REF_NAME}" == v* ]]; then
+            version="${GITHUB_REF_NAME#v}"
+          else
+            version="0.0.0-dev"
+          fi
+          echo "version=${version}" >>"$GITHUB_OUTPUT"
+      - name: Test
+        run: make test
+      - name: Package macOS Universal DMG
+        env:
+          VERSION: ${{ steps.version.outputs.version }}
+        run: make package-macos
+      - name: Upload macOS artifact
+        uses: actions/upload-artifact@v4
+        with:
+          name: dogubako-macos
+          path: dist/Dogubako-*-macos-universal.dmg
+          if-no-files-found: error
+
+  linux:
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v4
@@ -30,22 +59,35 @@ jobs:
           echo "version=${version}" >>"$GITHUB_OUTPUT"
       - name: Test
         run: make test
-      - name: Package
+      - name: Package Linux AppImages
         env:
           VERSION: ${{ steps.version.outputs.version }}
-        run: |
-          make package-macos
-          make package-ubuntu
-      - name: Upload build artifacts
+        run: make package-ubuntu
+      - name: Upload Linux artifacts
         uses: actions/upload-artifact@v4
         with:
-          name: dogubako-packages
+          name: dogubako-linux
           path: |
-            dist/Dogubako-*-macos-universal.dmg
             dist/Dogubako-*-linux-amd64.AppImage
             dist/Dogubako-*-linux-arm64.AppImage
+          if-no-files-found: error
+
+  release:
+    if: github.ref_type == 'tag'
+    needs: [macos, linux]
+    runs-on: ubuntu-latest
+    steps:
+      - name: Download macOS artifact
+        uses: actions/download-artifact@v4
+        with:
+          name: dogubako-macos
+          path: dist
+      - name: Download Linux artifacts
+        uses: actions/download-artifact@v4
+        with:
+          name: dogubako-linux
+          path: dist
       - name: Attach assets to GitHub Release
-        if: github.ref_type == 'tag'
         uses: softprops/action-gh-release@v2
         with:
           files: |

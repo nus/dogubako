@@ -114,7 +114,7 @@ Apple Developer 証明書がある場合は、Mac 上で署名できます。
 MACOS_SIGN_IDENTITY="Developer ID Application: …" make package-macos
 ```
 
-`make package-macos` は Linux からも実行できます。その場合の `.dmg` は ISO 9660 / Joliet / Rock Ridge で、macOS の DiskImageMounter が開けます。Finder 向けの UDZO（HFS+）イメージは macOS 上の `hdiutil` で作られます。
+`make package-macos` は Linux からも実行できます。その場合の `.dmg` は ISO 9660 / Joliet / Rock Ridge で、macOS の DiskImageMounter が開けます。GitHub Release の DMG は macOS runner 上の `hdiutil` で作る UDZO（HFS+）イメージで、開くと Applications へドラッグできる構成です。
 
 Ubuntu では AppImage に実行ビットを付けて起動します。GTK / OpenGL / X11 はホストのデスクトップ環境のものを使います（上記の実行時パッケージ）。
 
