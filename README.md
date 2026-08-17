@@ -148,35 +148,14 @@ cp packaging/dogubako.desktop ~/.local/share/applications/
 make test
 ```
 
-## メモリ使用量
+## フォント
 
-日本語表示用の Noto Sans CJK（SC / TC / HK / JP / KR の 5 書体、圧縮約 19 MiB）は **Linux ビルドだけ** 埋め込みます。macOS では `/System/Library/Fonts/ヒラギノ角ゴシック W3.ttc`（無ければ W4 以降）を開き、Guigui のフォールバックに登録します。Linux の埋め込みは起動時に展開するため、ヒープの大半はここにあります。
-
-再計測（ウィンドウなしは `-frames=0`。ウィンドウありはディスプレイまたは Xvfb が必要です）:
-
-```sh
-make memstat                          # 道具箱、CJK あり（本番と同じ）
-make memstat MEMSTATFLAGS='-frames=0' # init 直後だけ
-make memstat-nocjk MEMSTATFLAGS='-widget=empty -frames=30'
-```
-
-Linux（amd64、GC 後）での一例:
-
-| 条件 | ヒープ in-use | RSS |
-| --- | ---: | ---: |
-| init、CJK あり | 179 MiB | 208 MiB |
-| init、CJK なし（`-tags nocjk`） | 9 MiB | 24 MiB |
-| 空ウィンドウ 30 フレーム、CJK あり | 179 MiB | 331 MiB |
-| 道具箱 30 フレーム、CJK あり | 190 MiB | 356 MiB |
-
-pprof では in-use ヒープの約 88% が `go-text/typesetting/font.NewFont`（CJK の OpenType テーブル）です。ウィンドウを開いたあとの RSS 増分は GPU / オフスクリーン側で、ソフトウェアレンダラ（llvmpipe）では大きく出ます。
+日本語表示用の Noto Sans CJK は **Linux ビルドだけ** 埋め込みます。macOS では `/System/Library/Fonts/ヒラギノ角ゴシック W3.ttc`（無ければ W4 以降）を開き、Guigui のフォールバックに登録します。
 
 ## ディレクトリ
 
 - `cmd/dogubako` — エントリポイント
-- `cmd/memstat` — Guigui 起動後のヒープ / RSS を測る（`make memstat`。Linux で CJK なしは `make memstat-nocjk`）
 - `internal/cjkembed` — Linux は Noto Sans CJK を埋め込み、macOS はヒラギノ角ゴシックを `/System/Library/Fonts` から開く
-- `internal/memstat` — ヒープ / RSS のスナップショット
 - `internal/app` — シェル（サイドメニューとメインパネル）、画像ツール、画面キャプチャ
 - `internal/appicon` — アプリ／パッケージ用アイコン
 - `internal/imageproc` — リサイズ・切り取り・エンコード

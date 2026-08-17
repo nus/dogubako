@@ -1,4 +1,4 @@
-.PHONY: test vet build build-macos build-ubuntu app-macos dmg-macos package-macos appimage-ubuntu package-ubuntu memstat memstat-nocjk
+.PHONY: test vet build build-macos build-ubuntu app-macos dmg-macos package-macos appimage-ubuntu package-ubuntu
 
 GO ?= go
 VERSION ?= 0.1.0
@@ -6,15 +6,6 @@ export VERSION
 
 test:
 	$(GO) test ./...
-
-# Measure heap / RSS after init and after a few Guigui frames.
-# Needs a display (or Xvfb). On Linux, production embeds CJK; compare with: make memstat-nocjk
-MEMSTATFLAGS ?=
-memstat:
-	$(GO) run ./cmd/memstat $(MEMSTATFLAGS)
-
-memstat-nocjk:
-	$(GO) run -tags nocjk ./cmd/memstat $(MEMSTATFLAGS)
 
 vet:
 	$(GO) vet ./...
