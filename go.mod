@@ -8,6 +8,7 @@ require (
 	github.com/hajimehoshi/ebiten/v2 v2.10.0-alpha.13.0.20260814053235-7532c813d0c1
 	github.com/konoui/lipo v0.10.0
 	golang.org/x/image v0.45.0
+	golang.org/x/text v0.41.0
 )
 
 require (
@@ -21,6 +22,5 @@ require (
 	github.com/srwiley/rasterx v0.0.0-20220730225603-2ab79fcdd4ef // indirect
 	golang.org/x/sync v0.22.0 // indirect
 	golang.org/x/sys v0.47.0 // indirect
-	golang.org/x/text v0.41.0 // indirect
 	howett.net/plist v1.0.1 // indirect
 )

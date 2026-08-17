@@ -148,9 +148,14 @@ cp packaging/dogubako.desktop ~/.local/share/applications/
 make test
 ```
 
+## フォント
+
+日本語表示用の Noto Sans CJK は **Linux ビルドだけ** 埋め込みます。macOS では `/System/Library/Fonts/ヒラギノ角ゴシック W3.ttc`（無ければ W4 以降）を開き、Guigui のフォールバックに登録します。
+
 ## ディレクトリ
 
 - `cmd/dogubako` — エントリポイント
+- `internal/cjkembed` — Linux は Noto Sans CJK を埋め込み、macOS はヒラギノ角ゴシックを `/System/Library/Fonts` から開く
 - `internal/app` — シェル（サイドメニューとメインパネル）、画像ツール、画面キャプチャ
 - `internal/appicon` — アプリ／パッケージ用アイコン
 - `internal/imageproc` — リサイズ・切り取り・エンコード
