@@ -1,5 +1,5 @@
-// Package cjkembed registers Guigui's bundled Noto Sans CJK faces.
+// Package cjkembed registers CJK faces for Guigui.
 //
-// Linux builds embed the font so Japanese UI works without depending on
-// distro packages. Other platforms do not embed a CJK font.
+// Linux builds embed Noto Sans CJK. macOS opens Hiragino Sans from
+// /System/Library/Fonts. Other platforms do not add a CJK face.
 package cjkembed

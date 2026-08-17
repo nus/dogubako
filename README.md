@@ -150,7 +150,7 @@ make test
 
 ## メモリ使用量
 
-日本語表示用の Noto Sans CJK（SC / TC / HK / JP / KR の 5 書体、圧縮約 19 MiB）は **Linux ビルドだけ** 埋め込みます。macOS などでは埋め込みません。Linux では起動時に展開するため、ヒープの大半はここにあります。macOS のキャンバス上の日本語は、既定フォント（Inter）にグリフがないため欠字になります。
+日本語表示用の Noto Sans CJK（SC / TC / HK / JP / KR の 5 書体、圧縮約 19 MiB）は **Linux ビルドだけ** 埋め込みます。macOS では `/System/Library/Fonts/ヒラギノ角ゴシック W3.ttc`（無ければ W4 以降）を開き、Guigui のフォールバックに登録します。Linux の埋め込みは起動時に展開するため、ヒープの大半はここにあります。
 
 再計測（ウィンドウなしは `-frames=0`。ウィンドウありはディスプレイまたは Xvfb が必要です）:
 
@@ -175,7 +175,7 @@ pprof では in-use ヒープの約 88% が `go-text/typesetting/font.NewFont`�
 
 - `cmd/dogubako` — エントリポイント
 - `cmd/memstat` — Guigui 起動後のヒープ / RSS を測る（`make memstat`。Linux で CJK なしは `make memstat-nocjk`）
-- `internal/cjkembed` — Linux のみ Noto Sans CJK を埋め込む
+- `internal/cjkembed` — Linux は Noto Sans CJK を埋め込み、macOS はヒラギノ角ゴシックを `/System/Library/Fonts` から開く
 - `internal/memstat` — ヒープ / RSS のスナップショット
 - `internal/app` — シェル（サイドメニューとメインパネル）、画像ツール、画面キャプチャ
 - `internal/appicon` — アプリ／パッケージ用アイコン
