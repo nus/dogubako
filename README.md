@@ -152,6 +152,8 @@ make test
 
 日本語表示のため `guigui/basicwidget/cjkfont` が Noto Sans CJK（SC / TC / HK / JP / KR の 5 書体、圧縮約 19 MiB）を **起動時に展開** します。ヒープの大半はここにあります。
 
+`make memstat-nocjk` は比較用です。既定フォント（Inter）にかな・漢字・CJK 約物のグリフがなく、Guigui は OS のフォントにもフォールバックしません。CJK なしでも言語切替やウィンドウタイトル（OS 描画）は動きますが、キャンバス上の日本語は欠字（`.notdef` の豆腐）になります。日本語 UI の本番代替にはなりません。
+
 再計測（ウィンドウなしは `-frames=0`。ウィンドウありはディスプレイまたは Xvfb が必要です）:
 
 ```sh
