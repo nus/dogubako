@@ -150,9 +150,7 @@ make test
 
 ## メモリ使用量
 
-日本語表示のため `guigui/basicwidget/cjkfont` が Noto Sans CJK（SC / TC / HK / JP / KR の 5 書体、圧縮約 19 MiB）を **起動時に展開** します。ヒープの大半はここにあります。
-
-`make memstat-nocjk` は比較用です。既定フォント（Inter）にかな・漢字・CJK 約物のグリフがなく、Guigui は OS のフォントにもフォールバックしません。CJK なしでも言語切替やウィンドウタイトル（OS 描画）は動きますが、キャンバス上の日本語は欠字（`.notdef` の豆腐）になります。日本語 UI の本番代替にはなりません。
+日本語表示用の Noto Sans CJK（SC / TC / HK / JP / KR の 5 書体、圧縮約 19 MiB）は **Linux ビルドだけ** 埋め込みます。macOS などでは埋め込みません。Linux では起動時に展開するため、ヒープの大半はここにあります。macOS のキャンバス上の日本語は、既定フォント（Inter）にグリフがないため欠字になります。
 
 再計測（ウィンドウなしは `-frames=0`。ウィンドウありはディスプレイまたは Xvfb が必要です）:
 
@@ -176,7 +174,8 @@ pprof では in-use ヒープの約 88% が `go-text/typesetting/font.NewFont`�
 ## ディレクトリ
 
 - `cmd/dogubako` — エントリポイント
-- `cmd/memstat` — Guigui 起動後のヒープ / RSS を測る（`make memstat`。CJK フォントなしは `make memstat-nocjk`）
+- `cmd/memstat` — Guigui 起動後のヒープ / RSS を測る（`make memstat`。Linux で CJK なしは `make memstat-nocjk`）
+- `internal/cjkembed` — Linux のみ Noto Sans CJK を埋め込む
 - `internal/memstat` — ヒープ / RSS のスナップショット
 - `internal/app` — シェル（サイドメニューとメインパネル）、画像ツール、画面キャプチャ
 - `internal/appicon` — アプリ／パッケージ用アイコン

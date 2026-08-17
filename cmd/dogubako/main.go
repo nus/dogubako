@@ -6,11 +6,11 @@ import (
 	"os"
 
 	"github.com/guigui-gui/guigui"
-	_ "github.com/guigui-gui/guigui/basicwidget/cjkfont"
 	"github.com/hajimehoshi/ebiten/v2"
 
 	"github.com/nus/dogubako/internal/app"
 	"github.com/nus/dogubako/internal/appicon"
+	_ "github.com/nus/dogubako/internal/cjkembed"
 	"github.com/nus/dogubako/internal/i18n"
 )
 

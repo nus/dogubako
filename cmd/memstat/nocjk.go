@@ -1,8 +1,7 @@
-//go:build nocjk
+//go:build !linux || nocjk
 
-// This build is for memory comparison only. The default Inter face has no
-// kana/kanji glyphs, and Guigui does not fall back to OS fonts, so Japanese
-// UI text renders as .notdef tofu.
+// Production macOS (and memstat -tags nocjk on Linux) do not embed Noto Sans CJK.
+// The default Inter face has no kana/kanji glyphs.
 
 package main
 

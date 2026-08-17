@@ -8,7 +8,7 @@ test:
 	$(GO) test ./...
 
 # Measure heap / RSS after init and after a few Guigui frames.
-# Needs a display (or Xvfb). Compare CJK fonts with: make memstat-nocjk
+# Needs a display (or Xvfb). On Linux, production embeds CJK; compare with: make memstat-nocjk
 MEMSTATFLAGS ?=
 memstat:
 	$(GO) run ./cmd/memstat $(MEMSTATFLAGS)

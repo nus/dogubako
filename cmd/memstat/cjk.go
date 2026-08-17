@@ -1,7 +1,7 @@
-//go:build !nocjk
+//go:build linux && !nocjk
 
 package main
 
-import _ "github.com/guigui-gui/guigui/basicwidget/cjkfont"
+import _ "github.com/nus/dogubako/internal/cjkembed"
 
 const cjkEnabled = true
