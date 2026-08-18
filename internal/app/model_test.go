@@ -39,6 +39,55 @@ func TestImageModelResizeAndCrop(t *testing.T) {
 	}
 }
 
+func TestImageModelRotate90SwapsSize(t *testing.T) {
+	src := image.NewNRGBA(image.Rect(0, 0, 20, 10))
+	src.SetNRGBA(0, 0, color.NRGBA{R: 255, A: 255})
+	var m ImageModel
+	m.setSource(src, "test.png", imageproc.FormatPNG)
+
+	m.Rotate90()
+	if m.RotateDegrees() != 90 {
+		t.Fatalf("angle = %d", m.RotateDegrees())
+	}
+	if m.Width() != 10 || m.Height() != 20 {
+		t.Fatalf("size after 90° = %dx%d", m.Width(), m.Height())
+	}
+	got, err := m.Processed()
+	if err != nil {
+		t.Fatal(err)
+	}
+	if got.Bounds().Dx() != 10 || got.Bounds().Dy() != 20 {
+		t.Fatalf("processed size = %v", got.Bounds())
+	}
+	nrgba, ok := got.(*image.NRGBA)
+	if !ok {
+		t.Fatalf("type %T", got)
+	}
+	if c := nrgba.NRGBAAt(9, 0); c != (color.NRGBA{R: 255, A: 255}) {
+		t.Fatalf("rotated pixel = %+v", c)
+	}
+
+	m.SetRotateDegrees(1)
+	if m.RotateDegrees() != 1 {
+		t.Fatalf("1° = %d", m.RotateDegrees())
+	}
+	got, err = m.Processed()
+	if err != nil {
+		t.Fatal(err)
+	}
+	if got.Bounds().Dx() != m.Width() || got.Bounds().Dy() != m.Height() {
+		t.Fatalf("1° processed %v vs params %dx%d", got.Bounds(), m.Width(), m.Height())
+	}
+
+	m.ResetRotate()
+	if m.RotateDegrees() != 0 {
+		t.Fatalf("reset = %d", m.RotateDegrees())
+	}
+	if m.Width() != 20 || m.Height() != 10 {
+		t.Fatalf("size after reset = %dx%d", m.Width(), m.Height())
+	}
+}
+
 func TestImageModelSaveRoundTrip(t *testing.T) {
 	src := image.NewNRGBA(image.Rect(0, 0, 4, 4))
 	for y := 0; y < 4; y++ {
