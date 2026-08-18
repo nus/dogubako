@@ -3,6 +3,7 @@ module github.com/nus/dogubako
 go 1.25.0
 
 require (
+	github.com/codeskyblue/go-adbkit v0.3.0
 	github.com/guigui-gui/guigui v0.0.0-20260814053346-1ea23646e521
 	github.com/hajimehoshi/dialog v0.0.0-20260703050910-dfca0e7cf198
 	github.com/hajimehoshi/ebiten/v2 v2.10.0-alpha.13.0.20260814053235-7532c813d0c1

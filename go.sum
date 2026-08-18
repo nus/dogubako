@@ -1,3 +1,5 @@
+github.com/codeskyblue/go-adbkit v0.3.0 h1:t9/pIDO4tgPwsyt8xDoRWaQuQdZUpY2lLZUCrkcbWKE=
+github.com/codeskyblue/go-adbkit v0.3.0/go.mod h1:DkCO9KqYcOtsHP+/kcmJiTRDChKz4VzLqAahhkE7ZmY=
 github.com/davecgh/go-spew v1.1.1 h1:vj9j/u1bqnvCEfJOwUhtlOARqs3+rkHYY13jYWTU97c=
 github.com/davecgh/go-spew v1.1.1/go.mod h1:J7Y8YcW2NihsgmVo/mv3lAwl/skON4iLHjSsI+c5H38=
 github.com/ebitengine/gomobile v0.0.0-20260811165420-c5a1b14deab0 h1:Z/MUJqW6sWINqPtym7afjK0yhbJLl7M6KAMpouZJzus=

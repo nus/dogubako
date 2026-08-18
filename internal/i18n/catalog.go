@@ -9,6 +9,7 @@ const (
 	AppTitle       Key = "app.title"
 	ToolImage      Key = "tool.image"
 	ToolScreenshot Key = "tool.screenshot"
+	ToolAndroid    Key = "tool.android"
 
 	OpenFile       Key = "image.open_file"
 	PasteClipboard Key = "image.paste_clipboard"
@@ -60,6 +61,24 @@ const (
 	ScreenshotSendImage    Key = "screenshot.send_image"
 	ScreenshotShowFolder   Key = "screenshot.show_folder"
 
+	AndroidDevices     Key = "android.devices"
+	AndroidFiles       Key = "android.files"
+	AndroidRefresh     Key = "android.refresh"
+	AndroidUp          Key = "android.up"
+	AndroidPull        Key = "android.pull"
+	AndroidPushFile    Key = "android.push_file"
+	AndroidPushFolder  Key = "android.push_folder"
+	AndroidEmpty       Key = "android.empty"
+	AndroidColName     Key = "android.col_name"
+	AndroidColSize     Key = "android.col_size"
+	AndroidColModified Key = "android.col_modified"
+	AndroidNoDevices   Key = "android.no_devices"
+	AndroidHint        Key = "android.hint"
+	DialogOpenDir      Key = "dialog.open_dir"
+	DialogSaveAny      Key = "dialog.save_any"
+	DialogOpenAny      Key = "dialog.open_any"
+	DialogOpenFolder   Key = "dialog.open_folder"
+
 	DialogOpen   Key = "dialog.open"
 	DialogSave   Key = "dialog.save"
 	FilterImages Key = "dialog.filter_images"
@@ -92,6 +111,17 @@ const (
 	StatusNoCaptureToCopy          Key = "status.no_capture_to_copy"
 	StatusDestFailed               Key = "status.dest_failed"
 	StatusFolderOpenFailed         Key = "status.folder_open_failed"
+	StatusAdbConnectFailed         Key = "status.adb_connect_failed"
+	StatusAdbNoDevices             Key = "status.adb_no_devices"
+	StatusAdbDeviceOffline         Key = "status.adb_device_offline"
+	StatusAdbListing               Key = "status.adb_listing"
+	StatusAdbListed                Key = "status.adb_listed"
+	StatusAdbListFailed            Key = "status.adb_list_failed"
+	StatusAdbCopying               Key = "status.adb_copying"
+	StatusAdbCopied                Key = "status.adb_copied"
+	StatusAdbCopyFailed            Key = "status.adb_copy_failed"
+	StatusAdbNoSelection           Key = "status.adb_no_selection"
+	StatusAdbSelectOnline          Key = "status.adb_select_online"
 )
 
 var catalogs = map[Lang]map[Key]string{
@@ -99,6 +129,7 @@ var catalogs = map[Lang]map[Key]string{
 		AppTitle:                       "道具箱",
 		ToolImage:                      "画像",
 		ToolScreenshot:                 "画面キャプチャ",
+		ToolAndroid:                    "Android ファイル",
 		OpenFile:                       "ファイルを開く",
 		PasteClipboard:                 "クリップボードから貼り付け",
 		InputHint:                      "ファイル指定・ドロップ・%s で入力",
@@ -147,6 +178,23 @@ var catalogs = map[Lang]map[Key]string{
 		ScreenshotCopy:                 "クリップボードにコピー",
 		ScreenshotSendImage:            "画像ツールへ送る",
 		ScreenshotShowFolder:           "フォルダを開く",
+		AndroidDevices:                 "デバイス",
+		AndroidFiles:                   "ファイル",
+		AndroidRefresh:                 "再読み込み",
+		AndroidUp:                      "上へ",
+		AndroidPull:                    "PCへコピー",
+		AndroidPushFile:                "PCのファイルをコピー",
+		AndroidPushFolder:              "PCのフォルダをコピー",
+		AndroidEmpty:                   "フォルダは空です。デバイスを選び、USB デバッグを許可してください。",
+		AndroidColName:                 "名前",
+		AndroidColSize:                 "サイズ",
+		AndroidColModified:             "更新日時",
+		AndroidNoDevices:               "接続中のデバイスはありません",
+		AndroidHint:                    "ADB プロトコルで端末のファイルを閲覧・コピーします（adb コマンドは使いません）。",
+		DialogOpenDir:                  "保存先フォルダ",
+		DialogSaveAny:                  "ファイルを保存",
+		DialogOpenAny:                  "ファイルを選ぶ",
+		DialogOpenFolder:               "フォルダを選ぶ",
 		DialogOpen:                     "画像を開く",
 		DialogSave:                     "画像を保存",
 		FilterImages:                   "画像",
@@ -178,11 +226,23 @@ var catalogs = map[Lang]map[Key]string{
 		StatusNoCaptureToCopy:          "コピーするキャプチャがありません",
 		StatusDestFailed:               "保存先を用意できませんでした: %v",
 		StatusFolderOpenFailed:         "フォルダを開けませんでした: %v",
+		StatusAdbConnectFailed:         "ADB サーバーに接続できません: %v",
+		StatusAdbNoDevices:             "接続中のデバイスがありません。USB デバッグを有効にして端末を接続してください",
+		StatusAdbDeviceOffline:         "このデバイスはまだ使えません（%s）",
+		StatusAdbListing:               "読み込んでいます…",
+		StatusAdbListed:                "%s を表示しています（%d 件）",
+		StatusAdbListFailed:            "一覧を取得できません: %v",
+		StatusAdbCopying:               "コピーしています…",
+		StatusAdbCopied:                "コピーしました（%d 件）: %s",
+		StatusAdbCopyFailed:            "コピーに失敗しました: %v",
+		StatusAdbNoSelection:           "コピーするファイルまたはフォルダを選んでください",
+		StatusAdbSelectOnline:          "オンラインのデバイスを選んでください",
 	},
 	EN: {
 		AppTitle:                       "Dogubako",
 		ToolImage:                      "Image",
 		ToolScreenshot:                 "Screenshot",
+		ToolAndroid:                    "Android Files",
 		OpenFile:                       "Open File",
 		PasteClipboard:                 "Paste from Clipboard",
 		InputHint:                      "Open, drop, or paste with %s",
@@ -231,6 +291,23 @@ var catalogs = map[Lang]map[Key]string{
 		ScreenshotCopy:                 "Copy to Clipboard",
 		ScreenshotSendImage:            "Send to Image tool",
 		ScreenshotShowFolder:           "Open Folder",
+		AndroidDevices:                 "Devices",
+		AndroidFiles:                   "Files",
+		AndroidRefresh:                 "Reload",
+		AndroidUp:                      "Up",
+		AndroidPull:                    "Copy to PC",
+		AndroidPushFile:                "Copy File from PC",
+		AndroidPushFolder:              "Copy Folder from PC",
+		AndroidEmpty:                   "This folder is empty. Select a device and allow USB debugging.",
+		AndroidColName:                 "Name",
+		AndroidColSize:                 "Size",
+		AndroidColModified:             "Modified",
+		AndroidNoDevices:               "No devices connected",
+		AndroidHint:                    "Browse and copy device files over the ADB protocol (the adb command is not used).",
+		DialogOpenDir:                  "Destination Folder",
+		DialogSaveAny:                  "Save File",
+		DialogOpenAny:                  "Choose File",
+		DialogOpenFolder:               "Choose Folder",
 		DialogOpen:                     "Open Image",
 		DialogSave:                     "Save Image",
 		FilterImages:                   "Images",
@@ -262,6 +339,17 @@ var catalogs = map[Lang]map[Key]string{
 		StatusNoCaptureToCopy:          "No screenshot to copy",
 		StatusDestFailed:               "Could not prepare the save folder: %v",
 		StatusFolderOpenFailed:         "Could not open the folder: %v",
+		StatusAdbConnectFailed:         "Could not connect to the ADB server: %v",
+		StatusAdbNoDevices:             "No devices connected. Enable USB debugging and plug in a device.",
+		StatusAdbDeviceOffline:         "This device is not ready (%s)",
+		StatusAdbListing:               "Loading…",
+		StatusAdbListed:                "Showing %s (%d items)",
+		StatusAdbListFailed:            "Could not list files: %v",
+		StatusAdbCopying:               "Copying…",
+		StatusAdbCopied:                "Copied %d item(s) to %s",
+		StatusAdbCopyFailed:            "Copy failed: %v",
+		StatusAdbNoSelection:           "Select a file or folder to copy",
+		StatusAdbSelectOnline:          "Select an online device",
 	},
 }
 

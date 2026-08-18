@@ -50,6 +50,18 @@ func SaveFileAsync(title, suggested string, filter *FileFilter) <-chan FileResul
 	return ch
 }
 
+// OpenDirectoryAsync shows a folder-selection dialog on a new goroutine.
+func OpenDirectoryAsync(title string) <-chan FileResult {
+	ch := make(chan FileResult, 1)
+	go func() {
+		if title == "" {
+			title = "Select Folder"
+		}
+		ch <- openDirectorySync(title)
+	}()
+	return ch
+}
+
 func openFileSync(title string, filter *FileFilter) FileResult {
 	if res, ok := tryNative(func() (string, error) {
 		b := nativedialog.File().Title(title)
@@ -86,6 +98,21 @@ func saveFileSync(title, suggested string, filter *FileFilter) FileResult {
 		return res
 	}
 	if res, ok := tryExternal(kdialogSaveArgs(title, suggested, filter)); ok {
+		return res
+	}
+	return FileResult{Err: ErrNoFileDialog}
+}
+
+func openDirectorySync(title string) FileResult {
+	if res, ok := tryNative(func() (string, error) {
+		return nativedialog.Directory().Title(title).Browse()
+	}); ok {
+		return res
+	}
+	if res, ok := tryExternal(zenityDirArgs(title)); ok {
+		return res
+	}
+	if res, ok := tryExternal(kdialogDirArgs(title)); ok {
 		return res
 	}
 	return FileResult{Err: ErrNoFileDialog}

@@ -55,6 +55,17 @@ sudo apt install gnome-screenshot scrot
 
 macOS ではシステムの `screencapture` を使います。初回は「画面収録」の許可が必要です（システム設定 → プライバシーとセキュリティ）。
 
+### Android ファイル
+
+USB デバッグ（または無線デバッグ）が有効な Android 端末のファイルを、ADB プロトコルで閲覧・コピーします。`adb pull` / `adb push` などの **adb コマンドは呼び出しません**。pure Go の [go-adbkit](https://github.com/codeskyblue/go-adbkit) が、起動済みの ADB サーバー（`127.0.0.1:5037`）と通信します。
+
+- 接続中のデバイス一覧から選択
+- ファイル / フォルダのツリー表示
+- サイズ、更新日時（列ヘッダーのクリックで昇順 / 降順を切り替え、境界のドラッグで列幅を変更できます）
+- Android → PC、PC → Android のファイル / フォルダコピー
+
+ADB サーバーは Android Studio や SDK Platform-Tools などが起動している必要があります。端末側で USB デバッグを許可してください。
+
 ## 必要環境
 
 - Go 1.25 以降（ソースからビルドする場合）
@@ -151,13 +162,14 @@ make test
 
 ## フォント
 
-日本語表示用の Noto Sans CJK は **Linux ビルドだけ** 埋め込みます。macOS では `/System/Library/Fonts/ヒラギノ角ゴシック W3.ttc`（無ければ W4 以降）を開き、Guigui のフォールバックに登録します。
+日本語表示用の Noto Sans CJK は **Linux ビルドだけ** 埋め込みます。macOS では `/System/Library/Fonts/ヒラギノ角ゴシック W3.ttc`（無ければ W4 以降）を開き、Guigui のフォールバックに登録します。フォルダ／ファイルの絵文字アイコンは、macOS では Apple Color Emoji、Linux では Noto Color Emoji（入っていれば）を使います。
 
 ## ディレクトリ
 
 - `cmd/dogubako` — エントリポイント
 - `internal/cjkembed` — Linux は Noto Sans CJK を埋め込み、macOS はヒラギノ角ゴシックを `/System/Library/Fonts` から開く
-- `internal/app` — シェル（サイドメニューとメインパネル）、画像ツール、画面キャプチャ
+- `internal/app` — シェル（サイドメニューとメインパネル）、画像ツール、画面キャプチャ、Android ファイル
+- `internal/adbfs` — ADB プロトコルによるデバイス一覧・ファイル同期（pure Go）
 - `internal/appicon` — アプリ／パッケージ用アイコン
 - `internal/imageproc` — リサイズ・切り取り・エンコード
 - `internal/capture` — OS の画面キャプチャコマンド呼び出し

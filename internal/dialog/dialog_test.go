@@ -42,6 +42,15 @@ func TestZenityAndKdialogArgs(t *testing.T) {
 	if !reflect.DeepEqual(args, []string{"--getopenfilename", ".", "Images (*.png *.jpg *.jpeg)", "--title", "画像を開く"}) {
 		t.Fatalf("kdialog open = %v", args)
 	}
+
+	name, args = zenityDirArgs("フォルダを選ぶ")
+	if name != "zenity" || !contains(args, "--directory") || !contains(args, "--title=フォルダを選ぶ") {
+		t.Fatalf("zenity dir = %v", args)
+	}
+	name, args = kdialogDirArgs("フォルダを選ぶ")
+	if name != "kdialog" || !reflect.DeepEqual(args, []string{"--getexistingdirectory", ".", "--title", "フォルダを選ぶ"}) {
+		t.Fatalf("kdialog dir = %v", args)
+	}
 }
 
 func TestResultFromCmd(t *testing.T) {
