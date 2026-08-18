@@ -89,7 +89,7 @@ func (m *Model) Screenshot() *ScreenshotModel {
 	return &m.screenshot
 }
 
-// ImageModel holds the first tool: resize, crop, and JPEG/PNG conversion.
+// ImageModel holds the first tool: resize, crop, rotate, and JPEG/PNG conversion.
 type ImageModel struct {
 	generation uint64
 
@@ -156,13 +156,14 @@ func (m *ImageModel) BaseSize() image.Point {
 	if m.source == nil {
 		return image.Point{}
 	}
+	size := m.source.Bounds().Size()
 	if m.params.CropEnabled {
 		c := m.params.Crop.Intersect(m.source.Bounds())
 		if !c.Empty() {
-			return c.Size()
+			size = c.Size()
 		}
 	}
-	return m.source.Bounds().Size()
+	return imageproc.RotatedSize(size, m.params.RotateDegrees)
 }
 
 func (m *ImageModel) Params() imageproc.Params { return m.params }
@@ -440,6 +441,34 @@ func (m *ImageModel) ResetCrop() {
 	m.markDirty()
 }
 
+func (m *ImageModel) RotateDegrees() int {
+	return imageproc.NormalizeDegrees(m.params.RotateDegrees)
+}
+
+func (m *ImageModel) SetRotateDegrees(degrees int) {
+	m.ensureDefaults()
+	degrees = imageproc.NormalizeDegrees(degrees)
+	if m.params.RotateDegrees == degrees {
+		return
+	}
+	percent := m.ScalePercent()
+	m.params.RotateDegrees = degrees
+	if m.source != nil {
+		size := imageproc.ScaleSize(m.BaseSize(), percent)
+		m.params.Width = size.X
+		m.params.Height = size.Y
+	}
+	m.markDirty()
+}
+
+func (m *ImageModel) Rotate90() {
+	m.SetRotateDegrees(m.RotateDegrees() + 90)
+}
+
+func (m *ImageModel) ResetRotate() {
+	m.SetRotateDegrees(0)
+}
+
 func (m *ImageModel) SetFormat(format imageproc.Format) {
 	m.ensureDefaults()
 	if format != imageproc.FormatJPEG && format != imageproc.FormatPNG {
@@ -482,6 +511,7 @@ func (m *ImageModel) setSource(img image.Image, name string, format imageproc.Fo
 	m.params.Crop = img.Bounds()
 	m.params.Width = img.Bounds().Dx()
 	m.params.Height = img.Bounds().Dy()
+	m.params.RotateDegrees = 0
 	m.markDirty()
 }
 

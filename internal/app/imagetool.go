@@ -18,7 +18,7 @@ var (
 	eventCopy     = guigui.GenerateEventKey()
 )
 
-// ImageTool is the first workspace tool: resize, crop, and JPEG/PNG convert.
+// ImageTool is the first workspace tool: resize, crop, rotate, and JPEG/PNG convert.
 type ImageTool struct {
 	guigui.DefaultWidget
 
@@ -34,6 +34,7 @@ type ImageTool struct {
 
 	resizePanel editPanel
 	cropPanel   editPanel
+	rotatePanel editPanel
 	formatPanel editPanel
 
 	sectionSize     basicwidget.Text
@@ -59,6 +60,12 @@ type ImageTool struct {
 	cropHText       basicwidget.Text
 	cropHInput      guigui.WidgetWithSize[*basicwidget.NumberInput]
 	resetCropButton basicwidget.Button
+
+	sectionRotate     basicwidget.Text
+	rotateAngleText   basicwidget.Text
+	rotateAngleInput  guigui.WidgetWithSize[*basicwidget.NumberInput]
+	rotate90Button    basicwidget.Button
+	resetRotateButton basicwidget.Button
 
 	sectionOut  basicwidget.Text
 	formatText  basicwidget.Text
@@ -111,6 +118,7 @@ func (t *ImageTool) Build(context *guigui.Context, adder *guigui.ChildAdder) err
 	adder.AddWidget(&t.afterLabel)
 	adder.AddWidget(&t.resizePanel)
 	adder.AddWidget(&t.cropPanel)
+	adder.AddWidget(&t.rotatePanel)
 	adder.AddWidget(&t.formatPanel)
 	adder.AddWidget(&t.saveButton)
 	adder.AddWidget(&t.copyButton)
@@ -289,6 +297,30 @@ func (t *ImageTool) configureForms(context *guigui.Context, model *ImageModel, l
 	})
 	context.SetEnabled(&t.resetCropButton, cropOn)
 
+	t.sectionRotate.SetValue(i18n.T(lang, i18n.Rotate))
+	setBoldText(&t.sectionRotate, true)
+
+	t.rotateAngleText.SetValue(i18n.T(lang, i18n.RotateAngle))
+	configureIntInput(t.rotateAngleInput.Widget(), 0, 359, 1, model.RotateDegrees(), func(v int, committed bool) {
+		if committed {
+			model.SetRotateDegrees(v)
+		}
+	})
+	t.rotateAngleInput.SetFixedWidth(fieldW)
+	context.SetEnabled(&t.rotateAngleInput, model.HasSource())
+
+	t.rotate90Button.SetText(i18n.T(lang, i18n.Rotate90))
+	t.rotate90Button.OnDown(func(context *guigui.Context) {
+		model.Rotate90()
+	})
+	context.SetEnabled(&t.rotate90Button, model.HasSource())
+
+	t.resetRotateButton.SetText(i18n.T(lang, i18n.ResetRotate))
+	t.resetRotateButton.OnDown(func(context *guigui.Context) {
+		model.ResetRotate()
+	})
+	context.SetEnabled(&t.resetRotateButton, model.HasSource() && model.RotateDegrees() != 0)
+
 	t.sectionOut.SetValue(i18n.T(lang, i18n.Format))
 	setBoldText(&t.sectionOut, true)
 
@@ -332,6 +364,12 @@ func (t *ImageTool) configureForms(context *guigui.Context, model *ImageModel, l
 		{PrimaryWidget: &t.cropWText, SecondaryWidget: &t.cropWInput},
 		{PrimaryWidget: &t.cropHText, SecondaryWidget: &t.cropHInput},
 		{SecondaryWidget: &t.resetCropButton},
+	})
+	t.rotatePanel.form.SetItems([]basicwidget.FormItem{
+		{PrimaryWidget: &t.sectionRotate},
+		{PrimaryWidget: &t.rotateAngleText, SecondaryWidget: &t.rotateAngleInput},
+		{SecondaryWidget: &t.rotate90Button},
+		{SecondaryWidget: &t.resetRotateButton},
 	})
 	t.formatPanel.form.SetItems([]basicwidget.FormItem{
 		{PrimaryWidget: &t.sectionOut},
@@ -402,6 +440,7 @@ func (t *ImageTool) Layout(context *guigui.Context, widgetBounds *guigui.WidgetB
 	t.editItems = append(t.editItems,
 		guigui.LinearLayoutItem{Widget: &t.resizePanel, Size: guigui.FlexibleSize(1)},
 		guigui.LinearLayoutItem{Widget: &t.cropPanel, Size: guigui.FlexibleSize(1)},
+		guigui.LinearLayoutItem{Widget: &t.rotatePanel, Size: guigui.FlexibleSize(1)},
 		guigui.LinearLayoutItem{Widget: &t.formatPanel, Size: guigui.FlexibleSize(1)},
 	)
 	t.editRow = guigui.LinearLayout{Direction: guigui.LayoutDirectionHorizontal, Items: t.editItems, Gap: u / 2}

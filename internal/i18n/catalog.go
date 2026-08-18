@@ -34,6 +34,10 @@ const (
 	Width          Key = "image.width"
 	Height         Key = "image.height"
 	ResetCrop      Key = "image.reset_crop"
+	Rotate         Key = "image.rotate"
+	RotateAngle    Key = "image.rotate_angle"
+	Rotate90       Key = "image.rotate_90"
+	ResetRotate    Key = "image.reset_rotate"
 	Format         Key = "image.format"
 	OutputFormat   Key = "image.output_format"
 	JPEGQuality    Key = "image.jpeg_quality"
@@ -119,6 +123,10 @@ var catalogs = map[Lang]map[Key]string{
 		Width:                          "幅",
 		Height:                         "高さ",
 		ResetCrop:                      "切り取りをリセット",
+		Rotate:                         "回転",
+		RotateAngle:                    "角度 (°)",
+		Rotate90:                       "90° 回転",
+		ResetRotate:                    "回転をリセット",
 		Format:                         "形式",
 		OutputFormat:                   "出力形式",
 		JPEGQuality:                    "JPEG 品質  %d",
@@ -199,6 +207,10 @@ var catalogs = map[Lang]map[Key]string{
 		Width:                          "Width",
 		Height:                         "Height",
 		ResetCrop:                      "Reset crop",
+		Rotate:                         "Rotate",
+		RotateAngle:                    "Angle (°)",
+		Rotate90:                       "Rotate 90°",
+		ResetRotate:                    "Reset rotation",
 		Format:                         "Format",
 		OutputFormat:                   "Output format",
 		JPEGQuality:                    "JPEG quality  %d",

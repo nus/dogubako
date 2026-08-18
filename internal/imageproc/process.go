@@ -38,6 +38,10 @@ type Params struct {
 	CropEnabled bool
 	Crop        image.Rectangle
 
+	// RotateDegrees is a clockwise angle in 1° steps. Values outside 0..359
+	// are wrapped by Apply.
+	RotateDegrees int
+
 	Format      Format
 	JPEGQuality int
 }
@@ -78,7 +82,7 @@ func Extension(format Format) string {
 	}
 }
 
-// Apply crops and resizes src according to p. Format is ignored here; use Encode for that.
+// Apply crops, rotates, and resizes src according to p. Format is ignored here; use Encode for that.
 func Apply(src image.Image, p Params) (image.Image, error) {
 	if src == nil {
 		return nil, fmt.Errorf("no image")
@@ -90,6 +94,13 @@ func Apply(src image.Image, p Params) (image.Image, error) {
 			return nil, err
 		}
 		img = cropped
+	}
+	if NormalizeDegrees(p.RotateDegrees) != 0 {
+		rotated, err := Rotate(img, p.RotateDegrees)
+		if err != nil {
+			return nil, err
+		}
+		img = rotated
 	}
 	if p.Width <= 0 || p.Height <= 0 {
 		return nil, fmt.Errorf("invalid size %d×%d", p.Width, p.Height)
