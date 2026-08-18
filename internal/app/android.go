@@ -264,7 +264,7 @@ func (t *AndroidTool) Build(context *guigui.Context, adder *guigui.ChildAdder) e
 	t.hint.SetValue(i18n.T(lang, i18n.AndroidHint))
 	t.hint.SetVerticalAlign(basicwidget.VerticalAlignMiddle)
 
-	t.header.SetLang(lang)
+	t.header.SetLang(lang, model.SortCol(), model.SortDesc())
 
 	rows := model.Rows()
 	t.showEmpty = len(rows) == 0
@@ -405,14 +405,17 @@ type androidFileHeader struct {
 	size basicwidget.Text
 	mod  basicwidget.Text
 
+	pressCol int
+	pressX   int
+
 	layoutItems []guigui.LinearLayoutItem
 	layout      guigui.LinearLayout
 }
 
-func (h *androidFileHeader) SetLang(lang i18n.Lang) {
-	h.name.SetValue(i18n.T(lang, i18n.AndroidColName))
-	h.size.SetValue(i18n.T(lang, i18n.AndroidColSize))
-	h.mod.SetValue(i18n.T(lang, i18n.AndroidColModified))
+func (h *androidFileHeader) SetLang(lang i18n.Lang, sortCol int, sortDesc bool) {
+	h.name.SetValue(i18n.T(lang, i18n.AndroidColName) + androidSortMark(androidSortName, sortCol, sortDesc))
+	h.size.SetValue(i18n.T(lang, i18n.AndroidColSize) + androidSortMark(androidSortSize, sortCol, sortDesc))
+	h.mod.SetValue(i18n.T(lang, i18n.AndroidColModified) + androidSortMark(androidSortMod, sortCol, sortDesc))
 }
 
 func (h *androidFileHeader) Build(context *guigui.Context, adder *guigui.ChildAdder) error {
@@ -479,14 +482,60 @@ func (h *androidFileHeader) CursorShape(context *guigui.Context, widgetBounds *g
 	if h.tool == nil {
 		return 0, false
 	}
-	return h.tool.colResizeCursor(context, widgetBounds)
+	if shape, ok := h.tool.colResizeCursor(context, widgetBounds); ok {
+		return shape, true
+	}
+	if widgetBounds.IsHitAtCursor() {
+		return ebiten.CursorShapePointer, true
+	}
+	return 0, false
 }
 
 func (h *androidFileHeader) HandlePointingInput(context *guigui.Context, widgetBounds *guigui.WidgetBounds) guigui.HandleInputResult {
 	if h.tool == nil {
 		return guigui.HandleInputResult{}
 	}
-	return h.tool.handleColResize(context, widgetBounds.Bounds(), widgetBounds.IsHitAtCursor())
+	hit := widgetBounds.IsHitAtCursor()
+	bounds := widgetBounds.Bounds()
+	if r := h.tool.handleColResize(context, bounds, hit); r.IsHandled() {
+		h.pressCol = 0
+		return r
+	}
+	return h.handleSortClick(context, bounds, hit)
+}
+
+func (h *androidFileHeader) handleSortClick(context *guigui.Context, bounds image.Rectangle, hit bool) guigui.HandleInputResult {
+	u := basicwidget.UnitSize(context)
+	cx, _ := ebiten.CursorPosition()
+	sizeW, modW := h.tool.colWidths(u)
+	slop := androidSplitterSlop(u)
+	colAt := func() int {
+		return androidHeaderColAt(cx, bounds, sizeW, modW, androidColGap(u), slop)
+	}
+
+	if hit && inpututil.IsMouseButtonJustPressed(ebiten.MouseButtonLeft) {
+		h.pressCol = colAt()
+		h.pressX = cx
+		if h.pressCol == 0 {
+			return guigui.HandleInputResult{}
+		}
+		return guigui.HandleInputByWidget(h)
+	}
+	if h.pressCol == 0 {
+		return guigui.HandleInputResult{}
+	}
+	if ebiten.IsMouseButtonPressed(ebiten.MouseButtonLeft) {
+		return guigui.HandleInputByWidget(h)
+	}
+	col := h.pressCol
+	moved := androidAbs(cx - h.pressX)
+	h.pressCol = 0
+	if moved <= slop {
+		if v, ok := context.Env(h, EnvKeyModel); ok {
+			v.(*Model).Android().ToggleSort(col)
+		}
+	}
+	return guigui.HandleInputByWidget(h)
 }
 
 type androidFileRow struct {

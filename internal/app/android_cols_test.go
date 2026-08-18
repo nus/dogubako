@@ -54,11 +54,38 @@ func TestAndroidSplitterHit(t *testing.T) {
 	}
 }
 
-func TestAndroidColWidthAfterDrag(t *testing.T) {
-	if got := androidColWidthAfterDrag(100, 157, 147); got != 110 {
-		t.Fatalf("grow size = %d", got)
+func TestAndroidHeaderColAt(t *testing.T) {
+	b := image.Rect(10, 0, 410, 24)
+	sizeW, modW, gap, slop := 100, 150, 3, 4
+	// splitters at 157 (size) and 260 (mod)
+	if got := androidHeaderColAt(80, b, sizeW, modW, gap, slop); got != androidSortName {
+		t.Fatalf("name = %d", got)
 	}
-	if got := androidColWidthAfterDrag(100, 157, 177); got != 80 {
-		t.Fatalf("shrink size = %d", got)
+	if got := androidHeaderColAt(200, b, sizeW, modW, gap, slop); got != androidSortSize {
+		t.Fatalf("size = %d", got)
+	}
+	if got := androidHeaderColAt(300, b, sizeW, modW, gap, slop); got != androidSortMod {
+		t.Fatalf("mod = %d", got)
+	}
+	if got := androidHeaderColAt(157, b, sizeW, modW, gap, slop); got != 0 {
+		t.Fatalf("size splitter = %d", got)
+	}
+	if got := androidHeaderColAt(260, b, sizeW, modW, gap, slop); got != 0 {
+		t.Fatalf("mod splitter = %d", got)
+	}
+	if got := androidHeaderColAt(5, b, sizeW, modW, gap, slop); got != 0 {
+		t.Fatalf("outside = %d", got)
+	}
+}
+
+func TestAndroidSortMark(t *testing.T) {
+	if got := androidSortMark(androidSortName, androidSortName, false); got != " ▲" {
+		t.Fatalf("asc = %q", got)
+	}
+	if got := androidSortMark(androidSortSize, androidSortName, true); got != "" {
+		t.Fatalf("inactive = %q", got)
+	}
+	if got := androidSortMark(androidSortMod, androidSortMod, true); got != " ▼" {
+		t.Fatalf("desc = %q", got)
 	}
 }

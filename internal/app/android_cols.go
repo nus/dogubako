@@ -110,3 +110,43 @@ func androidSplitterAt(x, sizeLeft, modLeft, slop int) int {
 	}
 	return 0
 }
+
+const (
+	androidSortName = 1
+	androidSortSize = 2
+	androidSortMod  = 3
+)
+
+func androidHeaderColAt(x int, bounds image.Rectangle, sizeW, modW, gap, slop int) int {
+	if x < bounds.Min.X || x >= bounds.Max.X {
+		return 0
+	}
+	sl, ml := androidSplitterXs(bounds, sizeW, modW, gap)
+	if androidSplitterAt(x, sl, ml, slop) != 0 {
+		return 0
+	}
+	if x >= ml {
+		return androidSortMod
+	}
+	if x >= sl {
+		return androidSortSize
+	}
+	return androidSortName
+}
+
+func androidAbs(n int) int {
+	if n < 0 {
+		return -n
+	}
+	return n
+}
+
+func androidSortMark(col, current int, desc bool) string {
+	if col != current {
+		return ""
+	}
+	if desc {
+		return " ▼"
+	}
+	return " ▲"
+}

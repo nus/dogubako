@@ -133,3 +133,65 @@ func TestFormatFileSizeAndTime(t *testing.T) {
 		t.Fatalf("time = %q", got)
 	}
 }
+
+func TestAndroidModelSortsByColumn(t *testing.T) {
+	old := time.Unix(1_700_000_000, 0)
+	mid := old.Add(time.Hour)
+	neu := old.Add(2 * time.Hour)
+	fs := adbfs.NewMem(adbfs.Device{Serial: "pixel", State: "device", Model: "Pixel 7"})
+	fs.PutDir("/sdcard/DCIM", mid, mid)
+	fs.PutFile("/sdcard/note.txt", []byte("n"), neu, neu)
+	fs.PutFile("/sdcard/big.bin", make([]byte, 2048), old, old)
+
+	var m AndroidModel
+	m.SetClient(fs)
+	m.RefreshDevices()
+	waitAndroid(t, &m)
+
+	names := func() []string {
+		var out []string
+		for _, r := range m.Rows() {
+			out = append(out, r.Entry.Name)
+		}
+		return out
+	}
+
+	if got := names(); len(got) != 3 || got[0] != "DCIM" || got[1] != "big.bin" || got[2] != "note.txt" {
+		t.Fatalf("default name asc = %v", got)
+	}
+
+	m.ToggleSort(androidSortName)
+	if !m.SortDesc() || m.SortCol() != androidSortName {
+		t.Fatalf("name toggle desc col=%d desc=%v", m.SortCol(), m.SortDesc())
+	}
+	if got := names(); got[0] != "DCIM" || got[1] != "note.txt" || got[2] != "big.bin" {
+		t.Fatalf("name desc = %v", got)
+	}
+
+	m.ToggleSort(androidSortSize)
+	if m.SortDesc() || m.SortCol() != androidSortSize {
+		t.Fatalf("size asc col=%d desc=%v", m.SortCol(), m.SortDesc())
+	}
+	if got := names(); got[0] != "DCIM" || got[1] != "note.txt" || got[2] != "big.bin" {
+		t.Fatalf("size asc = %v", got)
+	}
+
+	m.ToggleSort(androidSortSize)
+	if got := names(); got[0] != "big.bin" || got[1] != "note.txt" || got[2] != "DCIM" {
+		t.Fatalf("size desc = %v", got)
+	}
+
+	m.ToggleSort(androidSortMod)
+	if got := names(); got[0] != "big.bin" || got[1] != "DCIM" || got[2] != "note.txt" {
+		t.Fatalf("mod asc = %v", got)
+	}
+	m.ToggleSort(androidSortMod)
+	if got := names(); got[0] != "note.txt" || got[1] != "DCIM" || got[2] != "big.bin" {
+		t.Fatalf("mod desc = %v", got)
+	}
+
+	m.ToggleSort(0)
+	if m.SortCol() != androidSortMod || !m.SortDesc() {
+		t.Fatal("invalid column should be ignored")
+	}
+}

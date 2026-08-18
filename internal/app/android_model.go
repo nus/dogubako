@@ -59,6 +59,9 @@ type AndroidModel struct {
 
 	status statusMsg
 
+	sortCol  int
+	sortDesc bool
+
 	pendingDevices <-chan devicesResult
 	pendingList    <-chan listResult
 	pendingCopy    <-chan copyResult
@@ -157,8 +160,32 @@ func (m *AndroidModel) Rows() []AndroidTreeRow {
 	return rows
 }
 
+func (m *AndroidModel) SortCol() int {
+	if m.sortCol == 0 {
+		return androidSortName
+	}
+	return m.sortCol
+}
+
+func (m *AndroidModel) SortDesc() bool { return m.sortDesc }
+
+func (m *AndroidModel) ToggleSort(col int) {
+	if col != androidSortName && col != androidSortSize && col != androidSortMod {
+		return
+	}
+	if m.SortCol() == col {
+		m.sortDesc = !m.sortDesc
+	} else {
+		m.sortCol = col
+		m.sortDesc = false
+	}
+	m.generation++
+}
+
 func (m *AndroidModel) appendRows(dir string, depth int, rows *[]AndroidTreeRow) {
-	for _, e := range m.children[dir] {
+	ents := append([]adbfs.Entry(nil), m.children[dir]...)
+	sortAndroidEntries(ents, m.SortCol(), m.sortDesc)
+	for _, e := range ents {
 		expanded := e.IsDir && m.expanded[e.Path]
 		*rows = append(*rows, AndroidTreeRow{Entry: e, Depth: depth, Expanded: expanded})
 		if expanded {
