@@ -68,7 +68,6 @@ const (
 	AndroidColName     Key = "android.col_name"
 	AndroidColSize     Key = "android.col_size"
 	AndroidColModified Key = "android.col_modified"
-	AndroidColCreated  Key = "android.col_created"
 	AndroidNoDevices   Key = "android.no_devices"
 	AndroidHint        Key = "android.hint"
 	DialogOpenDir      Key = "dialog.open_dir"
@@ -182,7 +181,6 @@ var catalogs = map[Lang]map[Key]string{
 		AndroidColName:                 "名前",
 		AndroidColSize:                 "サイズ",
 		AndroidColModified:             "更新日時",
-		AndroidColCreated:              "作成日時",
 		AndroidNoDevices:               "接続中のデバイスはありません",
 		AndroidHint:                    "ADB プロトコルで端末のファイルを閲覧・コピーします（adb コマンドは使いません）。",
 		DialogOpenDir:                  "保存先フォルダ",
@@ -292,7 +290,6 @@ var catalogs = map[Lang]map[Key]string{
 		AndroidColName:                 "Name",
 		AndroidColSize:                 "Size",
 		AndroidColModified:             "Modified",
-		AndroidColCreated:              "Created",
 		AndroidNoDevices:               "No devices connected",
 		AndroidHint:                    "Browse and copy device files over the ADB protocol (the adb command is not used).",
 		DialogOpenDir:                  "Destination Folder",
