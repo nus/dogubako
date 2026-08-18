@@ -22,6 +22,15 @@ func TestDarwinCompilesHiraginoLoader(t *testing.T) {
 	if !containsFile(linux, "embed_linux.go") {
 		t.Fatalf("linux files = %q, want embed_linux.go", linux)
 	}
+	if !containsFile(darwin, "emoji_darwin.go") {
+		t.Fatalf("darwin files = %q, want emoji_darwin.go", darwin)
+	}
+	if containsFile(linux, "emoji_darwin.go") {
+		t.Fatalf("linux files unexpectedly include emoji_darwin.go: %q", linux)
+	}
+	if !containsFile(linux, "emoji_linux.go") {
+		t.Fatalf("linux files = %q, want emoji_linux.go", linux)
+	}
 }
 
 func listGoFiles(t *testing.T, root, goos, pkg string) []string {

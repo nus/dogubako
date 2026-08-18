@@ -38,6 +38,14 @@ func kdialogSaveArgs(title, suggested string, filter *FileFilter) (string, []str
 	return "kdialog", args
 }
 
+func zenityDirArgs(title string) (string, []string) {
+	return "zenity", []string{"--file-selection", "--directory", "--title=" + title}
+}
+
+func kdialogDirArgs(title string) (string, []string) {
+	return "kdialog", []string{"--getexistingdirectory", ".", "--title", title}
+}
+
 func zenityFilter(filter *FileFilter) string {
 	if filter == nil || len(filter.Extensions) == 0 {
 		return "All files | *"

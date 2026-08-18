@@ -31,12 +31,15 @@ type Root struct {
 	sidebar        Sidebar
 	imageTool      ImageTool
 	screenshotTool ScreenshotTool
+	androidTool    AndroidTool
 
 	model Model
 
 	pendingOpen           <-chan dialog.FileResult
 	pendingSave           <-chan dialog.FileResult
 	pendingScreenshotSave <-chan dialog.FileResult
+	pendingAndroidPull    <-chan dialog.FileResult
+	pendingAndroidPush    <-chan dialog.FileResult
 	pendingCapture        <-chan capture.Result
 	captureCancel         context.CancelFunc
 	captureHidden         bool
@@ -58,14 +61,18 @@ func (r *Root) WriteStateKey(context *guigui.Context, w *guigui.StateKeyWriter) 
 	w.WriteString(string(r.model.Lang()))
 	w.WriteUint64(r.model.Image().Generation())
 	w.WriteUint64(r.model.Screenshot().Generation())
+	w.WriteUint64(r.model.Android().Generation())
 	w.WriteBool(r.model.Screenshot().HasImage())
 	w.WriteBool(r.pendingCapture != nil)
+	w.WriteBool(r.model.Android().Busy())
 }
 
 func (r *Root) contentWidget() guigui.Widget {
 	switch r.model.Mode() {
 	case ToolScreenshot:
 		return &r.screenshotTool
+	case ToolAndroid:
+		return &r.androidTool
 	default:
 		return &r.imageTool
 	}
@@ -107,6 +114,21 @@ func (r *Root) Build(context *guigui.Context, adder *guigui.ChildAdder) error {
 	r.screenshotTool.OnShowFolder(func(context *guigui.Context) {
 		r.showScreenshotFolder()
 	})
+	r.androidTool.OnRefresh(func(context *guigui.Context) {
+		r.model.Android().Reload()
+	})
+	r.androidTool.OnUp(func(context *guigui.Context) {
+		r.model.Android().GoUp()
+	})
+	r.androidTool.OnPull(func(context *guigui.Context) {
+		r.startAndroidPull()
+	})
+	r.androidTool.OnPushFile(func(context *guigui.Context) {
+		r.startAndroidPush(false)
+	})
+	r.androidTool.OnPushFolder(func(context *guigui.Context) {
+		r.startAndroidPush(true)
+	})
 	return nil
 }
 
@@ -133,6 +155,7 @@ func (r *Root) Layout(context *guigui.Context, widgetBounds *guigui.WidgetBounds
 func (r *Root) Tick(context *guigui.Context, widgetBounds *guigui.WidgetBounds) error {
 	r.drainDialogs()
 	r.drainCapture()
+	r.model.Android().Drain()
 	if files := ebiten.DroppedFiles(); files != nil && r.model.Mode() == ToolImage {
 		_ = r.model.Image().LoadDropped(files)
 	}
@@ -153,6 +176,8 @@ func (r *Root) HandleButtonInput(context *guigui.Context, widgetBounds *guigui.W
 			r.copyScreenshot()
 			return guigui.HandleInputByWidget(r)
 		}
+	case ToolAndroid:
+		return guigui.HandleInputResult{}
 	default:
 		switch {
 		case inpututil.IsKeyJustPressed(ebiten.KeyO):
@@ -263,6 +288,34 @@ func (r *Root) drainDialogs() {
 				break
 			}
 			_ = r.model.Screenshot().SavePath(res.Path)
+		default:
+		}
+	}
+	if r.pendingAndroidPull != nil {
+		select {
+		case res := <-r.pendingAndroidPull:
+			r.pendingAndroidPull = nil
+			if res.Cancelled || res.Err != nil {
+				if res.Err != nil {
+					r.setAndroidDialogStatus(res.Err)
+				}
+				break
+			}
+			r.model.Android().StartPull(res.Path)
+		default:
+		}
+	}
+	if r.pendingAndroidPush != nil {
+		select {
+		case res := <-r.pendingAndroidPush:
+			r.pendingAndroidPush = nil
+			if res.Cancelled || res.Err != nil {
+				if res.Err != nil {
+					r.setAndroidDialogStatus(res.Err)
+				}
+				break
+			}
+			r.model.Android().StartPush(res.Path)
 		default:
 		}
 	}
@@ -384,6 +437,43 @@ func (r *Root) showScreenshotFolder() {
 	if err := userdir.OpenInFileManager(dir); err != nil {
 		r.model.Screenshot().SetStatus(i18n.StatusFolderOpenFailed, err)
 	}
+}
+
+func (r *Root) startAndroidPull() {
+	if r.pendingAndroidPull != nil || r.model.Android().Busy() {
+		return
+	}
+	e, ok := r.model.Android().SelectedEntry()
+	if !ok {
+		r.model.Android().SetStatus(i18n.StatusAdbNoSelection)
+		return
+	}
+	lang := r.model.Lang()
+	if e.IsDir {
+		r.pendingAndroidPull = dialog.OpenDirectoryAsync(i18n.T(lang, i18n.DialogOpenDir))
+		return
+	}
+	r.pendingAndroidPull = dialog.SaveFileAsync(i18n.T(lang, i18n.DialogSaveAny), e.Name, nil)
+}
+
+func (r *Root) startAndroidPush(folder bool) {
+	if r.pendingAndroidPush != nil || r.model.Android().Busy() {
+		return
+	}
+	lang := r.model.Lang()
+	if folder {
+		r.pendingAndroidPush = dialog.OpenDirectoryAsync(i18n.T(lang, i18n.DialogOpenFolder))
+		return
+	}
+	r.pendingAndroidPush = dialog.OpenFileAsync(i18n.T(lang, i18n.DialogOpenAny), nil)
+}
+
+func (r *Root) setAndroidDialogStatus(err error) {
+	if errors.Is(err, dialog.ErrNoFileDialog) {
+		r.model.Android().SetStatus(i18n.StatusNoFileDialog)
+		return
+	}
+	r.model.Android().SetStatus(i18n.StatusSaveDialogFailed, err)
 }
 
 func (r *Root) setScreenshotDialogStatus(err error) {
