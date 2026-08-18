@@ -563,9 +563,9 @@ func (r *androidFileRow) Set(row AndroidTreeRow, onExpand func(), tool *AndroidT
 	if row.Entry.IsDir {
 		r.icon.SetValue(androidFolderIcon)
 		if row.Expanded {
-			r.expand.SetText("▾")
+			r.expand.SetText(androidExpandOpen)
 		} else {
-			r.expand.SetText("▸")
+			r.expand.SetText(androidExpandClosed)
 		}
 		r.expand.OnDown(func(context *guigui.Context) {
 			if onExpand != nil {
