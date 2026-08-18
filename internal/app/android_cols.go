@@ -14,7 +14,7 @@ const (
 	androidColDragMod  = 2
 )
 
-func androidColGap(u int) int { return u / 8 }
+func androidColGap(u int) int { return u / 4 }
 
 func androidExpandColWidth(u int) int { return u }
 

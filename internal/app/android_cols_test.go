@@ -6,6 +6,14 @@ import (
 	"testing"
 )
 
+func TestAndroidColGap(t *testing.T) {
+	u := 24
+	// FontSize is u/2, so half a CJK em is u/4.
+	if got := androidColGap(u); got != u/4 {
+		t.Fatalf("gap = %d", got)
+	}
+}
+
 func TestClampAndroidColWidths(t *testing.T) {
 	u := 24
 	size, mod := clampAndroidColWidths(1, 1, u)
