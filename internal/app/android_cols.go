@@ -3,8 +3,8 @@ package app
 import "image"
 
 const (
-	androidFolderIcon = "🗂️"
-	androidFileIcon   = "📄"
+	androidFolderIcon = "\U0001F5C2" // 🗂 without VS16 (U+FE0F), which otherwise renders as tofu
+	androidFileIcon   = "\U0001F4C4" // 📄
 
 	androidColDragSize = 1
 	androidColDragMod  = 2

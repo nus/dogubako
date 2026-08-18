@@ -2,6 +2,7 @@ package app
 
 import (
 	"image"
+	"strings"
 	"testing"
 )
 
@@ -87,5 +88,17 @@ func TestAndroidSortMark(t *testing.T) {
 	}
 	if got := androidSortMark(androidSortMod, androidSortMod, true); got != " ▼" {
 		t.Fatalf("desc = %q", got)
+	}
+}
+
+func TestAndroidFileIconsHaveNoVariationSelector(t *testing.T) {
+	if strings.ContainsRune(androidFolderIcon, '\uFE0F') || strings.ContainsRune(androidFileIcon, '\uFE0F') {
+		t.Fatal("emoji variation selector would show as a missing-glyph box")
+	}
+	if androidFolderIcon != "\U0001F5C2" {
+		t.Fatalf("folder = %q", androidFolderIcon)
+	}
+	if androidFileIcon != "\U0001F4C4" {
+		t.Fatalf("file = %q", androidFileIcon)
 	}
 }
