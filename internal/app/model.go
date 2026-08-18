@@ -21,6 +21,7 @@ type ToolID string
 const (
 	ToolImage      ToolID = "image"
 	ToolScreenshot ToolID = "screenshot"
+	ToolAndroid    ToolID = "android"
 )
 
 // Tool is a sidebar entry.
@@ -32,6 +33,7 @@ type Tool struct {
 var Tools = []Tool{
 	{ID: ToolImage},
 	{ID: ToolScreenshot},
+	{ID: ToolAndroid},
 }
 
 // Title returns the localized sidebar label for this tool.
@@ -41,6 +43,8 @@ func (t Tool) Title(lang i18n.Lang) string {
 		return i18n.T(lang, i18n.ToolImage)
 	case ToolScreenshot:
 		return i18n.T(lang, i18n.ToolScreenshot)
+	case ToolAndroid:
+		return i18n.T(lang, i18n.ToolAndroid)
 	default:
 		return string(t.ID)
 	}
@@ -52,6 +56,7 @@ type Model struct {
 	mode       ToolID
 	image      ImageModel
 	screenshot ScreenshotModel
+	android    AndroidModel
 }
 
 func (m *Model) Lang() i18n.Lang {
@@ -87,6 +92,10 @@ func (m *Model) Image() *ImageModel {
 
 func (m *Model) Screenshot() *ScreenshotModel {
 	return &m.screenshot
+}
+
+func (m *Model) Android() *AndroidModel {
+	return &m.android
 }
 
 // ImageModel holds the first tool: resize, crop, and JPEG/PNG conversion.
