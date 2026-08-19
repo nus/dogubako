@@ -13,7 +13,9 @@ func registerEmoji() {
 	if err != nil || src == nil || path == "" {
 		return
 	}
-	registerLoaded("emoji", "Emoji", path)
+	if err := registerLoaded("emoji", "Emoji", path); err != nil {
+		logFontErr("emoji", err)
+	}
 }
 
 func pickEmojiFace(sources []*text.FontSource) *text.FontSource {

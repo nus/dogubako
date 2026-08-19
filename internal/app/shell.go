@@ -94,7 +94,8 @@ type Shell struct {
 
 // Run starts the desktop application.
 func Run() error {
-	cjkembed.Register()
+	cjkOK := cjkembed.Register()
+	lang := sessionLang(cjkOK, i18n.Load())
 
 	theme := material3.New(widget.Hex(0x2F81FF))
 	s := &Shell{
@@ -116,13 +117,13 @@ func Run() error {
 		fmtSig:    state.NewSignal(string(imageproc.FormatPNG)),
 		modeSig:   state.NewSignal(string(ToolImage)),
 		shotMode:  state.NewSignal(string(capture.ModeFull)),
-		langSig:   state.NewSignal(string(i18n.Load())),
+		langSig:   state.NewSignal(string(lang)),
 		toolSel:   state.NewSignal(0),
 		shotSel:   state.NewSignal(-1),
 		devSel:    state.NewSignal(-1),
 		adbSel:    state.NewSignal(-1),
 	}
-	s.model.SetLang(i18n.Lang(s.langSig.Get()))
+	s.model.applyLang(lang, false)
 
 	cfg := gogpu.DefaultConfig().
 		WithTitle(i18n.T(s.model.Lang(), i18n.AppTitle)).

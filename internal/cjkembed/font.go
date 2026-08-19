@@ -140,13 +140,10 @@ func openHiragino(paths []string) (*text.FontSource, string, error) {
 	return openCJKFont(paths)
 }
 
-func registerLoaded(kind, family, path string) {
+func registerLoaded(_ string, family, path string) error {
 	data, err := os.ReadFile(path)
 	if err != nil {
-		logFontErr(kind, err)
-		return
+		return err
 	}
-	if err := loadFamily(family, data); err != nil {
-		logFontErr(kind, err)
-	}
+	return loadFamily(family, data)
 }

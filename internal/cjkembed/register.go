@@ -1,34 +1,56 @@
 package cjkembed
 
 import (
+	"fmt"
 	"path/filepath"
 
 	"golang.org/x/text/language"
 )
 
-// FamilyName is the gogpu/ui font family used for CJK text.
-const FamilyName = "CJK"
+const (
+	cjkFamily       = "CJK"
+	hiraginoFontDir = "/System/Library/Fonts"
+)
 
-const hiraginoFontDir = "/System/Library/Fonts"
+// FamilyName is the gogpu/ui font family for Japanese text.
+// Empty when Register did not find a CJK face; widgets then use the default font.
+var FamilyName string
 
-var jaBase = language.MustParseBase("ja")
+var (
+	cjkLoaded   bool
+	cjkPathList = defaultCJKPaths
+	jaBase      = language.MustParseBase("ja")
+)
+
+// Available reports whether a CJK face was registered for this process.
+func Available() bool { return cjkLoaded }
 
 // Register loads system CJK (and emoji, when present) into the gogpu/ui
 // font registry. Call once before creating the widget tree.
-func Register() {
-	registerCJK()
+// It returns whether a CJK face was loaded.
+func Register() bool {
+	cjkLoaded = false
+	FamilyName = ""
+	ok := registerCJK()
 	registerEmoji()
+	return ok
 }
 
-func registerCJK() {
-	src, path, err := openCJKFont(defaultCJKPaths())
+func registerCJK() bool {
+	src, path, err := openCJKFont(cjkPathList())
 	if err != nil || src == nil || path == "" {
-		if err != nil && len(defaultCJKPaths()) > 0 {
-			logFontErr("cjk", err)
+		if err != nil {
+			logFontErr("cjk", fmt.Errorf("%w (using English UI)", err))
 		}
-		return
+		return false
 	}
-	registerLoaded("cjk", FamilyName, path)
+	if err := registerLoaded("cjk", cjkFamily, path); err != nil {
+		logFontErr("cjk", fmt.Errorf("%w (using English UI)", err))
+		return false
+	}
+	FamilyName = cjkFamily
+	cjkLoaded = true
+	return true
 }
 
 func japanesePrimary(locales []language.Tag) bool {

@@ -107,3 +107,50 @@ func TestJapanesePrimary(t *testing.T) {
 		t.Fatal("en first")
 	}
 }
+
+func restoreCJKRegister(t *testing.T) {
+	t.Helper()
+	origList := cjkPathList
+	origFamily := FamilyName
+	origLoaded := cjkLoaded
+	t.Cleanup(func() {
+		cjkPathList = origList
+		FamilyName = origFamily
+		cjkLoaded = origLoaded
+	})
+}
+
+func TestRegisterMissingCJK(t *testing.T) {
+	restoreCJKRegister(t)
+	cjkPathList = func() []string {
+		return []string{filepath.Join(t.TempDir(), "missing.ttc")}
+	}
+	if Register() {
+		t.Fatal("expected Register to fail")
+	}
+	if Available() {
+		t.Fatal("Available")
+	}
+	if FamilyName != "" {
+		t.Fatalf("FamilyName = %q", FamilyName)
+	}
+}
+
+func TestRegisterLoadsFamily(t *testing.T) {
+	restoreCJKRegister(t)
+	dir := t.TempDir()
+	path := filepath.Join(dir, "GoRegular.ttf")
+	if err := os.WriteFile(path, goregular.TTF, 0o644); err != nil {
+		t.Fatal(err)
+	}
+	cjkPathList = func() []string { return []string{path} }
+	if !Register() {
+		t.Fatal("expected Register to succeed")
+	}
+	if !Available() {
+		t.Fatal("Available")
+	}
+	if FamilyName != cjkFamily {
+		t.Fatalf("FamilyName = %q", FamilyName)
+	}
+}

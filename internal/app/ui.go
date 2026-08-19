@@ -41,6 +41,9 @@ func (s *Shell) buildSidebar() widget.Widget {
 	})).FontSize(14).Bold().Align(primitives.TextAlignCenter)
 
 	setLang := func(lang i18n.Lang) {
+		if lang == i18n.JA && !cjkembed.Available() {
+			return
+		}
 		s.model.SetLang(lang)
 		if s.gpu != nil {
 			s.gpu.SetTitle(i18n.T(s.model.Lang(), i18n.AppTitle))
@@ -64,9 +67,15 @@ func (s *Shell) buildSidebar() widget.Widget {
 
 	lang := s.segBarFill(
 		segItem{
-			label:    func() string { return "日本語" },
+			label: func() string {
+				if cjkembed.Available() {
+					return "日本語"
+				}
+				return "Japanese"
+			},
 			selected: func() bool { return s.model.Lang() == i18n.JA },
 			onClick:  func() { setLang(i18n.JA) },
+			disabled: func() bool { return !cjkembed.Available() },
 		},
 		segItem{
 			label:    func() string { return "English" },
