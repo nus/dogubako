@@ -94,13 +94,20 @@ func (h *modeHost) active() widget.Widget {
 func (h *modeHost) Layout(ctx widget.Context, cons geometry.Constraints) geometry.Size {
 	size := cons.BiggestFinite(windowWidth, windowHeight)
 	h.SetBounds(geometry.FromPointSize(h.Position(), size))
+	active := h.active()
 	for _, child := range []widget.Widget{h.image, h.screenshot, h.android} {
 		if child == nil {
 			continue
 		}
-		sz := widget.LayoutChild(child, ctx, geometry.Tight(size))
+		if child == active {
+			sz := widget.LayoutChild(child, ctx, geometry.Tight(size))
+			if b, ok := child.(boundsSetter); ok {
+				b.SetBounds(geometry.FromPointSize(geometry.Pt(0, 0), sz))
+			}
+			continue
+		}
 		if b, ok := child.(boundsSetter); ok {
-			b.SetBounds(geometry.FromPointSize(geometry.Pt(0, 0), sz))
+			b.SetBounds(geometry.Rect{})
 		}
 	}
 	return size

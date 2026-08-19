@@ -36,7 +36,16 @@ const (
 	windowHeight = 760
 	windowMinW   = 800
 	windowMinH   = 560
-	fieldWidth   = 88
+
+	// unit matches guigui's UnitSize at 1x (~24px). Sidebar was 8*u,
+	// number fields 5*u, screenshot file list 16*u, device list 4*u.
+	unit            float32 = 24
+	sidebarWidth            = 8 * unit
+	fieldWidth              = 5 * unit
+	screenshotListW         = 16 * unit
+	deviceListH             = 4 * unit
+	formRowH        float32 = 32
+	fieldH          float32 = 28
 )
 
 // Shell is the application controller: model, window, and widget tree.
@@ -125,6 +134,9 @@ func Run() error {
 	if p := os.Getenv("DOGUBAKO_OPEN"); p != "" {
 		_ = s.model.Image().LoadPath(p)
 		s.syncFields()
+	}
+	if t := os.Getenv("DOGUBAKO_TOOL"); t != "" {
+		s.model.SetMode(ToolID(t))
 	}
 	gpuApp := gogpu.NewApp(cfg)
 	uiApp := uiapp.New(

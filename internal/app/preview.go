@@ -9,6 +9,7 @@ import (
 	"github.com/gogpu/ui/state"
 	"github.com/gogpu/ui/widget"
 
+	"github.com/nus/dogubako/internal/cjkembed"
 	"github.com/nus/dogubako/internal/imageproc"
 )
 
@@ -152,9 +153,10 @@ func (p *sourcePreview) Unmount() {}
 type destPreview struct {
 	widget.WidgetBase
 
-	rev    state.ReadonlySignal[uint64]
-	source image.Image
-	image  image.Image
+	rev       state.ReadonlySignal[uint64]
+	source    image.Image
+	image     image.Image
+	emptyHint func() string
 }
 
 func newDestPreview(rev state.ReadonlySignal[uint64]) *destPreview {
@@ -176,6 +178,10 @@ func (p *destPreview) SetSource(img image.Image) {
 	p.SetNeedsRedraw(true)
 }
 
+func (p *destPreview) SetEmptyHint(f func() string) {
+	p.emptyHint = f
+}
+
 func (p *destPreview) HasImage() bool { return p.source != nil || p.image != nil }
 
 func (p *destPreview) Layout(_ widget.Context, cons geometry.Constraints) geometry.Size {
@@ -195,10 +201,28 @@ func (p *destPreview) Draw(_ widget.Context, canvas widget.Canvas) {
 		img = previewImage(p.source)
 		p.image = img
 	}
-	if img == nil {
+	if img != nil {
+		drawFittedImage(canvas, img, fittedRect(toImageRect(b), img.Bounds().Size()))
 		return
 	}
-	drawFittedImage(canvas, img, fittedRect(toImageRect(b), img.Bounds().Size()))
+	if p.emptyHint == nil {
+		return
+	}
+	hint := p.emptyHint()
+	if hint == "" {
+		return
+	}
+	style := widget.TextStyle{
+		FontFamily: cjkembed.FamilyName,
+		FontSize:   13,
+		Color:      widget.RGBA8(120, 120, 120, 255),
+		Align:      widget.TextAlignCenter,
+	}
+	if sd, ok := canvas.(widget.StyledTextDrawer); ok {
+		sd.DrawStyledText(hint, b, style)
+	} else {
+		canvas.DrawText(hint, b, 13, style.Color, false, widget.TextAlignCenter)
+	}
 }
 
 func (p *destPreview) Event(_ widget.Context, _ event.Event) bool { return false }

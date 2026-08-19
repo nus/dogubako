@@ -7,9 +7,7 @@ import (
 	"github.com/gogpu/ui/core/checkbox"
 	"github.com/gogpu/ui/core/datatable"
 	"github.com/gogpu/ui/core/listview"
-	"github.com/gogpu/ui/core/radio"
 	"github.com/gogpu/ui/core/slider"
-	"github.com/gogpu/ui/core/splitview"
 	"github.com/gogpu/ui/core/textfield"
 	"github.com/gogpu/ui/primitives"
 	"github.com/gogpu/ui/state"
@@ -28,48 +26,19 @@ func (s *Shell) buildRoot() widget.Widget {
 }
 
 func (s *Shell) buildShell() widget.Widget {
-	return splitview.New(
-		splitview.First(s.buildSidebar()),
-		splitview.Second(newModeHost(s)),
-		splitview.OrientationOpt(splitview.Horizontal),
-		splitview.FixedFirst(220),
-		splitview.MinFirst(180),
-		splitview.MinSecond(400),
-		splitview.PainterOpt(material3.SplitViewPainter{Theme: s.theme}),
-	)
+	side := primitives.Box(s.buildSidebar()).
+		Width(sidebarWidth).
+		MinWidthValue(sidebarWidth).
+		MaxWidthValue(sidebarWidth).
+		Background(widget.RGBA8(245, 247, 250, 255)).
+		BorderStyle(1, widget.RGBA8(220, 224, 230, 255))
+	return primitives.HBox(side, primitives.Expanded(newModeHost(s)))
 }
 
 func (s *Shell) buildSidebar() widget.Widget {
 	title := s.txt("").ContentSignal(s.computed(func() string {
 		return i18n.T(s.model.Lang(), i18n.AppTitle)
-	})).FontSize(18).Bold().Align(primitives.TextAlignCenter)
-
-	tools := listview.New(
-		listview.ItemCountFn(func() int { return len(Tools) }),
-		listview.FixedItemHeight(40),
-		listview.SelectionModeOpt(listview.SelectionSingle),
-		listview.SelectedIndexSignal(s.toolSel),
-		listview.PainterOpt(material3.ListViewPainter{Theme: s.theme}),
-		listview.BuildItem(func(ctx listview.ItemContext) widget.Widget {
-			tool := Tools[ctx.Index]
-			color := widget.RGBA8(33, 33, 33, 255)
-			if ctx.Selected {
-				color = widget.RGBA8(47, 129, 255, 255)
-			}
-			t := s.txt(tool.Title(s.model.Lang())).FontSize(14).Color(color)
-			if ctx.Selected {
-				t = t.Bold()
-			}
-			return primitives.Box(t).PaddingXY(12, 8)
-		}),
-		listview.OnItemClick(func(index int) {
-			if index < 0 || index >= len(Tools) {
-				return
-			}
-			s.model.SetMode(Tools[index].ID)
-			s.bump()
-		}),
-	)
+	})).FontSize(14).Bold().Align(primitives.TextAlignCenter)
 
 	setLang := func(lang i18n.Lang) {
 		s.model.SetLang(lang)
@@ -78,24 +47,51 @@ func (s *Shell) buildSidebar() widget.Widget {
 		}
 		s.reloadUI()
 	}
-	lang := primitives.HBox(
-		s.btnFn(func() string { return "日本語" }, func() { setLang(i18n.JA) }, func() bool { return s.model.Lang() == i18n.JA }, nil),
-		s.btnFn(func() string { return "English" }, func() { setLang(i18n.EN) }, func() bool { return s.model.Lang() == i18n.EN }, nil),
-	).Gap(6)
+
+	items := make([]widget.Widget, 0, len(Tools))
+	for i, tool := range Tools {
+		i, tool := i, tool
+		items = append(items, s.navItem(
+			func() string { return tool.Title(s.model.Lang()) },
+			func() bool { return s.model.Mode() == tool.ID },
+			func() {
+				s.model.SetMode(tool.ID)
+				s.toolSel.Set(i)
+				s.bump()
+			},
+		))
+	}
+
+	lang := s.segBar(
+		segItem{
+			label:    func() string { return "日本語" },
+			selected: func() bool { return s.model.Lang() == i18n.JA },
+			onClick:  func() { setLang(i18n.JA) },
+		},
+		segItem{
+			label:    func() string { return "English" },
+			selected: func() bool { return s.model.Lang() == i18n.EN },
+			onClick:  func() { setLang(i18n.EN) },
+		},
+	)
 
 	return primitives.Box(
-		title,
-		primitives.Expanded(primitives.Box(tools).PaddingXY(4, 4)),
-		primitives.Box(lang).PaddingXY(8, 8),
-	).
-		Padding(8).
-		Gap(8).
-		Background(widget.RGBA8(245, 247, 250, 255))
+		primitives.Box(title).Height(unit),
+		primitives.Expanded(primitives.VBox(items...).Gap(2).PaddingXY(4, 4)),
+		lang,
+	).Padding(6).Gap(6)
 }
 
 func (s *Shell) buildImageTool() widget.Widget {
 	before := newSourcePreview(s.rev)
 	after := newDestPreview(s.rev)
+	after.SetEmptyHint(func() string {
+		img := s.model.Image()
+		if out, err := img.Processed(); err == nil && out != nil {
+			return ""
+		}
+		return i18n.T(s.model.Lang(), i18n.AfterEmpty)
+	})
 	before.OnCropChanged(func(rect image.Rectangle) {
 		s.model.Image().SetCrop(rect)
 		s.bump()
@@ -121,7 +117,7 @@ func (s *Shell) buildImageTool() widget.Widget {
 		return i18n.T(s.model.Lang(), i18n.InputHint, ShortcutLabel("V"))
 	})).FontSize(13).Color(widget.RGBA8(90, 90, 90, 255))
 
-	toolbar := primitives.HBox(open, paste, primitives.Expanded(hint)).Gap(8)
+	toolbar := primitives.HBox(open, paste, primitives.Expanded(hint)).Gap(8).CrossAlign(primitives.CrossAxisCenter)
 
 	beforeLabel := s.txt("").ContentSignal(s.computed(func() string {
 		img := s.model.Image()
@@ -140,25 +136,17 @@ func (s *Shell) buildImageTool() widget.Widget {
 		return i18n.T(s.model.Lang(), i18n.After)
 	})).Bold().FontSize(14)
 
-	afterEmpty := s.txt("").ContentSignal(s.computed(func() string {
-		img := s.model.Image()
-		if out, err := img.Processed(); err == nil && out != nil {
-			return ""
-		}
-		return i18n.T(s.model.Lang(), i18n.AfterEmpty)
-	})).FontSize(13).Color(widget.RGBA8(120, 120, 120, 255)).Align(primitives.TextAlignCenter)
-
 	previews := primitives.HBox(
 		primitives.Expanded(primitives.VBox(beforeLabel, primitives.Expanded(before)).Gap(6)),
-		primitives.Expanded(primitives.VBox(afterLabel, primitives.Expanded(after), afterEmpty).Gap(6)),
-	).Gap(12)
+		primitives.Expanded(primitives.VBox(afterLabel, primitives.Expanded(after)).Gap(6)),
+	).Gap(unit)
 
 	save := s.btn(i18n.SaveFile, func() { s.startSave() }, true, func() bool { return !s.model.Image().HasSource() })
 	copyBtn := s.btn(i18n.CopyClipboard, func() { s.copyClipboard() }, false, func() bool { return !s.model.Image().HasSource() })
 	outHint := s.txt("").ContentSignal(s.computed(func() string {
 		return i18n.T(s.model.Lang(), i18n.OutputHint)
 	})).FontSize(13).Color(widget.RGBA8(90, 90, 90, 255))
-	output := primitives.HBox(save, copyBtn, primitives.Expanded(outHint)).Gap(8)
+	output := primitives.HBox(save, copyBtn, primitives.Expanded(outHint)).Gap(8).CrossAlign(primitives.CrossAxisCenter)
 
 	status := s.txt("").ContentSignal(s.computed(func() string {
 		return s.model.Image().StatusText(s.model.Lang())
@@ -170,21 +158,20 @@ func (s *Shell) buildImageTool() widget.Widget {
 		s.buildImageForms(),
 		output,
 		status,
-	).Padding(12).Gap(10)
+	).Padding(12).Gap(12)
 }
 
 func (s *Shell) buildImageForms() widget.Widget {
-	m3 := s.theme
 	has := func() bool { return s.model.Image().HasSource() }
 	cropOn := func() bool { return s.model.Image().HasSource() && s.model.Image().CropEnabled() }
 
 	scale := s.intField(s.scaleSig, 1, 1000, func(v int) { s.model.Image().SetScalePercent(v) }, has)
 	width := s.intField(s.widthSig, 1, imageproc.MaxDimension, func(v int) { s.model.Image().SetWidth(v) }, has)
 	height := s.intField(s.heightSig, 1, imageproc.MaxDimension, func(v int) { s.model.Image().SetHeight(v) }, has)
-	keep := s.check(i18n.KeepAspect, s.keepAsp, func() bool { return !has() }, func(v bool) { s.model.Image().SetKeepAspect(v); s.bump() })
+	keep := s.toggle(s.keepAsp, func() bool { return !has() }, func(v bool) { s.model.Image().SetKeepAspect(v); s.bump() })
 	resetSize := s.btn(i18n.ResetSize, func() { s.model.Image().ResetSize(); s.bump() }, false, func() bool { return !has() })
 
-	cropEn := s.check(i18n.CropEnable, s.cropOn, func() bool { return !has() }, func(v bool) { s.model.Image().SetCropEnabled(v); s.bump() })
+	cropEn := s.toggle(s.cropOn, func() bool { return !has() }, func(v bool) { s.model.Image().SetCropEnabled(v); s.bump() })
 	cropX := s.intField(s.cropXSig, 0, imageproc.MaxDimension, func(v int) { s.model.Image().SetCropX(v) }, cropOn)
 	cropY := s.intField(s.cropYSig, 0, imageproc.MaxDimension, func(v int) { s.model.Image().SetCropY(v) }, cropOn)
 	cropW := s.intField(s.cropWSig, 1, imageproc.MaxDimension, func(v int) { s.model.Image().SetCropWidth(v) }, cropOn)
@@ -197,19 +184,25 @@ func (s *Shell) buildImageForms() widget.Widget {
 		return !has() || s.model.Image().RotateDegrees() == 0
 	})
 
-	format := radio.NewGroup(
-		radio.Items(
-			radio.ItemDef{Value: string(imageproc.FormatPNG), Label: "PNG"},
-			radio.ItemDef{Value: string(imageproc.FormatJPEG), Label: "JPEG"},
-		),
-		radio.SelectedSignal(s.fmtSig),
-		radio.DirectionOpt(radio.Horizontal),
-		radio.GroupDisabledFn(func() bool { return !has() }),
-		radio.GroupPainter(material3.RadioPainter{Theme: m3}),
-		radio.OnChange(func(v string) {
-			s.model.Image().SetFormat(imageproc.Format(v))
-			s.bump()
-		}),
+	format := s.segBar(
+		segItem{
+			label:    func() string { return "PNG" },
+			selected: func() bool { return s.model.Image().Format() == imageproc.FormatPNG },
+			disabled: func() bool { return !has() },
+			onClick: func() {
+				s.model.Image().SetFormat(imageproc.FormatPNG)
+				s.bump()
+			},
+		},
+		segItem{
+			label:    func() string { return "JPEG" },
+			selected: func() bool { return s.model.Image().Format() == imageproc.FormatJPEG },
+			disabled: func() bool { return !has() },
+			onClick: func() {
+				s.model.Image().SetFormat(imageproc.FormatJPEG)
+				s.bump()
+			},
+		},
 	)
 	qual := slider.New(
 		slider.Min(1), slider.Max(100), slider.Step(1),
@@ -217,52 +210,39 @@ func (s *Shell) buildImageForms() widget.Widget {
 		slider.DisabledFn(func() bool {
 			return !has() || s.model.Image().Format() != imageproc.FormatJPEG
 		}),
-		slider.PainterOpt(material3.SliderPainter{Theme: m3}),
+		slider.PainterOpt(material3.SliderPainter{Theme: s.theme}),
 		slider.OnChange(func(v float32) {
 			s.model.Image().SetJPEGQuality(int(v + 0.5))
 			s.bump()
 		}),
 	)
-	qualLabel := s.txt("").ContentSignal(s.computed(func() string {
-		return i18n.T(s.model.Lang(), i18n.JPEGQuality, s.model.Image().JPEGQuality())
-	})).FontSize(12)
 
-	card := func(title i18n.Key, children ...widget.Widget) widget.Widget {
-		items := []widget.Widget{
-			s.txt("").ContentSignal(s.computed(func() string { return i18n.T(s.model.Lang(), title) })).Bold().FontSize(13),
-		}
-		items = append(items, children...)
-		return primitives.Box(items...).
-			Padding(10).Gap(6).
-			Background(widget.RGBA8(250, 250, 252, 255)).
-			Rounded(8).
-			BorderStyle(1, widget.RGBA8(220, 224, 230, 255))
-	}
-
-	return primitives.HBox(
-		primitives.Expanded(card(i18n.Resize,
-			s.labeled(i18n.ScalePercent, scale),
-			s.labeled(i18n.WidthPx, width),
-			s.labeled(i18n.HeightPx, height),
-			keep, resetSize,
-		)),
-		primitives.Expanded(card(i18n.Crop,
-			cropEn,
-			s.labeled(i18n.CropX, cropX),
-			s.labeled(i18n.CropY, cropY),
-			s.labeled(i18n.Width, cropW),
-			s.labeled(i18n.Height, cropH),
-			resetCrop,
-		)),
-		primitives.Expanded(card(i18n.Rotate,
-			s.labeled(i18n.RotateAngle, angle),
-			rot90, resetRot,
-		)),
-		primitives.Expanded(card(i18n.Format,
-			s.labeled(i18n.OutputFormat, format),
-			qualLabel, qual,
-		)),
-	).Gap(8)
+	return newEqualRow(8,
+		s.formPanel(i18n.Resize,
+			s.formRow(i18n.ScalePercent, scale),
+			s.formRow(i18n.WidthPx, width),
+			s.formRow(i18n.HeightPx, height),
+			s.formRow(i18n.KeepAspect, keep),
+			s.formEnd(resetSize),
+		),
+		s.formPanel(i18n.Crop,
+			s.formRow(i18n.CropEnable, cropEn),
+			s.formRow(i18n.CropX, cropX),
+			s.formRow(i18n.CropY, cropY),
+			s.formRow(i18n.Width, cropW),
+			s.formRow(i18n.Height, cropH),
+			s.formEnd(resetCrop),
+		),
+		s.formPanel(i18n.Rotate,
+			s.formRow(i18n.RotateAngle, angle),
+			s.formEnd(rot90),
+			s.formEnd(resetRot),
+		),
+		s.formPanel(i18n.Format,
+			s.formRow(i18n.OutputFormat, primitives.Box(format).Width(fieldWidth)),
+			s.formSlider(qual),
+		),
+	)
 }
 
 func (s *Shell) buildScreenshotTool() widget.Widget {
@@ -273,13 +253,28 @@ func (s *Shell) buildScreenshotTool() widget.Widget {
 		s.model.Screenshot().SetMode(mode)
 		s.bump()
 	}
-	mode := primitives.HBox(
-		s.btnFn(func() string { return i18n.T(s.model.Lang(), i18n.ScreenshotFull) }, func() { setMode(capture.ModeFull) }, func() bool { return s.model.Screenshot().Mode() == capture.ModeFull }, busy),
-		s.btnFn(func() string { return i18n.T(s.model.Lang(), i18n.ScreenshotWindow) }, func() { setMode(capture.ModeWindow) }, func() bool { return s.model.Screenshot().Mode() == capture.ModeWindow }, busy),
-		s.btnFn(func() string { return i18n.T(s.model.Lang(), i18n.ScreenshotRegion) }, func() { setMode(capture.ModeRegion) }, func() bool { return s.model.Screenshot().Mode() == capture.ModeRegion }, busy),
-	).Gap(6)
+	mode := s.segBar(
+		segItem{
+			label:    func() string { return i18n.T(s.model.Lang(), i18n.ScreenshotFull) },
+			selected: func() bool { return s.model.Screenshot().Mode() == capture.ModeFull },
+			disabled: busy,
+			onClick:  func() { setMode(capture.ModeFull) },
+		},
+		segItem{
+			label:    func() string { return i18n.T(s.model.Lang(), i18n.ScreenshotWindow) },
+			selected: func() bool { return s.model.Screenshot().Mode() == capture.ModeWindow },
+			disabled: busy,
+			onClick:  func() { setMode(capture.ModeWindow) },
+		},
+		segItem{
+			label:    func() string { return i18n.T(s.model.Lang(), i18n.ScreenshotRegion) },
+			selected: func() bool { return s.model.Screenshot().Mode() == capture.ModeRegion },
+			disabled: busy,
+			onClick:  func() { setMode(capture.ModeRegion) },
+		},
+	)
 	delay := s.intField(s.delaySig, 0, maxCaptureDelaySec, func(v int) { s.model.Screenshot().SetDelaySec(v) }, func() bool { return !busy() })
-	hide := s.check(i18n.ScreenshotHideWindow, s.hideWin, busy, func(v bool) { s.model.Screenshot().SetHideWindow(v) })
+	hide := s.toggle(s.hideWin, busy, func(v bool) { s.model.Screenshot().SetHideWindow(v) })
 	cap := s.btnFn(func() string {
 		if s.model.Screenshot().Capturing() {
 			return i18n.T(s.model.Lang(), i18n.ScreenshotCaptureRetry)
@@ -291,10 +286,11 @@ func (s *Shell) buildScreenshotTool() widget.Widget {
 		mode,
 		s.txt("").ContentSignal(s.computed(func() string { return i18n.T(s.model.Lang(), i18n.ScreenshotDelay) })).FontSize(13),
 		delay,
+		s.txt("").ContentSignal(s.computed(func() string { return i18n.T(s.model.Lang(), i18n.ScreenshotHideWindow) })).FontSize(13),
 		hide,
 		primitives.Expanded(primitives.Box()),
 		cap,
-	).Gap(8)
+	).Gap(8).CrossAlign(primitives.CrossAxisCenter)
 
 	listLabel := s.txt("").ContentSignal(s.computed(func() string {
 		return i18n.T(s.model.Lang(), i18n.ScreenshotFiles)
@@ -304,7 +300,7 @@ func (s *Shell) buildScreenshotTool() widget.Widget {
 		listview.FixedItemHeight(48),
 		listview.SelectionModeOpt(listview.SelectionSingle),
 		listview.SelectedIndexSignal(s.shotSel),
-		listview.PainterOpt(material3.ListViewPainter{Theme: m3}),
+		listview.PainterOpt(newQuietListPainter(m3)),
 		listview.DisabledFn(busy),
 		listview.BuildItem(func(ctx listview.ItemContext) widget.Widget {
 			files := s.model.Screenshot().Files()
@@ -320,11 +316,11 @@ func (s *Shell) buildScreenshotTool() widget.Widget {
 				preview := newDestPreview(nil)
 				preview.SetSource(thumb)
 				row = []widget.Widget{
-					primitives.Box(preview).Width(40).Height(40),
+					primitives.Box(preview).Width(48).Height(48),
 					s.txt(f.Name).FontSize(13),
 				}
 			}
-			return primitives.HBox(row...).Gap(8).PaddingXY(8, 4).Height(48)
+			return primitives.HBox(row...).Gap(8).PaddingXY(8, 0).Height(48).CrossAlign(primitives.CrossAxisCenter)
 		}),
 		listview.OnItemClick(func(index int) {
 			files := s.model.Screenshot().Files()
@@ -345,22 +341,27 @@ func (s *Shell) buildScreenshotTool() widget.Widget {
 		return i18n.T(s.model.Lang(), i18n.ScreenshotPreview)
 	})).Bold().FontSize(14)
 	preview := newDestPreview(s.rev)
+	preview.SetEmptyHint(func() string {
+		if s.model.Screenshot().HasImage() {
+			return ""
+		}
+		return i18n.T(s.model.Lang(), i18n.ScreenshotEmpty)
+	})
 	sync := state.NewComputed(func() uint64 {
 		v := s.rev.Get()
 		preview.SetSource(s.model.Screenshot().Image())
 		return v
 	})
 	_ = sync
-	empty := s.txt("").ContentSignal(s.computed(func() string {
-		if s.model.Screenshot().HasImage() {
-			return ""
-		}
-		return i18n.T(s.model.Lang(), i18n.ScreenshotEmpty)
-	})).Align(primitives.TextAlignCenter).Color(widget.RGBA8(120, 120, 120, 255))
+
+	listCol := primitives.Box(
+		listLabel,
+		primitives.Expanded(primitives.Box(files).BorderStyle(1, widget.RGBA8(220, 224, 230, 255))),
+	).Width(screenshotListW).MinWidthValue(screenshotListW).MaxWidthValue(screenshotListW).Gap(6)
 
 	body := primitives.HBox(
-		primitives.Box(listLabel, primitives.Expanded(files)).Width(320).Gap(6),
-		primitives.Expanded(primitives.VBox(previewLabel, primitives.Expanded(preview), empty).Gap(6)),
+		listCol,
+		primitives.Expanded(primitives.VBox(previewLabel, primitives.Expanded(preview)).Gap(6)),
 	).Gap(12)
 
 	saveAs := s.btn(i18n.ScreenshotSaveAs, func() { s.startScreenshotSave() }, false, func() bool { return !s.model.Screenshot().HasImage() || busy() })
@@ -381,9 +382,9 @@ func (s *Shell) buildScreenshotTool() widget.Widget {
 	return primitives.VBox(
 		toolbar,
 		primitives.Expanded(body),
-		primitives.HBox(saveAs, copyBtn, send, folder, primitives.Expanded(dest)).Gap(8),
+		primitives.HBox(saveAs, copyBtn, send, folder, primitives.Expanded(dest)).Gap(8).CrossAlign(primitives.CrossAxisCenter),
 		status,
-	).Padding(12).Gap(10)
+	).Padding(12).Gap(12)
 }
 
 func (s *Shell) buildAndroidTool() widget.Widget {
@@ -404,10 +405,10 @@ func (s *Shell) buildAndroidTool() widget.Widget {
 	})).Bold().FontSize(14)
 	devices := listview.New(
 		listview.ItemCountFn(func() int { return len(s.model.Android().Devices()) }),
-		listview.FixedItemHeight(32),
+		listview.FixedItemHeight(unit),
 		listview.SelectionModeOpt(listview.SelectionSingle),
 		listview.SelectedIndexSignal(s.devSel),
-		listview.PainterOpt(material3.ListViewPainter{Theme: m3}),
+		listview.PainterOpt(newQuietListPainter(m3)),
 		listview.DisabledFn(busy),
 		listview.BuildItem(func(ctx listview.ItemContext) widget.Widget {
 			devs := s.model.Android().Devices()
@@ -431,7 +432,7 @@ func (s *Shell) buildAndroidTool() widget.Widget {
 	path := s.txt("").ContentSignal(s.computed(func() string {
 		return s.model.Android().Root()
 	})).FontSize(13)
-	toolbar := primitives.HBox(refresh, up, primitives.Expanded(path)).Gap(8)
+	toolbar := primitives.HBox(refresh, up, primitives.Expanded(path)).Gap(8).CrossAlign(primitives.CrossAxisCenter)
 
 	table := datatable.New(
 		datatable.Columns([]datatable.Column{
@@ -444,7 +445,7 @@ func (s *Shell) buildAndroidTool() widget.Widget {
 		datatable.SelectionModeOpt(datatable.SelectionSingle),
 		datatable.SelectedRowSignal(s.adbSel),
 		datatable.DisabledFn(func() bool { return busy() || !online() }),
-		datatable.PainterOpt(material3.DataTablePainter{Theme: m3}),
+		datatable.PainterOpt(newQuietTablePainter(m3)),
 		datatable.CellValue(func(row int, col string) string {
 			rows := s.model.Android().Rows()
 			if row < 0 || row >= len(rows) {
@@ -504,15 +505,6 @@ func (s *Shell) buildAndroidTool() widget.Widget {
 			s.bump()
 		}),
 	)
-	empty := s.txt("").ContentSignal(s.computed(func() string {
-		if len(s.model.Android().Rows()) > 0 {
-			return ""
-		}
-		if len(s.model.Android().Devices()) == 0 {
-			return i18n.T(s.model.Lang(), i18n.AndroidNoDevices)
-		}
-		return i18n.T(s.model.Lang(), i18n.AndroidEmpty)
-	})).Align(primitives.TextAlignCenter).Color(widget.RGBA8(120, 120, 120, 255))
 
 	pull := s.btn(i18n.AndroidPull, func() { s.startAndroidPull() }, false, func() bool { return busy() || !s.model.Android().HasSelection() })
 	pushFile := s.btn(i18n.AndroidPushFile, func() { s.startAndroidPush(false) }, false, func() bool { return busy() || !online() })
@@ -521,24 +513,64 @@ func (s *Shell) buildAndroidTool() widget.Widget {
 		return i18n.T(s.model.Lang(), i18n.AndroidHint)
 	})).FontSize(12).Color(widget.RGBA8(90, 90, 90, 255))
 	status := s.txt("").ContentSignal(s.computed(func() string {
-		return s.model.Android().StatusText(s.model.Lang())
+		if msg := s.model.Android().StatusText(s.model.Lang()); msg != "" {
+			return msg
+		}
+		if len(s.model.Android().Rows()) > 0 {
+			return ""
+		}
+		if len(s.model.Android().Devices()) == 0 {
+			return i18n.T(s.model.Lang(), i18n.AndroidNoDevices)
+		}
+		return i18n.T(s.model.Lang(), i18n.AndroidEmpty)
 	})).FontSize(13)
 
 	return primitives.VBox(
 		deviceLabel,
-		primitives.Box(devices).Height(96),
+		primitives.Box(devices).Height(deviceListH).BorderStyle(1, widget.RGBA8(220, 224, 230, 255)),
 		toolbar,
-		primitives.Expanded(primitives.VBox(primitives.Expanded(table), empty)),
-		primitives.HBox(pull, pushFile, pushDir, primitives.Expanded(hint)).Gap(8),
+		primitives.Expanded(table),
+		primitives.HBox(pull, pushFile, pushDir, primitives.Expanded(hint)).Gap(8).CrossAlign(primitives.CrossAxisCenter),
 		status,
-	).Padding(12).Gap(8)
+	).Padding(12).Gap(12)
 }
 
-func (s *Shell) labeled(key i18n.Key, w widget.Widget) widget.Widget {
+func (s *Shell) formPanel(title i18n.Key, children ...widget.Widget) widget.Widget {
+	items := []widget.Widget{
+		s.txt("").ContentSignal(s.computed(func() string { return i18n.T(s.model.Lang(), title) })).Bold().FontSize(13),
+	}
+	items = append(items, children...)
+	return primitives.Box(items...).
+		Padding(8).Gap(2).
+		Background(widget.RGBA8(250, 250, 252, 255)).
+		Rounded(4).
+		BorderStyle(1, widget.RGBA8(220, 224, 230, 255))
+}
+
+func (s *Shell) formRow(key i18n.Key, control widget.Widget) widget.Widget {
 	return primitives.HBox(
-		s.txt("").ContentSignal(s.computed(func() string { return i18n.T(s.model.Lang(), key) })).FontSize(12).Color(widget.RGBA8(70, 70, 70, 255)),
-		primitives.Expanded(w),
-	).Gap(6)
+		primitives.Expanded(s.txt("").ContentSignal(s.computed(func() string {
+			return i18n.T(s.model.Lang(), key)
+		})).FontSize(13).Color(widget.RGBA8(70, 70, 70, 255))),
+		control,
+	).Gap(8).Height(formRowH).CrossAlign(primitives.CrossAxisCenter)
+}
+
+func (s *Shell) formEnd(control widget.Widget) widget.Widget {
+	return primitives.HBox(
+		primitives.Expanded(primitives.Box()),
+		control,
+	).Height(formRowH).CrossAlign(primitives.CrossAxisCenter)
+}
+
+func (s *Shell) formSlider(qual widget.Widget) widget.Widget {
+	label := s.txt("").ContentSignal(s.computed(func() string {
+		return i18n.T(s.model.Lang(), i18n.JPEGQuality, s.model.Image().JPEGQuality())
+	})).FontSize(13).Color(widget.RGBA8(70, 70, 70, 255))
+	return primitives.HBox(
+		primitives.Expanded(label),
+		primitives.Box(qual).Width(fieldWidth).Height(formRowH),
+	).Gap(8).Height(formRowH).CrossAlign(primitives.CrossAxisCenter)
 }
 
 func (s *Shell) intField(sig state.Signal[string], minV, maxV int, apply func(int), enabled func() bool) widget.Widget {
@@ -546,7 +578,7 @@ func (s *Shell) intField(sig state.Signal[string], minV, maxV int, apply func(in
 		textfield.ValueSignal(sig),
 		textfield.InputTypeOpt(textfield.TypeNumber),
 		textfield.DisabledFn(func() bool { return enabled != nil && !enabled() }),
-		textfield.PainterOpt(material3.TextFieldPainter{Theme: s.theme}),
+		textfield.PainterOpt(newCompactTFPainter(s.theme)),
 		textfield.OnSubmit(func(text string) {
 			n, ok := parseInt(strings.TrimSpace(text))
 			if !ok {
@@ -572,22 +604,18 @@ func (s *Shell) intField(sig state.Signal[string], minV, maxV int, apply func(in
 			apply(n)
 		}),
 	)
-	return primitives.Box(tf).Width(fieldWidth).Height(36)
+	return primitives.Box(tf).Width(fieldWidth).Height(fieldH)
 }
 
 func (s *Shell) txt(content string) *primitives.TextWidget {
 	return primitives.Text(content).FontFamily(cjkembed.FamilyName)
 }
 
-func (s *Shell) check(key i18n.Key, sig state.Signal[bool], disabled func() bool, onToggle func(bool)) widget.Widget {
-	box := checkbox.New(
+func (s *Shell) toggle(sig state.Signal[bool], disabled func() bool, onToggle func(bool)) widget.Widget {
+	return checkbox.New(
 		checkbox.CheckedSignal(sig),
 		checkbox.DisabledFn(func() bool { return disabled != nil && disabled() }),
 		checkbox.PainterOpt(material3.CheckboxPainter{Theme: s.theme}),
 		checkbox.OnToggle(onToggle),
 	)
-	return primitives.HBox(
-		box,
-		s.txt("").ContentSignal(s.computed(func() string { return i18n.T(s.model.Lang(), key) })).FontSize(13),
-	).Gap(6)
 }
