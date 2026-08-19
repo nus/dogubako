@@ -93,8 +93,26 @@ func TestApplyCaptureAutoSavesAndLists(t *testing.T) {
 	if m.SelectedPath() != firstPath {
 		t.Fatalf("selected = %q", m.SelectedPath())
 	}
+	if m.RevealPath() != firstPath {
+		t.Fatalf("reveal = %q", m.RevealPath())
+	}
 	if got := m.StatusText(i18n.EN); !strings.Contains(got, "Loaded") {
 		t.Fatalf("loaded status = %q", got)
+	}
+}
+
+func TestRevealPathFallsBackToDestDir(t *testing.T) {
+	home := t.TempDir()
+	restore := userdir.Override("linux", home, nil)
+	t.Cleanup(restore)
+
+	var m ScreenshotModel
+	dest := m.DestDir()
+	if dest == "" {
+		t.Fatal("expected dest dir")
+	}
+	if m.RevealPath() != dest {
+		t.Fatalf("reveal = %q, want dest %q", m.RevealPath(), dest)
 	}
 }
 

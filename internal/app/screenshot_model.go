@@ -128,6 +128,14 @@ func (m *ScreenshotModel) SelectedPath() string {
 	return m.lastSaved
 }
 
+// RevealPath is the file to select in the OS file manager, or DestDir when none is selected.
+func (m *ScreenshotModel) RevealPath() string {
+	if p := m.SelectedPath(); p != "" {
+		return p
+	}
+	return m.DestDir()
+}
+
 func (m *ScreenshotModel) TakeJumpToSelected() bool {
 	if !m.jumpToSelected {
 		return false

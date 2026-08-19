@@ -1,8 +1,10 @@
 package userdir
 
 import (
+	"errors"
 	"os"
 	"path/filepath"
+	"slices"
 	"testing"
 	"time"
 )
@@ -143,6 +145,168 @@ func TestEnsureScreenshotsCreates(t *testing.T) {
 	if err != nil || !fi.IsDir() {
 		t.Fatalf("dir = %v err=%v", dir, err)
 	}
+}
+
+func TestOpenInFileManagerSelectsFileDarwin(t *testing.T) {
+	dir := t.TempDir()
+	file := filepath.Join(dir, "shot.png")
+	if err := os.WriteFile(file, []byte("x"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	restore := Override("darwin", dir, nil)
+	t.Cleanup(restore)
+	log := stubCommands(t)
+
+	if err := OpenInFileManager(file); err != nil {
+		t.Fatal(err)
+	}
+	if len(log.ran) != 1 || log.ran[0][0] != "open" {
+		t.Fatalf("ran = %q", log.ran)
+	}
+	if got := log.ran[0][1:]; len(got) != 2 || got[0] != "-R" || got[1] != file {
+		t.Fatalf("args = %q", got)
+	}
+	if len(log.started) != 0 {
+		t.Fatalf("started = %q", log.started)
+	}
+}
+
+func TestOpenInFileManagerOpensDirDarwin(t *testing.T) {
+	dir := t.TempDir()
+	restore := Override("darwin", dir, nil)
+	t.Cleanup(restore)
+	log := stubCommands(t)
+
+	if err := OpenInFileManager(dir); err != nil {
+		t.Fatal(err)
+	}
+	if len(log.started) != 1 || log.started[0][0] != "open" || log.started[0][1] != dir {
+		t.Fatalf("started = %q", log.started)
+	}
+}
+
+func TestOpenInFileManagerSelectsFileLinux(t *testing.T) {
+	dir := t.TempDir()
+	file := filepath.Join(dir, "shot.png")
+	if err := os.WriteFile(file, []byte("x"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	restore := Override("linux", dir, nil)
+	t.Cleanup(restore)
+	log := stubCommands(t)
+
+	if err := OpenInFileManager(file); err != nil {
+		t.Fatal(err)
+	}
+	if len(log.ran) != 1 || log.ran[0][0] != "dbus-send" {
+		t.Fatalf("ran = %q", log.ran)
+	}
+	args := log.ran[0][1:]
+	want := linuxShowItemsArgs(fileURI(file))
+	if !slices.Equal(args, want) {
+		t.Fatalf("args = %q, want %q", args, want)
+	}
+	if len(log.started) != 0 {
+		t.Fatalf("opened dir despite successful reveal: %q", log.started)
+	}
+}
+
+func TestOpenInFileManagerLinuxFallsBackWhenRevealFails(t *testing.T) {
+	dir := t.TempDir()
+	file := filepath.Join(dir, "shot.png")
+	if err := os.WriteFile(file, []byte("x"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	restore := Override("linux", dir, nil)
+	t.Cleanup(restore)
+	log := stubCommands(t)
+	log.runErr = errRevealFailed
+
+	if err := OpenInFileManager(file); err != nil {
+		t.Fatal(err)
+	}
+	if len(log.started) != 1 || log.started[0][0] != "xdg-open" || log.started[0][1] != dir {
+		t.Fatalf("started = %q", log.started)
+	}
+}
+
+func TestOpenInFileManagerOpensDirLinux(t *testing.T) {
+	dir := t.TempDir()
+	restore := Override("linux", dir, nil)
+	t.Cleanup(restore)
+	log := stubCommands(t)
+
+	if err := OpenInFileManager(dir); err != nil {
+		t.Fatal(err)
+	}
+	if len(log.started) != 1 || log.started[0][0] != "xdg-open" || log.started[0][1] != dir {
+		t.Fatalf("started = %q", log.started)
+	}
+}
+
+func TestOpenInFileManagerMissingFileOpensParent(t *testing.T) {
+	dir := t.TempDir()
+	missing := filepath.Join(dir, "gone.png")
+	restore := Override("linux", dir, nil)
+	t.Cleanup(restore)
+	log := stubCommands(t)
+
+	if err := OpenInFileManager(missing); err != nil {
+		t.Fatal(err)
+	}
+	if len(log.started) != 1 || log.started[0][0] != "xdg-open" || log.started[0][1] != dir {
+		t.Fatalf("started = %q", log.started)
+	}
+}
+
+func TestOpenInFileManagerEmptyPath(t *testing.T) {
+	if err := OpenInFileManager(""); err == nil {
+		t.Fatal("expected error")
+	}
+}
+
+func TestFileURIEncodesNonASCII(t *testing.T) {
+	path := "/home/yota/画像/Screenshots/撮影.png"
+	got := fileURI(path)
+	want := "file:///home/yota/%E7%94%BB%E5%83%8F/Screenshots/%E6%92%AE%E5%BD%B1.png"
+	if got != want {
+		t.Fatalf("uri = %q, want %q", got, want)
+	}
+	spaced := fileURI("/tmp/my shot.png")
+	if spaced != "file:///tmp/my%20shot.png" {
+		t.Fatalf("spaced uri = %q", spaced)
+	}
+}
+
+type cmdLog struct {
+	started [][]string
+	ran     [][]string
+	runErr  error
+}
+
+var errRevealFailed = errors.New("reveal failed")
+
+func stubCommands(t *testing.T) *cmdLog {
+	t.Helper()
+	log := &cmdLog{}
+	origStart, origRun := startCommand, runCommand
+	startCommand = log.start
+	runCommand = log.run
+	t.Cleanup(func() {
+		startCommand = origStart
+		runCommand = origRun
+	})
+	return log
+}
+
+func (c *cmdLog) start(name string, args ...string) error {
+	c.started = append(c.started, append([]string{name}, args...))
+	return nil
+}
+
+func (c *cmdLog) run(name string, args ...string) error {
+	c.ran = append(c.ran, append([]string{name}, args...))
+	return c.runErr
 }
 
 func TestFilenameAndUniquePath(t *testing.T) {
