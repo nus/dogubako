@@ -71,8 +71,8 @@ func TestLoadAndPickTTF(t *testing.T) {
 	if gotPath != path {
 		t.Fatalf("path = %q", gotPath)
 	}
-	if src == nil || src.Metadata().Family == "" {
-		t.Fatalf("metadata = %+v", src.Metadata())
+	if src == nil || src.Name() == "" {
+		t.Fatalf("name = %q", src.Name())
 	}
 }
 

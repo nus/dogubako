@@ -1,7 +1,10 @@
-// Package cjkembed registers CJK and emoji faces for Guigui.
+// Package cjkembed registers CJK and emoji faces for gogpu/ui.
 //
-// Linux builds embed Noto Sans CJK. macOS opens Hiragino Sans from
-// /System/Library/Fonts. Color emoji uses Apple Color Emoji on macOS and
-// Noto Color Emoji on Linux when those system fonts exist.
+// Linux loads Noto Sans CJK from the system font directories. macOS opens
+// Hiragino Sans from /System/Library/Fonts. Color emoji uses Apple Color
+// Emoji on macOS and Noto Color Emoji on Linux when those fonts exist.
 // Other platforms do not add a CJK face.
+//
+// gogpu/ui has no per-glyph fallback, so widgets that should show Japanese
+// must set FontFamily to [FamilyName] after [Register].
 package cjkembed

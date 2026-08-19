@@ -4,6 +4,7 @@ import (
 	"errors"
 	"os/exec"
 	"reflect"
+	"strings"
 	"testing"
 )
 
@@ -99,6 +100,40 @@ func TestTryExternalCancelAndPath(t *testing.T) {
 	res, ok = tryExternal("zenity", nil)
 	if !ok || res.Err == nil {
 		t.Fatalf("error result = %+v ok=%v", res, ok)
+	}
+}
+
+func TestOSAQuoteAndScript(t *testing.T) {
+	if got := osaQuote(`say "hi"`); got != `"say \"hi\""` {
+		t.Fatalf("quote = %s", got)
+	}
+	filter := &FileFilter{Description: "Images", Extensions: []string{"png", "JPG"}}
+	script := osaScript(osaOpen, `開く`, "", filter)
+	if !strings.Contains(script, `choose file with prompt "開く"`) {
+		t.Fatalf("open script = %s", script)
+	}
+	if !strings.Contains(script, `of type {"png", "jpg"}`) {
+		t.Fatalf("types = %s", script)
+	}
+	script = osaScript(osaSave, "Save", "out.png", nil)
+	if !strings.Contains(script, `choose file name with prompt "Save" default name "out.png"`) {
+		t.Fatalf("save script = %s", script)
+	}
+	script = osaScript(osaDir, "Folder", "", nil)
+	if !strings.Contains(script, `choose folder with prompt "Folder"`) {
+		t.Fatalf("dir script = %s", script)
+	}
+	if osaTypeList(&FileFilter{Extensions: []string{"*"}}) != "" {
+		t.Fatal("wildcard should disable type filter")
+	}
+}
+
+func TestTryOSDialogMissing(t *testing.T) {
+	origLook := execLookPath
+	t.Cleanup(func() { execLookPath = origLook })
+	execLookPath = func(string) (string, error) { return "", exec.ErrNotFound }
+	if _, ok := tryOSDialog(osaOpen, "Open", "", nil); ok {
+		t.Fatal("missing osascript should skip")
 	}
 }
 

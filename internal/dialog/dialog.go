@@ -2,10 +2,7 @@ package dialog
 
 import (
 	"errors"
-	"fmt"
 	"os/exec"
-
-	nativedialog "github.com/hajimehoshi/dialog"
 )
 
 // FileResult is the outcome of an asynchronous file dialog.
@@ -25,7 +22,7 @@ type FileFilter struct {
 var ErrNoFileDialog = errors.New("file dialog unavailable")
 
 // OpenFileAsync shows a file-open dialog on a new goroutine.
-// On Ubuntu it uses GTK 3, then zenity, then kdialog.
+// macOS uses osascript; Ubuntu uses zenity, then kdialog.
 func OpenFileAsync(title string, filter *FileFilter) <-chan FileResult {
 	ch := make(chan FileResult, 1)
 	go func() {
@@ -38,7 +35,6 @@ func OpenFileAsync(title string, filter *FileFilter) <-chan FileResult {
 }
 
 // SaveFileAsync shows a file-save dialog on a new goroutine.
-// On Ubuntu it uses GTK 3, then zenity, then kdialog.
 func SaveFileAsync(title, suggested string, filter *FileFilter) <-chan FileResult {
 	ch := make(chan FileResult, 1)
 	go func() {
@@ -63,13 +59,7 @@ func OpenDirectoryAsync(title string) <-chan FileResult {
 }
 
 func openFileSync(title string, filter *FileFilter) FileResult {
-	if res, ok := tryNative(func() (string, error) {
-		b := nativedialog.File().Title(title)
-		if filter != nil {
-			b = b.Filter(filter.Description, filter.Extensions...)
-		}
-		return b.Load()
-	}); ok {
+	if res, ok := tryOSDialog(osaOpen, title, "", filter); ok {
 		return res
 	}
 	if res, ok := tryExternal(zenityOpenArgs(title, filter)); ok {
@@ -82,16 +72,7 @@ func openFileSync(title string, filter *FileFilter) FileResult {
 }
 
 func saveFileSync(title, suggested string, filter *FileFilter) FileResult {
-	if res, ok := tryNative(func() (string, error) {
-		b := nativedialog.File().Title(title)
-		if suggested != "" {
-			b = b.SetStartFile(suggested)
-		}
-		if filter != nil {
-			b = b.Filter(filter.Description, filter.Extensions...)
-		}
-		return b.Save()
-	}); ok {
+	if res, ok := tryOSDialog(osaSave, title, suggested, filter); ok {
 		return res
 	}
 	if res, ok := tryExternal(zenitySaveArgs(title, suggested, filter)); ok {
@@ -104,9 +85,7 @@ func saveFileSync(title, suggested string, filter *FileFilter) FileResult {
 }
 
 func openDirectorySync(title string) FileResult {
-	if res, ok := tryNative(func() (string, error) {
-		return nativedialog.Directory().Title(title).Browse()
-	}); ok {
+	if res, ok := tryOSDialog(osaDir, title, "", nil); ok {
 		return res
 	}
 	if res, ok := tryExternal(zenityDirArgs(title)); ok {
@@ -116,27 +95,6 @@ func openDirectorySync(title string) FileResult {
 		return res
 	}
 	return FileResult{Err: ErrNoFileDialog}
-}
-
-func tryNative(fn func() (string, error)) (FileResult, bool) {
-	var path string
-	var err error
-	func() {
-		defer func() {
-			if rec := recover(); rec != nil {
-				err = fmt.Errorf("native dialog: %v", rec)
-			}
-		}()
-		path, err = fn()
-	}()
-	if err == nil {
-		return FileResult{Path: path}, true
-	}
-	if errors.Is(err, nativedialog.ErrCancelled) {
-		return FileResult{Cancelled: true}, true
-	}
-	// GTK missing or no display: let the caller try zenity/kdialog.
-	return FileResult{Err: err}, false
 }
 
 func tryExternal(name string, args []string) (FileResult, bool) {

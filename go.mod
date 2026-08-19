@@ -4,24 +4,22 @@ go 1.25.0
 
 require (
 	github.com/codeskyblue/go-adbkit v0.3.0
-	github.com/guigui-gui/guigui v0.0.0-20260814053346-1ea23646e521
-	github.com/hajimehoshi/dialog v0.0.0-20260703050910-dfca0e7cf198
-	github.com/hajimehoshi/ebiten/v2 v2.10.0-alpha.13.0.20260814053235-7532c813d0c1
+	github.com/gogpu/gg v0.52.3
+	github.com/gogpu/gogpu v0.53.0
+	github.com/gogpu/ui v0.1.54
 	github.com/konoui/lipo v0.10.0
 	golang.org/x/image v0.45.0
 	golang.org/x/text v0.41.0
 )
 
 require (
-	github.com/ebitengine/gomobile v0.0.0-20260811165420-c5a1b14deab0 // indirect
-	github.com/ebitengine/hideconsole v1.0.0 // indirect
-	github.com/ebitengine/purego v0.11.0-alpha.8.0.20260812182835-f9d41fc60f1f // indirect
-	github.com/go-text/typesetting v0.3.5-0.20260710134149-0bd3abe5ff89 // indirect
-	github.com/hajimehoshi/iro v0.4.0-alpha.0.20260802170616-edef5c559e51 // indirect
-	github.com/jeandeaual/go-locale v0.0.0-20250612000132-0ef82f21eade // indirect
+	github.com/coregx/signals v0.1.1 // indirect
+	github.com/go-webgpu/goffi v0.6.3 // indirect
+	github.com/go-webgpu/webgpu v0.5.5 // indirect
+	github.com/gogpu/gpucontext v0.28.0 // indirect
+	github.com/gogpu/gputypes v0.5.2 // indirect
+	github.com/gogpu/naga v0.18.0 // indirect
+	github.com/gogpu/wgpu v0.31.4 // indirect
 	github.com/konoui/go-qsort v0.1.0 // indirect
-	github.com/srwiley/rasterx v0.0.0-20220730225603-2ab79fcdd4ef // indirect
-	golang.org/x/sync v0.22.0 // indirect
 	golang.org/x/sys v0.47.0 // indirect
-	howett.net/plist v1.0.1 // indirect
 )

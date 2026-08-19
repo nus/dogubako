@@ -5,37 +5,19 @@ import (
 	"os"
 	"strings"
 
-	"github.com/hajimehoshi/ebiten/v2/text/v2"
-
-	"github.com/guigui-gui/guigui"
-	"github.com/guigui-gui/guigui/basicwidget"
+	"github.com/gogpu/gg/text"
 )
 
-var theEmojiFace *text.GoTextFaceSource
-
-// emojiUnicodeRanges covers pictographs used as UI icons (folder/file emoji).
-var emojiUnicodeRanges = []basicwidget.UnicodeRange{
-	{Min: 0x1f000, Max: 0x1faff},
-}
-
-func registerEmoji(src *text.GoTextFaceSource) {
-	theEmojiFace = src
-	basicwidget.RegisterFaceSourceEntries(appendEmojiEntries)
-}
-
-func appendEmojiEntries(context *guigui.Context, adder *basicwidget.FaceSourceEntryAdder) {
-	if theEmojiFace == nil {
+func registerEmoji() {
+	src, path, err := openEmoji(defaultEmojiPaths())
+	if err != nil || src == nil || path == "" {
 		return
 	}
-	adder.SetPriority(basicwidget.FaceSourceEntryPriorityHigh)
-	adder.Add(basicwidget.FaceSourceEntry{
-		FaceSource:    theEmojiFace,
-		UnicodeRanges: emojiUnicodeRanges,
-	})
+	registerLoaded("emoji", "Emoji", path)
 }
 
-func pickEmojiFace(sources []*text.GoTextFaceSource) *text.GoTextFaceSource {
-	var fallback *text.GoTextFaceSource
+func pickEmojiFace(sources []*text.FontSource) *text.FontSource {
+	var fallback *text.FontSource
 	for _, src := range sources {
 		if src == nil {
 			continue
@@ -43,7 +25,7 @@ func pickEmojiFace(sources []*text.GoTextFaceSource) *text.GoTextFaceSource {
 		if fallback == nil {
 			fallback = src
 		}
-		fam := strings.ToLower(src.Metadata().Family)
+		fam := strings.ToLower(src.Name())
 		if strings.Contains(fam, "emoji") || strings.Contains(fam, "color") {
 			return src
 		}
@@ -51,7 +33,7 @@ func pickEmojiFace(sources []*text.GoTextFaceSource) *text.GoTextFaceSource {
 	return fallback
 }
 
-func openEmoji(paths []string) (*text.GoTextFaceSource, string, error) {
+func openEmoji(paths []string) (*text.FontSource, string, error) {
 	var firstErr error
 	for _, path := range expandPathNorms(paths) {
 		sources, err := loadFaceSources(path)

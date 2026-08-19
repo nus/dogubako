@@ -2,11 +2,7 @@
 
 package cjkembed
 
-import (
-	"fmt"
-	"os"
-	"path/filepath"
-)
+import "path/filepath"
 
 func defaultEmojiPaths() []string {
 	dir := "/System/Library/Fonts"
@@ -19,13 +15,4 @@ func defaultEmojiPaths() []string {
 		out[i] = filepath.Join(dir, name)
 	}
 	return out
-}
-
-func init() {
-	src, _, err := openEmoji(defaultEmojiPaths())
-	if err != nil {
-		fmt.Fprintf(os.Stderr, "dogubako: emoji: %v\n", err)
-		return
-	}
-	registerEmoji(src)
 }

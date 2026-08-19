@@ -9,8 +9,6 @@ import (
 	"strings"
 	"time"
 
-	"github.com/hajimehoshi/ebiten/v2"
-
 	"github.com/nus/dogubako/internal/capture"
 	"github.com/nus/dogubako/internal/i18n"
 	"github.com/nus/dogubako/internal/imageproc"
@@ -27,7 +25,7 @@ type ScreenshotModel struct {
 	generation uint64
 
 	image   image.Image
-	preview *ebiten.Image
+	preview image.Image
 
 	mode      capture.Mode
 	delaySec  int
@@ -92,7 +90,7 @@ func (m *ScreenshotModel) Size() image.Point {
 	return m.image.Bounds().Size()
 }
 
-func (m *ScreenshotModel) Preview() *ebiten.Image {
+func (m *ScreenshotModel) Preview() image.Image {
 	if m.preview == nil && m.image != nil {
 		m.preview = previewImage(m.image)
 	}

@@ -12,11 +12,3 @@ func defaultEmojiPaths() []string {
 		filepath.Join("/usr/share/fonts/noto/NotoColorEmoji.ttf"),
 	}
 }
-
-func init() {
-	src, _, err := openEmoji(defaultEmojiPaths())
-	if err != nil {
-		return
-	}
-	registerEmoji(src)
-}

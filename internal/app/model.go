@@ -9,8 +9,6 @@ import (
 	"path/filepath"
 	"strings"
 
-	"github.com/hajimehoshi/ebiten/v2"
-
 	"github.com/nus/dogubako/internal/i18n"
 	"github.com/nus/dogubako/internal/imageproc"
 )
@@ -115,8 +113,8 @@ type ImageModel struct {
 	processErr error
 	dirty      bool
 
-	srcPreview *ebiten.Image
-	dstPreview *ebiten.Image
+	srcPreview image.Image
+	dstPreview image.Image
 
 	status statusMsg
 }
@@ -277,6 +275,31 @@ func (m *ImageModel) LoadDropped(fsys fs.FS) error {
 		return fmt.Errorf("no image in dropped files")
 	}
 	return loadErr
+}
+
+func (m *ImageModel) LoadPaths(paths []string) error {
+	for _, p := range paths {
+		if p == "" {
+			continue
+		}
+		info, err := os.Stat(p)
+		if err != nil {
+			continue
+		}
+		if info.IsDir() {
+			err := m.LoadDropped(os.DirFS(p))
+			if err == nil {
+				return nil
+			}
+			continue
+		}
+		if !isImageFilename(p) {
+			continue
+		}
+		return m.LoadPath(p)
+	}
+	m.SetStatus(i18n.StatusDropNoImage)
+	return fmt.Errorf("no image in dropped files")
 }
 
 func (m *ImageModel) LoadClipboardPNG(png []byte) error {
@@ -549,7 +572,7 @@ func (m *ImageModel) recompute() {
 	m.processErr = err
 }
 
-func (m *ImageModel) SourcePreview() *ebiten.Image {
+func (m *ImageModel) SourcePreview() image.Image {
 	m.recompute()
 	if m.srcPreview == nil && m.source != nil {
 		m.srcPreview = previewImage(m.source)
@@ -557,7 +580,7 @@ func (m *ImageModel) SourcePreview() *ebiten.Image {
 	return m.srcPreview
 }
 
-func (m *ImageModel) ResultPreview() *ebiten.Image {
+func (m *ImageModel) ResultPreview() image.Image {
 	m.recompute()
 	if m.dstPreview == nil && m.processed != nil && m.processErr == nil {
 		m.dstPreview = previewImage(m.processed)
@@ -565,18 +588,18 @@ func (m *ImageModel) ResultPreview() *ebiten.Image {
 	return m.dstPreview
 }
 
-func previewImage(src image.Image) *ebiten.Image {
+func previewImage(src image.Image) image.Image {
 	if src == nil {
 		return nil
 	}
 	size := src.Bounds().Size()
 	if size.X <= previewMaxEdge && size.Y <= previewMaxEdge {
-		return ebiten.NewImageFromImage(src)
+		return src
 	}
 	scale := float64(previewMaxEdge) / float64(max(size.X, size.Y))
 	w := max(1, int(float64(size.X)*scale))
 	h := max(1, int(float64(size.Y)*scale))
-	return ebiten.NewImageFromImage(imageproc.Resize(src, w, h))
+	return imageproc.Resize(src, w, h)
 }
 
 func clampDim(v int) int {

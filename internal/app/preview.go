@@ -2,25 +2,25 @@ package app
 
 import (
 	"image"
-	"image/color"
 	"math"
 
-	"github.com/hajimehoshi/ebiten/v2"
-	"github.com/hajimehoshi/ebiten/v2/inpututil"
-	"github.com/hajimehoshi/ebiten/v2/vector"
+	"github.com/gogpu/ui/event"
+	"github.com/gogpu/ui/geometry"
+	"github.com/gogpu/ui/state"
+	"github.com/gogpu/ui/widget"
 
-	"github.com/guigui-gui/guigui"
+	"github.com/nus/dogubako/internal/imageproc"
 )
 
 // sourcePreview shows the original image and lets the user drag a crop rectangle.
 type sourcePreview struct {
-	guigui.DefaultWidget
+	widget.WidgetBase
 
-	image         *ebiten.Image
+	rev           state.ReadonlySignal[uint64]
+	image         image.Image
 	imageSize     image.Point
 	crop          image.Rectangle
 	cropEnabled   bool
-	generation    uint64
 	onCropChanged func(image.Rectangle)
 
 	dragging  bool
@@ -28,46 +28,47 @@ type sourcePreview struct {
 	dragRect  image.Rectangle
 }
 
-func (p *sourcePreview) SetImage(img *ebiten.Image, srcSize image.Point) {
-	if p.image == img && p.imageSize == srcSize {
-		return
-	}
+func newSourcePreview(rev state.ReadonlySignal[uint64]) *sourcePreview {
+	p := &sourcePreview{rev: rev}
+	p.SetVisible(true)
+	p.SetEnabled(true)
+	return p
+}
+
+func (p *sourcePreview) SetImage(img image.Image, srcSize image.Point) {
 	p.image = img
 	p.imageSize = srcSize
-	p.generation++
+	p.SetNeedsRedraw(true)
 }
 
 func (p *sourcePreview) SetCrop(crop image.Rectangle, enabled bool) {
-	if p.crop == crop && p.cropEnabled == enabled {
-		return
-	}
 	p.crop = crop
 	p.cropEnabled = enabled
-	p.generation++
+	p.SetNeedsRedraw(true)
 }
 
 func (p *sourcePreview) OnCropChanged(f func(image.Rectangle)) {
 	p.onCropChanged = f
 }
 
-func (p *sourcePreview) WriteStateKey(context *guigui.Context, w *guigui.StateKeyWriter) {
-	w.WriteUint64(p.generation)
-	w.WriteBool(p.cropEnabled)
-	w.WriteInt(p.crop.Min.X)
-	w.WriteInt(p.crop.Min.Y)
-	w.WriteInt(p.crop.Max.X)
-	w.WriteInt(p.crop.Max.Y)
+func (p *sourcePreview) Layout(_ widget.Context, cons geometry.Constraints) geometry.Size {
+	size := cons.BiggestFinite(400, 300)
+	p.SetBounds(geometry.FromPointSize(p.Position(), size))
+	return size
 }
 
-func (p *sourcePreview) Draw(context *guigui.Context, widgetBounds *guigui.WidgetBounds, dst *ebiten.Image) {
-	b := widgetBounds.Bounds()
-	drawCheckerboard(dst, b)
+func (p *sourcePreview) Draw(_ widget.Context, canvas widget.Canvas) {
+	b := p.Bounds()
+	if b.IsEmpty() {
+		return
+	}
+	drawCheckerboard(canvas, b)
 	if p.image == nil || p.imageSize.X <= 0 || p.imageSize.Y <= 0 {
 		return
 	}
-
-	fitted := fittedRect(b, p.imageSize)
-	drawFittedImage(dst, p.image, fitted)
+	ib := toImageRect(b)
+	fitted := fittedRect(ib, p.imageSize)
+	drawFittedImage(canvas, p.image, fitted)
 
 	crop := p.crop
 	if p.dragging {
@@ -76,101 +77,146 @@ func (p *sourcePreview) Draw(context *guigui.Context, widgetBounds *guigui.Widge
 	if p.cropEnabled || p.dragging {
 		screenCrop := imageRectToScreen(crop, p.imageSize, fitted)
 		if !screenCrop.Empty() {
-			dim := color.NRGBA{A: 0x90}
-			vector.FillRect(dst, float32(b.Min.X), float32(b.Min.Y), float32(screenCrop.Min.X-b.Min.X), float32(b.Dy()), dim, false)
-			vector.FillRect(dst, float32(screenCrop.Max.X), float32(b.Min.Y), float32(b.Max.X-screenCrop.Max.X), float32(b.Dy()), dim, false)
-			vector.FillRect(dst, float32(screenCrop.Min.X), float32(b.Min.Y), float32(screenCrop.Dx()), float32(screenCrop.Min.Y-b.Min.Y), dim, false)
-			vector.FillRect(dst, float32(screenCrop.Min.X), float32(screenCrop.Max.Y), float32(screenCrop.Dx()), float32(b.Max.Y-screenCrop.Max.Y), dim, false)
-			vector.StrokeRect(dst, float32(screenCrop.Min.X)+0.5, float32(screenCrop.Min.Y)+0.5, float32(screenCrop.Dx())-1, float32(screenCrop.Dy())-1, 2, color.NRGBA{R: 0x2f, G: 0x81, B: 0xff, A: 0xff}, false)
+			dim := widget.RGBA8(0, 0, 0, 0x90)
+			canvas.DrawRect(geometry.NewRect(float32(ib.Min.X), float32(ib.Min.Y), float32(screenCrop.Min.X-ib.Min.X), float32(ib.Dy())), dim)
+			canvas.DrawRect(geometry.NewRect(float32(screenCrop.Max.X), float32(ib.Min.Y), float32(ib.Max.X-screenCrop.Max.X), float32(ib.Dy())), dim)
+			canvas.DrawRect(geometry.NewRect(float32(screenCrop.Min.X), float32(ib.Min.Y), float32(screenCrop.Dx()), float32(screenCrop.Min.Y-ib.Min.Y)), dim)
+			canvas.DrawRect(geometry.NewRect(float32(screenCrop.Min.X), float32(screenCrop.Max.Y), float32(screenCrop.Dx()), float32(ib.Max.Y-screenCrop.Max.Y)), dim)
+			canvas.StrokeRect(toGeomRect(screenCrop), widget.RGBA8(0x2f, 0x81, 0xff, 0xff), 2)
 		}
 	}
 }
 
-func (p *sourcePreview) HandlePointingInput(context *guigui.Context, widgetBounds *guigui.WidgetBounds) guigui.HandleInputResult {
-	if p.image == nil || p.imageSize.X <= 0 || p.imageSize.Y <= 0 {
-		return guigui.HandleInputResult{}
+func (p *sourcePreview) Event(ctx widget.Context, e event.Event) bool {
+	me, ok := e.(*event.MouseEvent)
+	if !ok || p.image == nil || p.imageSize.X <= 0 || p.imageSize.Y <= 0 {
+		return false
 	}
-	fitted := fittedRect(widgetBounds.Bounds(), p.imageSize)
+	fitted := fittedRect(toImageRect(p.Bounds()), p.imageSize)
 	if fitted.Empty() {
-		return guigui.HandleInputResult{}
+		return false
 	}
-	cx, cy := ebiten.CursorPosition()
-	pt := image.Pt(cx, cy)
+	pt := image.Pt(int(me.Position.X), int(me.Position.Y))
 
-	if inpututil.IsMouseButtonJustPressed(ebiten.MouseButtonLeft) && widgetBounds.IsHitAtCursor() && pt.In(fitted) {
-		p.dragging = true
-		p.dragStart = screenToImage(pt, fitted, p.imageSize)
-		p.dragRect = image.Rectangle{Min: p.dragStart, Max: p.dragStart.Add(image.Pt(1, 1))}.Canon()
-		return guigui.HandleInputByWidget(p)
-	}
-	if p.dragging && ebiten.IsMouseButtonPressed(ebiten.MouseButtonLeft) {
-		cur := screenToImage(pt, fitted, p.imageSize)
-		p.dragRect = normalizeCrop(image.Rectangle{Min: p.dragStart, Max: cur.Add(image.Pt(1, 1))}, p.imageSize)
-		guigui.RequestRedraw(p)
-		return guigui.HandleInputByWidget(p)
-	}
-	if p.dragging && inpututil.IsMouseButtonJustReleased(ebiten.MouseButtonLeft) {
-		p.dragging = false
-		rect := normalizeCrop(p.dragRect, p.imageSize)
-		if rect.Dx() >= 1 && rect.Dy() >= 1 && p.onCropChanged != nil {
-			p.onCropChanged(rect)
+	switch me.MouseType {
+	case event.MousePress:
+		if me.Button == event.ButtonLeft && pt.In(fitted) {
+			p.dragging = true
+			p.dragStart = screenToImage(pt, fitted, p.imageSize)
+			p.dragRect = image.Rectangle{Min: p.dragStart, Max: p.dragStart.Add(image.Pt(1, 1))}.Canon()
+			ctx.SetCursor(widget.CursorCrosshair)
+			p.SetNeedsRedraw(true)
+			return true
 		}
-		return guigui.HandleInputByWidget(p)
+	case event.MouseDrag, event.MouseMove:
+		if p.dragging {
+			cur := screenToImage(pt, fitted, p.imageSize)
+			p.dragRect = normalizeCrop(image.Rectangle{Min: p.dragStart, Max: cur.Add(image.Pt(1, 1))}, p.imageSize)
+			ctx.SetCursor(widget.CursorCrosshair)
+			p.SetNeedsRedraw(true)
+			return true
+		}
+		if pt.In(fitted) {
+			ctx.SetCursor(widget.CursorCrosshair)
+		}
+	case event.MouseRelease:
+		if p.dragging && me.Button == event.ButtonLeft {
+			p.dragging = false
+			rect := normalizeCrop(p.dragRect, p.imageSize)
+			if rect.Dx() >= 1 && rect.Dy() >= 1 && p.onCropChanged != nil {
+				p.onCropChanged(rect)
+			}
+			p.SetNeedsRedraw(true)
+			return true
+		}
 	}
-	return guigui.HandleInputResult{}
+	return false
 }
 
-// destPreview shows the processed image fitted into its bounds.
-type destPreview struct {
-	guigui.DefaultWidget
+func (p *sourcePreview) Children() []widget.Widget { return nil }
 
-	source     image.Image
-	image      *ebiten.Image
-	generation uint64
-}
-
-func (p *destPreview) SetImage(img *ebiten.Image) {
-	if p.image == img && p.source == nil {
+func (p *sourcePreview) Mount(ctx widget.Context) {
+	if p.rev == nil {
 		return
 	}
+	sched := ctx.Scheduler()
+	if sched == nil {
+		return
+	}
+	p.AddBinding(state.BindToScheduler(p.rev, p, sched))
+}
+
+func (p *sourcePreview) Unmount() {}
+
+// destPreview shows a processed image fitted into its bounds.
+type destPreview struct {
+	widget.WidgetBase
+
+	rev    state.ReadonlySignal[uint64]
+	source image.Image
+	image  image.Image
+}
+
+func newDestPreview(rev state.ReadonlySignal[uint64]) *destPreview {
+	p := &destPreview{rev: rev}
+	p.SetVisible(true)
+	p.SetEnabled(true)
+	return p
+}
+
+func (p *destPreview) SetImage(img image.Image) {
 	p.image = img
 	p.source = nil
-	p.generation++
+	p.SetNeedsRedraw(true)
 }
 
 func (p *destPreview) SetSource(img image.Image) {
-	if p.source == img {
-		return
-	}
 	p.source = img
 	p.image = nil
-	p.generation++
+	p.SetNeedsRedraw(true)
 }
 
 func (p *destPreview) HasImage() bool { return p.source != nil || p.image != nil }
 
-func (p *destPreview) WriteStateKey(context *guigui.Context, w *guigui.StateKeyWriter) {
-	w.WriteUint64(p.generation)
+func (p *destPreview) Layout(_ widget.Context, cons geometry.Constraints) geometry.Size {
+	size := cons.BiggestFinite(400, 300)
+	p.SetBounds(geometry.FromPointSize(p.Position(), size))
+	return size
 }
 
-func (p *destPreview) Draw(context *guigui.Context, widgetBounds *guigui.WidgetBounds, dst *ebiten.Image) {
-	b := widgetBounds.Bounds()
-	drawCheckerboard(dst, b)
-	if p.image == nil && p.source != nil {
-		p.image = previewImage(p.source)
-	}
-	if p.image == nil {
+func (p *destPreview) Draw(_ widget.Context, canvas widget.Canvas) {
+	b := p.Bounds()
+	if b.IsEmpty() {
 		return
 	}
-	drawFittedImage(dst, p.image, fittedRect(b, p.image.Bounds().Size()))
+	drawCheckerboard(canvas, b)
+	img := p.image
+	if img == nil && p.source != nil {
+		img = previewImage(p.source)
+		p.image = img
+	}
+	if img == nil {
+		return
+	}
+	drawFittedImage(canvas, img, fittedRect(toImageRect(b), img.Bounds().Size()))
 }
 
-func (p *sourcePreview) CursorShape(context *guigui.Context, widgetBounds *guigui.WidgetBounds) (ebiten.CursorShapeType, bool) {
-	if p.image != nil && widgetBounds.IsHitAtCursor() {
-		return ebiten.CursorShapeCrosshair, true
+func (p *destPreview) Event(_ widget.Context, _ event.Event) bool { return false }
+
+func (p *destPreview) Children() []widget.Widget { return nil }
+
+func (p *destPreview) Mount(ctx widget.Context) {
+	if p.rev == nil {
+		return
 	}
-	return 0, false
+	sched := ctx.Scheduler()
+	if sched == nil {
+		return
+	}
+	p.AddBinding(state.BindToScheduler(p.rev, p, sched))
 }
+
+func (p *destPreview) Unmount() {}
 
 func fittedRect(bounds image.Rectangle, imgSize image.Point) image.Rectangle {
 	if imgSize.X <= 0 || imgSize.Y <= 0 || bounds.Empty() {
@@ -184,16 +230,15 @@ func fittedRect(bounds image.Rectangle, imgSize image.Point) image.Rectangle {
 	return image.Rect(x, y, x+w, y+h)
 }
 
-func drawFittedImage(dst *ebiten.Image, src *ebiten.Image, fitted image.Rectangle) {
+func drawFittedImage(canvas widget.Canvas, src image.Image, fitted image.Rectangle) {
 	if src == nil || fitted.Empty() {
 		return
 	}
-	op := &ebiten.DrawImageOptions{}
-	op.Filter = ebiten.FilterLinear
-	srcSize := src.Bounds().Size()
-	op.GeoM.Scale(float64(fitted.Dx())/float64(srcSize.X), float64(fitted.Dy())/float64(srcSize.Y))
-	op.GeoM.Translate(float64(fitted.Min.X), float64(fitted.Min.Y))
-	dst.DrawImage(src, op)
+	size := src.Bounds().Size()
+	if size.X != fitted.Dx() || size.Y != fitted.Dy() {
+		src = imageproc.Resize(src, fitted.Dx(), fitted.Dy())
+	}
+	canvas.DrawImage(src, geometry.Pt(float32(fitted.Min.X), float32(fitted.Min.Y)))
 }
 
 func imageRectToScreen(rect image.Rectangle, imgSize image.Point, fitted image.Rectangle) image.Rectangle {
@@ -239,19 +284,28 @@ func normalizeCrop(rect image.Rectangle, imgSize image.Point) image.Rectangle {
 	return r.Intersect(image.Rect(0, 0, imgSize.X, imgSize.Y))
 }
 
-func drawCheckerboard(dst *ebiten.Image, b image.Rectangle) {
+func drawCheckerboard(canvas widget.Canvas, b geometry.Rect) {
 	const cell = 8
-	c0 := color.NRGBA{R: 0x3a, G: 0x3a, B: 0x3a, A: 0xff}
-	c1 := color.NRGBA{R: 0x2a, G: 0x2a, B: 0x2a, A: 0xff}
-	vector.FillRect(dst, float32(b.Min.X), float32(b.Min.Y), float32(b.Dx()), float32(b.Dy()), c0, false)
-	for y := b.Min.Y; y < b.Max.Y; y += cell {
-		for x := b.Min.X; x < b.Max.X; x += cell {
-			if ((x-b.Min.X)/cell+(y-b.Min.Y)/cell)%2 == 0 {
+	c0 := widget.RGBA8(0x3a, 0x3a, 0x3a, 0xff)
+	c1 := widget.RGBA8(0x2a, 0x2a, 0x2a, 0xff)
+	canvas.DrawRect(b, c0)
+	ib := toImageRect(b)
+	for y := ib.Min.Y; y < ib.Max.Y; y += cell {
+		for x := ib.Min.X; x < ib.Max.X; x += cell {
+			if ((x-ib.Min.X)/cell+(y-ib.Min.Y)/cell)%2 == 0 {
 				continue
 			}
-			w := min(cell, b.Max.X-x)
-			h := min(cell, b.Max.Y-y)
-			vector.FillRect(dst, float32(x), float32(y), float32(w), float32(h), c1, false)
+			w := min(cell, ib.Max.X-x)
+			h := min(cell, ib.Max.Y-y)
+			canvas.DrawRect(geometry.NewRect(float32(x), float32(y), float32(w), float32(h)), c1)
 		}
 	}
+}
+
+func toImageRect(r geometry.Rect) image.Rectangle {
+	return image.Rect(int(r.Min.X), int(r.Min.Y), int(r.Max.X), int(r.Max.Y))
+}
+
+func toGeomRect(r image.Rectangle) geometry.Rect {
+	return geometry.NewRect(float32(r.Min.X), float32(r.Min.Y), float32(r.Dx()), float32(r.Dy()))
 }
