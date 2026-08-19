@@ -445,6 +445,7 @@ func (s *Shell) buildAndroidTool() widget.Widget {
 	})).FontSize(13)
 	toolbar := primitives.HBox(refresh, up, primitives.Expanded(path)).Gap(8).CrossAlign(primitives.CrossAxisCenter)
 
+	adbScrollY := state.NewSignal[float32](0)
 	table := datatable.New(
 		datatable.Columns([]datatable.Column{
 			{Key: "name", Title: i18n.T(s.model.Lang(), i18n.AndroidColName), Sortable: true, MinWidth: 180},
@@ -452,9 +453,10 @@ func (s *Shell) buildAndroidTool() widget.Widget {
 			{Key: "mod", Title: i18n.T(s.model.Lang(), i18n.AndroidColModified), Sortable: true, Width: 170},
 		}),
 		datatable.RowCountFn(func() int { return len(s.model.Android().Rows()) }),
-		datatable.RowHeight(28),
+		datatable.RowHeight(androidTableRowHeight),
 		datatable.SelectionModeOpt(datatable.SelectionSingle),
 		datatable.SelectedRowSignal(s.adbSel),
+		datatable.ScrollYSignal(adbScrollY),
 		datatable.DisabledFn(func() bool { return busy() || !online() }),
 		datatable.PainterOpt(newQuietTablePainter(m3, func(row int) (int, bool, bool, bool) {
 			rows := s.model.Android().Rows()
@@ -501,18 +503,11 @@ func (s *Shell) buildAndroidTool() widget.Widget {
 			s.bump()
 		}),
 		datatable.OnRowSelect(func(row int) {
-			rows := s.model.Android().Rows()
-			if row < 0 || row >= len(rows) {
-				return
-			}
-			r := rows[row]
-			s.model.Android().SelectPath(r.Entry.Path)
-			if r.Entry.IsDir {
-				s.model.Android().ToggleExpand(r.Entry.Path)
-			}
+			activateAndroidTreeRow(s.model.Android(), row)
 			s.bump()
 		}),
 	)
+	tree := newAndroidTreeTable(s, table, adbScrollY)
 
 	pull := s.btn(i18n.AndroidPull, func() { s.startAndroidPull() }, false, func() bool { return busy() || !s.model.Android().HasSelection() })
 	pushFile := s.btn(i18n.AndroidPushFile, func() { s.startAndroidPush(false) }, false, func() bool { return busy() || !online() })
@@ -537,7 +532,7 @@ func (s *Shell) buildAndroidTool() widget.Widget {
 		deviceLabel,
 		primitives.Box(devices).Height(deviceListH).BorderStyle(1, widget.RGBA8(220, 224, 230, 255)),
 		toolbar,
-		primitives.Expanded(table),
+		primitives.Expanded(tree),
 		primitives.HBox(pull, pushFile, pushDir, primitives.Expanded(hint)).Gap(8).CrossAlign(primitives.CrossAxisCenter),
 		status,
 	).Padding(12).Gap(12)
