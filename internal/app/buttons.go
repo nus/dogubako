@@ -213,6 +213,85 @@ func (b *cjkButton) Mount(ctx widget.Context) {
 
 func (b *cjkButton) Unmount() {}
 
+// cjkLabel sizes CJK text by glyph width. primitives.Text assumes 0.6em
+// per rune, so Japanese labels overflow into the next control.
+type cjkLabel struct {
+	widget.WidgetBase
+	shell    *Shell
+	text     func() string
+	fontSize float32
+	color    widget.Color
+	padEnd   float32
+}
+
+func (s *Shell) toolbarLabel(key i18n.Key) *cjkLabel {
+	return s.cjkLabelFn(func() string { return i18n.T(s.model.Lang(), key) }, 13, widget.RGBA8(33, 33, 33, 255), 0)
+}
+
+func (s *Shell) cjkLabelFn(text func() string, fontSize float32, color widget.Color, padEnd float32) *cjkLabel {
+	l := &cjkLabel{shell: s, text: text, fontSize: fontSize, color: color, padEnd: padEnd}
+	l.SetVisible(true)
+	l.SetEnabled(true)
+	return l
+}
+
+func (l *cjkLabel) Layout(_ widget.Context, cons geometry.Constraints) geometry.Size {
+	label := ""
+	if l.text != nil {
+		label = l.text()
+	}
+	w := labelWidth(label) + l.padEnd
+	h := l.fontSize * 1.2
+	if h < 1 {
+		h = 1
+	}
+	size := cons.Constrain(geometry.Sz(w, h))
+	l.SetBounds(geometry.FromPointSize(l.Position(), size))
+	return size
+}
+
+func (l *cjkLabel) Draw(_ widget.Context, canvas widget.Canvas) {
+	bounds := l.Bounds()
+	if bounds.IsEmpty() {
+		return
+	}
+	label := ""
+	if l.text != nil {
+		label = l.text()
+	}
+	if label == "" {
+		return
+	}
+	textBounds := bounds
+	if l.padEnd > 0 && bounds.Width() > l.padEnd {
+		textBounds = geometry.NewRect(bounds.Min.X, bounds.Min.Y, bounds.Width()-l.padEnd, bounds.Height())
+	}
+	style := widget.TextStyle{
+		FontFamily: cjkembed.FamilyName,
+		FontSize:   l.fontSize,
+		Color:      l.color,
+		Align:      widget.TextAlignLeft,
+	}
+	canvas.PushClip(bounds)
+	if sd, ok := canvas.(widget.StyledTextDrawer); ok {
+		sd.DrawStyledText(label, textBounds, style)
+	} else {
+		canvas.DrawText(label, textBounds, l.fontSize, l.color, false, widget.TextAlignLeft)
+	}
+	canvas.PopClip()
+}
+
+func (l *cjkLabel) Event(_ widget.Context, _ event.Event) bool { return false }
+func (l *cjkLabel) Children() []widget.Widget                  { return nil }
+func (l *cjkLabel) Mount(ctx widget.Context) {
+	sched := ctx.Scheduler()
+	if sched == nil || l.shell == nil {
+		return
+	}
+	l.AddBinding(state.BindToScheduler(l.shell.rev, l, sched))
+}
+func (l *cjkLabel) Unmount() {}
+
 // navItem is a full-width sidebar row matching the old guigui list style.
 type navItem struct {
 	widget.WidgetBase

@@ -280,13 +280,17 @@ func (s *Shell) buildScreenshotTool() widget.Widget {
 		}
 		return i18n.T(s.model.Lang(), i18n.ScreenshotCapture)
 	}, func() { s.startCapture() }, func() bool { return true }, nil)
+	// 0.5 CJK em (~7px) between 対象 and 画面全体. Other toolbar gaps stay 8px.
+	modeGroup := primitives.HBox(s.toolbarLabel(i18n.ScreenshotMode), mode).
+		Gap(7).CrossAlign(primitives.CrossAxisCenter)
+	delayGroup := primitives.HBox(s.toolbarLabel(i18n.ScreenshotDelay), delay).
+		Gap(8).CrossAlign(primitives.CrossAxisCenter)
+	hideGroup := primitives.HBox(hide, s.toolbarLabel(i18n.ScreenshotHideWindow)).
+		Gap(6).CrossAlign(primitives.CrossAxisCenter).Height(btnHeight)
 	toolbar := primitives.HBox(
-		s.txt("").ContentSignal(s.computed(func() string { return i18n.T(s.model.Lang(), i18n.ScreenshotMode) })).FontSize(13),
-		mode,
-		s.txt("").ContentSignal(s.computed(func() string { return i18n.T(s.model.Lang(), i18n.ScreenshotDelay) })).FontSize(13),
-		delay,
-		s.txt("").ContentSignal(s.computed(func() string { return i18n.T(s.model.Lang(), i18n.ScreenshotHideWindow) })).FontSize(13),
-		hide,
+		modeGroup,
+		delayGroup,
+		hideGroup,
 		primitives.Expanded(primitives.Box()),
 		cap,
 	).Gap(8).CrossAlign(primitives.CrossAxisCenter)
@@ -611,10 +615,12 @@ func (s *Shell) txt(content string) *primitives.TextWidget {
 }
 
 func (s *Shell) toggle(sig state.Signal[bool], disabled func() bool, onToggle func(bool)) widget.Widget {
-	return checkbox.New(
+	box := checkbox.New(
 		checkbox.CheckedSignal(sig),
 		checkbox.DisabledFn(func() bool { return disabled != nil && disabled() }),
 		checkbox.PainterOpt(material3.CheckboxPainter{Theme: s.theme}),
 		checkbox.OnToggle(onToggle),
 	)
+	box.Padding(0)
+	return primitives.Box(box).Width(24).Height(btnHeight)
 }
