@@ -241,10 +241,7 @@ func (l *cjkLabel) Layout(_ widget.Context, cons geometry.Constraints) geometry.
 		label = l.text()
 	}
 	w := labelWidth(label) + l.padEnd
-	h := l.fontSize * 1.2
-	if h < 1 {
-		h = 1
-	}
+	h := btnHeight
 	size := cons.Constrain(geometry.Sz(w, h))
 	l.SetBounds(geometry.FromPointSize(l.Position(), size))
 	return size
@@ -262,10 +259,13 @@ func (l *cjkLabel) Draw(_ widget.Context, canvas widget.Canvas) {
 	if label == "" {
 		return
 	}
-	textBounds := bounds
-	if l.padEnd > 0 && bounds.Width() > l.padEnd {
-		textBounds = geometry.NewRect(bounds.Min.X, bounds.Min.Y, bounds.Width()-l.padEnd, bounds.Height())
+	textH := l.fontSize * 1.2
+	y := bounds.Min.Y + (bounds.Height()-textH)/2
+	textW := bounds.Width() - l.padEnd
+	if textW < 1 {
+		textW = bounds.Width()
 	}
+	textBounds := geometry.NewRect(bounds.Min.X, y, textW, textH)
 	style := widget.TextStyle{
 		FontFamily: cjkembed.FamilyName,
 		FontSize:   l.fontSize,

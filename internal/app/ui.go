@@ -286,7 +286,7 @@ func (s *Shell) buildScreenshotTool() widget.Widget {
 	delayGroup := primitives.HBox(s.toolbarLabel(i18n.ScreenshotDelay), delay).
 		Gap(8).CrossAlign(primitives.CrossAxisCenter)
 	hideGroup := primitives.HBox(hide, s.toolbarLabel(i18n.ScreenshotHideWindow)).
-		Gap(6).CrossAlign(primitives.CrossAxisCenter).Height(btnHeight)
+		Gap(6)
 	toolbar := primitives.HBox(
 		modeGroup,
 		delayGroup,
@@ -621,6 +621,7 @@ func (s *Shell) toggle(sig state.Signal[bool], disabled func() bool, onToggle fu
 		checkbox.PainterOpt(material3.CheckboxPainter{Theme: s.theme}),
 		checkbox.OnToggle(onToggle),
 	)
-	box.Padding(0)
-	return primitives.Box(box).Width(24).Height(btnHeight)
+	// Padding so layout height matches toolbar buttons; the painter centers
+	// the 18px box inside that height.
+	return box.Padding((btnHeight - 18) / 2)
 }
