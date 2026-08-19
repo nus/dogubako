@@ -136,17 +136,24 @@ func drawAndroidNameGlyphs(canvas widget.Canvas, bounds geometry.Rect, depth int
 		drawFileGlyph(canvas, slots.Icon)
 	}
 	if name != "" {
-		style := widget.TextStyle{
-			FontFamily: cjkembed.FamilyName,
-			FontSize:   13,
-			Color:      text,
-			Align:      widget.TextAlignLeft,
-		}
-		if sd, ok := canvas.(widget.StyledTextDrawer); ok {
-			sd.DrawStyledText(name, slots.Text, style)
-		} else {
-			canvas.DrawText(name, slots.Text, 13, text, false, widget.TextAlignLeft)
-		}
+		drawStyledLabel(canvas, name, slots.Text, 13, text, widget.TextAlignLeft)
 	}
 	canvas.PopClip()
+}
+
+func drawStyledLabel(canvas widget.Canvas, s string, bounds geometry.Rect, size float32, color widget.Color, align widget.TextAlign) {
+	if s == "" || bounds.IsEmpty() {
+		return
+	}
+	style := widget.TextStyle{
+		FontFamily: cjkembed.FamilyName,
+		FontSize:   size,
+		Color:      color,
+		Align:      align,
+	}
+	if sd, ok := canvas.(widget.StyledTextDrawer); ok {
+		sd.DrawStyledText(s, bounds, style)
+		return
+	}
+	canvas.DrawText(s, bounds, size, color, false, align)
 }

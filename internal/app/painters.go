@@ -67,7 +67,22 @@ func (p quietTablePainter) PaintHeader(canvas widget.Canvas, bounds geometry.Rec
 }
 
 func (p quietTablePainter) PaintHeaderCell(canvas widget.Canvas, bounds geometry.Rect, state datatable.HeaderCellPaintState) {
-	p.inner.PaintHeaderCell(canvas, bounds, state)
+	if bounds.IsEmpty() {
+		return
+	}
+	if state.Hovered && state.Sortable && !state.Disabled {
+		canvas.DrawRect(bounds, widget.RGBA8(0, 0, 0, 10))
+	}
+	label := state.Title
+	if ind := state.SortDir.Indicator(); ind != "" {
+		label = state.Title + " " + ind
+	}
+	fg := widget.RGBA8(28, 27, 31, 255)
+	if state.Disabled {
+		fg = widget.RGBA8(28, 27, 31, 97)
+	}
+	textBounds := geometry.NewRect(bounds.Min.X+12, bounds.Min.Y, bounds.Width()-24, bounds.Height())
+	drawStyledLabel(canvas, label, textBounds, 13, fg, state.Align)
 }
 
 func (p quietTablePainter) PaintRow(canvas widget.Canvas, state datatable.RowPaintState) {

@@ -80,6 +80,10 @@ func newModeHost(s *Shell) *modeHost {
 	return h
 }
 
+func (h *modeHost) tools() []widget.Widget {
+	return []widget.Widget{h.image, h.screenshot, h.android}
+}
+
 func (h *modeHost) active() widget.Widget {
 	switch h.shell.model.Mode() {
 	case ToolScreenshot:
@@ -91,13 +95,26 @@ func (h *modeHost) active() widget.Widget {
 	}
 }
 
+// Children exposes only the active tool. gogpu/ui's compositor walks
+// Children() to blit RepaintBoundary textures; inactive tools must not
+// appear there or their last frame stays on screen after a switch.
+func (h *modeHost) Children() []widget.Widget {
+	if c := h.active(); c != nil {
+		return []widget.Widget{c}
+	}
+	return nil
+}
+
 func (h *modeHost) Layout(ctx widget.Context, cons geometry.Constraints) geometry.Size {
 	size := cons.BiggestFinite(windowWidth, windowHeight)
 	h.SetBounds(geometry.FromPointSize(h.Position(), size))
 	active := h.active()
-	for _, child := range []widget.Widget{h.image, h.screenshot, h.android} {
+	for _, child := range h.tools() {
 		if child == nil {
 			continue
+		}
+		if vis, ok := child.(interface{ SetVisible(bool) }); ok {
+			vis.SetVisible(child == active)
 		}
 		if child == active {
 			sz := widget.LayoutChild(child, ctx, geometry.Tight(size))
@@ -114,6 +131,10 @@ func (h *modeHost) Layout(ctx widget.Context, cons geometry.Constraints) geometr
 }
 
 func (h *modeHost) Draw(ctx widget.Context, canvas widget.Canvas) {
+	bounds := h.Bounds()
+	if !bounds.IsEmpty() {
+		canvas.DrawRect(bounds, widget.RGBA8(255, 255, 255, 255))
+	}
 	if child := h.active(); child != nil {
 		widget.DrawChild(child, ctx, canvas)
 	}
@@ -127,11 +148,22 @@ func (h *modeHost) Event(ctx widget.Context, e event.Event) bool {
 }
 
 func (h *modeHost) Mount(ctx widget.Context) {
-	sched := ctx.Scheduler()
-	if sched == nil {
-		return
+	active := h.active()
+	for _, child := range h.tools() {
+		if child != nil && child != active {
+			widget.MountTree(child, ctx)
+		}
 	}
-	h.AddBinding(state.BindToSchedulerLayout(h.shell.rev, h, sched))
+	if sched := ctx.Scheduler(); sched != nil {
+		h.AddBinding(state.BindToSchedulerLayout(h.shell.rev, h, sched))
+	}
 }
 
-func (h *modeHost) Unmount() {}
+func (h *modeHost) Unmount() {
+	active := h.active()
+	for _, child := range h.tools() {
+		if child != nil && child != active {
+			widget.UnmountTree(child)
+		}
+	}
+}
