@@ -5,6 +5,7 @@ import (
 	"image/color"
 	"testing"
 
+	"github.com/gogpu/ui/event"
 	"github.com/gogpu/ui/geometry"
 	"github.com/gogpu/ui/state"
 	"github.com/gogpu/ui/uitest"
@@ -219,5 +220,28 @@ func TestSourcePreviewDrawBakesOverlayWhileDragging(t *testing.T) {
 	}
 	if got.RGBAAt(18, 18).R != 255 {
 		t.Fatal("inside drag rect should stay bright")
+	}
+}
+
+func TestSourcePreviewLocalMouseUsesScreenOriginWhileDragging(t *testing.T) {
+	p := newSourcePreview(nil)
+	p.SetBounds(geometry.NewRect(0, 0, 200, 150))
+	p.SetScreenOrigin(geometry.Pt(192, 80))
+
+	press := event.NewMouseEvent(
+		event.MousePress, event.ButtonLeft, event.ButtonStateLeft,
+		geometry.Pt(40, 30), geometry.Pt(40, 30), event.ModNone,
+	)
+	if got := p.localMouse(press); got != (image.Point{X: 40, Y: 30}) {
+		t.Fatalf("press (tree-local) = %v, want (40,30)", got)
+	}
+
+	p.dragging = true
+	move := event.NewMouseEvent(
+		event.MouseMove, event.ButtonNone, event.ButtonStateLeft,
+		geometry.Pt(192+40, 80+30), geometry.Pt(192+40, 80+30), event.ModNone,
+	)
+	if got := p.localMouse(move); got != (image.Point{X: 40, Y: 30}) {
+		t.Fatalf("captured window coords = %v, want (40,30)", got)
 	}
 }

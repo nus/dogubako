@@ -120,7 +120,7 @@ func (p *sourcePreview) Event(ctx widget.Context, e event.Event) bool {
 	if fitted.Empty() {
 		return false
 	}
-	pt := image.Pt(int(me.Position.X), int(me.Position.Y))
+	pt := p.localMouse(me)
 
 	switch me.MouseType {
 	case event.MousePress:
@@ -161,6 +161,18 @@ func (p *sourcePreview) Event(ctx widget.Context, e event.Event) bool {
 		}
 	}
 	return false
+}
+
+// localMouse maps an event into this widget's bounds space.
+// Tree dispatch translates through parents (local). After CapturePointer,
+// the window delivers the same events in window coordinates — subtracting
+// ScreenOrigin puts the crop corner back on the cursor.
+func (p *sourcePreview) localMouse(me *event.MouseEvent) image.Point {
+	pos := me.Position
+	if p.dragging && p.IsScreenOriginValid() {
+		pos = pos.Sub(p.ScreenOrigin()).Add(p.Bounds().Min)
+	}
+	return image.Pt(int(math.Round(float64(pos.X))), int(math.Round(float64(pos.Y))))
 }
 
 func (p *sourcePreview) Children() []widget.Widget { return nil }
