@@ -2,6 +2,7 @@ package app
 
 import (
 	"image"
+	"image/color"
 	"image/draw"
 	"math"
 
@@ -99,23 +100,14 @@ func (p *sourcePreview) Draw(_ widget.Context, canvas widget.Canvas) {
 	}
 	ib := toImageRect(b)
 	fitted := fittedRect(ib, p.imageSize)
-	drawFittedImage(canvas, p.image, fitted)
-
-	crop := p.crop
-	if p.dragging {
-		crop = p.dragRect
-	}
+	crop := image.Rectangle{}
 	if p.cropEnabled || p.dragging {
-		screenCrop := imageRectToScreen(crop, p.imageSize, fitted)
-		if !screenCrop.Empty() {
-			dim := widget.RGBA8(0, 0, 0, 0x90)
-			canvas.DrawRect(geometry.NewRect(float32(ib.Min.X), float32(ib.Min.Y), float32(screenCrop.Min.X-ib.Min.X), float32(ib.Dy())), dim)
-			canvas.DrawRect(geometry.NewRect(float32(screenCrop.Max.X), float32(ib.Min.Y), float32(ib.Max.X-screenCrop.Max.X), float32(ib.Dy())), dim)
-			canvas.DrawRect(geometry.NewRect(float32(screenCrop.Min.X), float32(ib.Min.Y), float32(screenCrop.Dx()), float32(screenCrop.Min.Y-ib.Min.Y)), dim)
-			canvas.DrawRect(geometry.NewRect(float32(screenCrop.Min.X), float32(screenCrop.Max.Y), float32(screenCrop.Dx()), float32(ib.Max.Y-screenCrop.Max.Y)), dim)
-			canvas.StrokeRect(toGeomRect(screenCrop), widget.RGBA8(0x2f, 0x81, 0xff, 0xff), 2)
+		crop = p.crop
+		if p.dragging {
+			crop = p.dragRect
 		}
 	}
+	drawFittedImage(canvas, p.image, fitted, p.imageSize, crop)
 }
 
 func (p *sourcePreview) Event(ctx widget.Context, e event.Event) bool {
@@ -136,6 +128,9 @@ func (p *sourcePreview) Event(ctx widget.Context, e event.Event) bool {
 			p.dragging = true
 			p.dragStart = screenToImage(pt, fitted, p.imageSize)
 			p.dragRect = image.Rectangle{Min: p.dragStart, Max: p.dragStart.Add(image.Pt(1, 1))}.Canon()
+			if cap, ok := ctx.(widget.PointerCapturer); ok {
+				cap.CapturePointer(p)
+			}
 			ctx.SetCursor(widget.CursorCrosshair)
 			p.SetNeedsRedraw(true)
 			return true
@@ -154,6 +149,9 @@ func (p *sourcePreview) Event(ctx widget.Context, e event.Event) bool {
 	case event.MouseRelease:
 		if p.dragging && me.Button == event.ButtonLeft {
 			p.dragging = false
+			if cap, ok := ctx.(widget.PointerCapturer); ok {
+				cap.ReleasePointer(p)
+			}
 			rect := normalizeCrop(p.dragRect, p.imageSize)
 			if rect.Dx() >= 1 && rect.Dy() >= 1 && p.onCropChanged != nil {
 				p.onCropChanged(rect)
@@ -257,7 +255,7 @@ func (p *destPreview) Draw(_ widget.Context, canvas widget.Canvas) {
 	drawCheckerboard(canvas, b)
 	img := p.resolvedImage()
 	if img != nil {
-		drawFittedImage(canvas, img, fittedRect(toImageRect(b), img.Bounds().Size()))
+		drawFittedImage(canvas, img, fittedRect(toImageRect(b), img.Bounds().Size()), img.Bounds().Size(), image.Rectangle{})
 		return
 	}
 	if p.emptyHint == nil {
@@ -309,7 +307,7 @@ func fittedRect(bounds image.Rectangle, imgSize image.Point) image.Rectangle {
 	return image.Rect(x, y, x+w, y+h)
 }
 
-func drawFittedImage(canvas widget.Canvas, src image.Image, fitted image.Rectangle) {
+func drawFittedImage(canvas widget.Canvas, src image.Image, fitted image.Rectangle, imgSize image.Point, crop image.Rectangle) {
 	if src == nil || fitted.Empty() {
 		return
 	}
@@ -317,7 +315,12 @@ func drawFittedImage(canvas widget.Canvas, src image.Image, fitted image.Rectang
 	if size.X != fitted.Dx() || size.Y != fitted.Dy() {
 		src = imageproc.Resize(src, fitted.Dx(), fitted.Dy())
 	}
-	canvas.DrawImage(toDisplayRGBA(src), geometry.Pt(float32(fitted.Min.X), float32(fitted.Min.Y)))
+	rgba := toDisplayRGBA(src)
+	if imgSize.X > 0 && imgSize.Y > 0 && !crop.Empty() {
+		rgba = cloneRGBA(rgba)
+		applyCropHighlight(rgba, imgSize, crop)
+	}
+	canvas.DrawImage(rgba, geometry.Pt(float32(fitted.Min.X), float32(fitted.Min.Y)))
 }
 
 // toDisplayRGBA copies src into an origin-aligned RGBA buffer. GPU DrawImage
@@ -334,6 +337,75 @@ func toDisplayRGBA(src image.Image) *image.RGBA {
 	dst := image.NewRGBA(image.Rect(0, 0, b.Dx(), b.Dy()))
 	draw.Draw(dst, dst.Bounds(), src, b.Min, draw.Src)
 	return dst
+}
+
+func cloneRGBA(src *image.RGBA) *image.RGBA {
+	if src == nil {
+		return nil
+	}
+	dst := image.NewRGBA(src.Rect)
+	copy(dst.Pix, src.Pix)
+	return dst
+}
+
+const cropDimMul = 112 // 112/256 ≈ remaining luminance under 0x90 black overlay
+
+var cropBorder = color.RGBA{R: 0x2f, G: 0x81, B: 0xff, A: 0xff}
+
+// applyCropHighlight darkens pixels outside crop and draws a 2px accent border.
+// Overlay is baked into the bitmap because GPU DrawImage is composited over
+// later DrawRect/StrokeRect, so a separate highlight pass is invisible.
+func applyCropHighlight(dst *image.RGBA, imgSize image.Point, crop image.Rectangle) {
+	if dst == nil || imgSize.X <= 0 || imgSize.Y <= 0 {
+		return
+	}
+	b := dst.Rect
+	screen := imageRectToScreen(crop, imgSize, b)
+	if screen.Empty() {
+		return
+	}
+	dimRGBA(dst, image.Rect(b.Min.X, b.Min.Y, screen.Min.X, b.Max.Y))
+	dimRGBA(dst, image.Rect(screen.Max.X, b.Min.Y, b.Max.X, b.Max.Y))
+	dimRGBA(dst, image.Rect(screen.Min.X, b.Min.Y, screen.Max.X, screen.Min.Y))
+	dimRGBA(dst, image.Rect(screen.Min.X, screen.Max.Y, screen.Max.X, b.Max.Y))
+	const t = 2
+	fillRGBA(dst, image.Rect(screen.Min.X, screen.Min.Y, screen.Max.X, screen.Min.Y+t), cropBorder)
+	fillRGBA(dst, image.Rect(screen.Min.X, screen.Max.Y-t, screen.Max.X, screen.Max.Y), cropBorder)
+	fillRGBA(dst, image.Rect(screen.Min.X, screen.Min.Y, screen.Min.X+t, screen.Max.Y), cropBorder)
+	fillRGBA(dst, image.Rect(screen.Max.X-t, screen.Min.Y, screen.Max.X, screen.Max.Y), cropBorder)
+}
+
+func dimRGBA(dst *image.RGBA, r image.Rectangle) {
+	r = r.Intersect(dst.Rect)
+	if r.Empty() {
+		return
+	}
+	for y := r.Min.Y; y < r.Max.Y; y++ {
+		i := dst.PixOffset(r.Min.X, y)
+		for x := r.Min.X; x < r.Max.X; x++ {
+			dst.Pix[i+0] = uint8(uint32(dst.Pix[i+0]) * cropDimMul / 256)
+			dst.Pix[i+1] = uint8(uint32(dst.Pix[i+1]) * cropDimMul / 256)
+			dst.Pix[i+2] = uint8(uint32(dst.Pix[i+2]) * cropDimMul / 256)
+			i += 4
+		}
+	}
+}
+
+func fillRGBA(dst *image.RGBA, r image.Rectangle, c color.RGBA) {
+	r = r.Intersect(dst.Rect)
+	if r.Empty() {
+		return
+	}
+	for y := r.Min.Y; y < r.Max.Y; y++ {
+		i := dst.PixOffset(r.Min.X, y)
+		for x := r.Min.X; x < r.Max.X; x++ {
+			dst.Pix[i+0] = c.R
+			dst.Pix[i+1] = c.G
+			dst.Pix[i+2] = c.B
+			dst.Pix[i+3] = c.A
+			i += 4
+		}
+	}
 }
 
 func imageRectToScreen(rect image.Rectangle, imgSize image.Point, fitted image.Rectangle) image.Rectangle {
@@ -399,8 +471,4 @@ func drawCheckerboard(canvas widget.Canvas, b geometry.Rect) {
 
 func toImageRect(r geometry.Rect) image.Rectangle {
 	return image.Rect(int(r.Min.X), int(r.Min.Y), int(r.Max.X), int(r.Max.Y))
-}
-
-func toGeomRect(r image.Rectangle) geometry.Rect {
-	return geometry.NewRect(float32(r.Min.X), float32(r.Min.Y), float32(r.Dx()), float32(r.Dy()))
 }

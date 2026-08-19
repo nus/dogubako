@@ -146,3 +146,78 @@ func TestScreenToImageRoundTrip(t *testing.T) {
 		t.Fatalf("bottom-right out of range: %v", pt)
 	}
 }
+
+func TestApplyCropHighlightDarkensOutsideAndPaintsBorder(t *testing.T) {
+	dst := image.NewRGBA(image.Rect(0, 0, 100, 100))
+	for i := range dst.Pix {
+		dst.Pix[i] = 255
+	}
+	applyCropHighlight(dst, image.Pt(100, 100), image.Rect(20, 20, 80, 80))
+
+	outside := dst.RGBAAt(0, 0)
+	if outside.R > 130 || outside.A != 255 {
+		t.Fatalf("outside pixel should be dimmed, got %+v", outside)
+	}
+	inside := dst.RGBAAt(50, 50)
+	if inside.R != 255 || inside.G != 255 || inside.B != 255 {
+		t.Fatalf("inside pixel should stay white, got %+v", inside)
+	}
+	border := dst.RGBAAt(20, 50)
+	if border != cropBorder {
+		t.Fatalf("crop border = %+v, want %+v", border, cropBorder)
+	}
+}
+
+func TestSourcePreviewDrawBakesCropOverlay(t *testing.T) {
+	src := image.NewNRGBA(image.Rect(0, 0, 100, 100))
+	for y := 0; y < 100; y++ {
+		for x := 0; x < 100; x++ {
+			src.SetNRGBA(x, y, color.NRGBA{R: 255, G: 255, B: 255, A: 255})
+		}
+	}
+	p := newSourcePreview(nil)
+	p.SetImage(src, image.Pt(100, 100))
+	p.SetCrop(image.Rect(20, 20, 80, 80), true)
+	p.SetBounds(geometry.NewRect(0, 0, 100, 100))
+	canvas := &uitest.MockCanvas{}
+	p.Draw(nil, canvas)
+	if len(canvas.Images) != 1 {
+		t.Fatalf("DrawImage calls = %d, want 1", len(canvas.Images))
+	}
+	got, ok := canvas.Images[0].Image.(*image.RGBA)
+	if !ok {
+		t.Fatalf("drawn type %T", canvas.Images[0].Image)
+	}
+	outside := got.RGBAAt(0, 0)
+	if outside.R > 130 {
+		t.Fatalf("crop overlay missing: outside pixel %+v", outside)
+	}
+	inside := got.RGBAAt(50, 50)
+	if inside.R != 255 {
+		t.Fatalf("selected region should stay bright, got %+v", inside)
+	}
+}
+
+func TestSourcePreviewDrawBakesOverlayWhileDragging(t *testing.T) {
+	src := image.NewNRGBA(image.Rect(0, 0, 40, 40))
+	for y := 0; y < 40; y++ {
+		for x := 0; x < 40; x++ {
+			src.SetNRGBA(x, y, color.NRGBA{R: 255, G: 255, B: 255, A: 255})
+		}
+	}
+	p := newSourcePreview(nil)
+	p.SetImage(src, image.Pt(40, 40))
+	p.SetCrop(src.Bounds(), false)
+	p.dragging = true
+	p.dragRect = image.Rect(5, 5, 30, 30)
+	p.SetBounds(geometry.NewRect(0, 0, 40, 40))
+	canvas := &uitest.MockCanvas{}
+	p.Draw(nil, canvas)
+	got := canvas.Images[0].Image.(*image.RGBA)
+	if got.RGBAAt(0, 0).R > 130 {
+		t.Fatal("drag overlay should dim outside the drag rect")
+	}
+	if got.RGBAAt(18, 18).R != 255 {
+		t.Fatal("inside drag rect should stay bright")
+	}
+}
