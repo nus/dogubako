@@ -105,20 +105,22 @@ func (s *Shell) buildImageTool() widget.Widget {
 		s.model.Image().SetCrop(rect)
 		s.bump()
 	})
-	s.rev.Get() // keep computed readers consistent
-	previewSync := state.NewComputed(func() uint64 {
-		v := s.rev.Get()
+	before.SetProvider(func() sourcePreviewFrame {
 		img := s.model.Image()
-		before.SetImage(img.SourcePreview(), img.SourceSize())
-		before.SetCrop(img.Crop(), img.CropEnabled())
-		if out, err := img.Processed(); err == nil && out != nil {
-			after.SetImage(img.ResultPreview())
-		} else {
-			after.SetImage(nil)
+		return sourcePreviewFrame{
+			image:       img.SourcePreview(),
+			size:        img.SourceSize(),
+			crop:        img.Crop(),
+			cropEnabled: img.CropEnabled(),
 		}
-		return v
 	})
-	_ = previewSync
+	after.SetProvider(func() image.Image {
+		img := s.model.Image()
+		if out, err := img.Processed(); err == nil && out != nil {
+			return img.ResultPreview()
+		}
+		return nil
+	})
 
 	open := s.btn(i18n.OpenFile, func() { s.startOpen() }, false, nil)
 	paste := s.btn(i18n.PasteClipboard, func() { s.pasteClipboard() }, false, nil)
@@ -359,12 +361,9 @@ func (s *Shell) buildScreenshotTool() widget.Widget {
 		}
 		return i18n.T(s.model.Lang(), i18n.ScreenshotEmpty)
 	})
-	sync := state.NewComputed(func() uint64 {
-		v := s.rev.Get()
-		preview.SetSource(s.model.Screenshot().Image())
-		return v
+	preview.SetProvider(func() image.Image {
+		return s.model.Screenshot().Preview()
 	})
-	_ = sync
 
 	listCol := primitives.Box(
 		listLabel,

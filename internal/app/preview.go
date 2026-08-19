@@ -2,6 +2,7 @@ package app
 
 import (
 	"image"
+	"image/draw"
 	"math"
 
 	"github.com/gogpu/ui/event"
@@ -13,11 +14,20 @@ import (
 	"github.com/nus/dogubako/internal/imageproc"
 )
 
+// sourcePreviewFrame is one source-preview draw: raster, original size, crop overlay.
+type sourcePreviewFrame struct {
+	image       image.Image
+	size        image.Point
+	crop        image.Rectangle
+	cropEnabled bool
+}
+
 // sourcePreview shows the original image and lets the user drag a crop rectangle.
 type sourcePreview struct {
 	widget.WidgetBase
 
 	rev           state.ReadonlySignal[uint64]
+	provider      func() sourcePreviewFrame
 	image         image.Image
 	imageSize     image.Point
 	crop          image.Rectangle
@@ -36,6 +46,11 @@ func newSourcePreview(rev state.ReadonlySignal[uint64]) *sourcePreview {
 	return p
 }
 
+func (p *sourcePreview) SetProvider(f func() sourcePreviewFrame) {
+	p.provider = f
+	p.SetNeedsRedraw(true)
+}
+
 func (p *sourcePreview) SetImage(img image.Image, srcSize image.Point) {
 	p.image = img
 	p.imageSize = srcSize
@@ -46,6 +61,20 @@ func (p *sourcePreview) SetCrop(crop image.Rectangle, enabled bool) {
 	p.crop = crop
 	p.cropEnabled = enabled
 	p.SetNeedsRedraw(true)
+}
+
+func (p *sourcePreview) sync() {
+	if p.rev != nil {
+		_ = p.rev.Get()
+	}
+	if p.provider == nil {
+		return
+	}
+	frame := p.provider()
+	p.image = frame.image
+	p.imageSize = frame.size
+	p.crop = frame.crop
+	p.cropEnabled = frame.cropEnabled
 }
 
 func (p *sourcePreview) OnCropChanged(f func(image.Rectangle)) {
@@ -59,6 +88,7 @@ func (p *sourcePreview) Layout(_ widget.Context, cons geometry.Constraints) geom
 }
 
 func (p *sourcePreview) Draw(_ widget.Context, canvas widget.Canvas) {
+	p.sync()
 	b := p.Bounds()
 	if b.IsEmpty() {
 		return
@@ -89,6 +119,7 @@ func (p *sourcePreview) Draw(_ widget.Context, canvas widget.Canvas) {
 }
 
 func (p *sourcePreview) Event(ctx widget.Context, e event.Event) bool {
+	p.sync()
 	me, ok := e.(*event.MouseEvent)
 	if !ok || p.image == nil || p.imageSize.X <= 0 || p.imageSize.Y <= 0 {
 		return false
@@ -154,6 +185,7 @@ type destPreview struct {
 	widget.WidgetBase
 
 	rev       state.ReadonlySignal[uint64]
+	provider  func() image.Image
 	source    image.Image
 	image     image.Image
 	emptyHint func() string
@@ -164,6 +196,11 @@ func newDestPreview(rev state.ReadonlySignal[uint64]) *destPreview {
 	p.SetVisible(true)
 	p.SetEnabled(true)
 	return p
+}
+
+func (p *destPreview) SetProvider(f func() image.Image) {
+	p.provider = f
+	p.SetNeedsRedraw(true)
 }
 
 func (p *destPreview) SetImage(img image.Image) {
@@ -182,7 +219,29 @@ func (p *destPreview) SetEmptyHint(f func() string) {
 	p.emptyHint = f
 }
 
-func (p *destPreview) HasImage() bool { return p.source != nil || p.image != nil }
+func (p *destPreview) HasImage() bool {
+	if p.provider != nil {
+		return p.provider() != nil
+	}
+	return p.source != nil || p.image != nil
+}
+
+func (p *destPreview) resolvedImage() image.Image {
+	if p.rev != nil {
+		_ = p.rev.Get()
+	}
+	if p.provider != nil {
+		return p.provider()
+	}
+	if p.image != nil {
+		return p.image
+	}
+	if p.source == nil {
+		return nil
+	}
+	p.image = previewImage(p.source)
+	return p.image
+}
 
 func (p *destPreview) Layout(_ widget.Context, cons geometry.Constraints) geometry.Size {
 	size := cons.BiggestFinite(400, 300)
@@ -196,11 +255,7 @@ func (p *destPreview) Draw(_ widget.Context, canvas widget.Canvas) {
 		return
 	}
 	drawCheckerboard(canvas, b)
-	img := p.image
-	if img == nil && p.source != nil {
-		img = previewImage(p.source)
-		p.image = img
-	}
+	img := p.resolvedImage()
 	if img != nil {
 		drawFittedImage(canvas, img, fittedRect(toImageRect(b), img.Bounds().Size()))
 		return
@@ -262,7 +317,23 @@ func drawFittedImage(canvas widget.Canvas, src image.Image, fitted image.Rectang
 	if size.X != fitted.Dx() || size.Y != fitted.Dy() {
 		src = imageproc.Resize(src, fitted.Dx(), fitted.Dy())
 	}
-	canvas.DrawImage(src, geometry.Pt(float32(fitted.Min.X), float32(fitted.Min.Y)))
+	canvas.DrawImage(toDisplayRGBA(src), geometry.Pt(float32(fitted.Min.X), float32(fitted.Min.Y)))
+}
+
+// toDisplayRGBA copies src into an origin-aligned RGBA buffer. GPU DrawImage
+// treats Pix as tightly packed RGBA starting at (0,0); NRGBA and non-zero Min
+// would otherwise upload garbage or nothing.
+func toDisplayRGBA(src image.Image) *image.RGBA {
+	if src == nil {
+		return nil
+	}
+	if rgba, ok := src.(*image.RGBA); ok && rgba.Rect.Min == (image.Point{}) && rgba.Stride == rgba.Rect.Dx()*4 {
+		return rgba
+	}
+	b := src.Bounds()
+	dst := image.NewRGBA(image.Rect(0, 0, b.Dx(), b.Dy()))
+	draw.Draw(dst, dst.Bounds(), src, b.Min, draw.Src)
+	return dst
 }
 
 func imageRectToScreen(rect image.Rectangle, imgSize image.Point, fitted image.Rectangle) image.Rectangle {
