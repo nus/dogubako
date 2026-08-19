@@ -582,10 +582,11 @@ func (s *Shell) formSlider(qual widget.Widget) widget.Widget {
 }
 
 func (s *Shell) intField(sig state.Signal[string], minV, maxV int, apply func(int), enabled func() bool) widget.Widget {
+	disabled := func() bool { return enabled != nil && !enabled() }
 	tf := textfield.New(
 		textfield.ValueSignal(sig),
 		textfield.InputTypeOpt(textfield.TypeNumber),
-		textfield.DisabledFn(func() bool { return enabled != nil && !enabled() }),
+		textfield.DisabledFn(disabled),
 		textfield.PainterOpt(newCompactTFPainter(s.theme)),
 		textfield.OnSubmit(func(text string) {
 			n, ok := parseInt(strings.TrimSpace(text))
@@ -612,7 +613,15 @@ func (s *Shell) intField(sig state.Signal[string], minV, maxV int, apply func(in
 			apply(n)
 		}),
 	)
-	return primitives.Box(tf).Width(fieldWidth).Height(fieldH)
+	nudge := func(delta int) {
+		apply(stepIntValue(sig.Get(), minV, maxV, delta))
+		s.bump()
+	}
+	spins := newSpinButtons(s, disabled, func() { nudge(1) }, func() { nudge(-1) })
+	return primitives.HBox(
+		primitives.Expanded(primitives.Box(tf).Height(fieldH)),
+		primitives.Box(spins).Width(spinBtnW).MinWidthValue(spinBtnW).MaxWidthValue(spinBtnW).Height(fieldH),
+	).Width(fieldWidth).Height(fieldH).Gap(2)
 }
 
 func (s *Shell) txt(content string) *primitives.TextWidget {
