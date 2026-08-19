@@ -3,6 +3,7 @@ package app
 import (
 	"context"
 	"errors"
+	"os"
 	"path/filepath"
 	"runtime"
 	"strconv"
@@ -118,8 +119,12 @@ func Run() error {
 		WithTitle(i18n.T(s.model.Lang(), i18n.AppTitle)).
 		WithSize(windowWidth, windowHeight).
 		WithMinSize(windowMinW, windowMinH)
-	if img, err := appicon.RGBA(); err == nil {
+	if img, err := appicon.WindowRGBA(); err == nil {
 		cfg = cfg.WithIcon(img)
+	}
+	if p := os.Getenv("DOGUBAKO_OPEN"); p != "" {
+		_ = s.model.Image().LoadPath(p)
+		s.syncFields()
 	}
 	gpuApp := gogpu.NewApp(cfg)
 	uiApp := uiapp.New(

@@ -14,5 +14,7 @@ func defaultCJKPaths() []string {
 		filepath.Join("/usr/share/fonts/opentype/noto-cjk/NotoSansCJKjp-Regular.otf"),
 		filepath.Join("/usr/share/fonts/noto-cjk/NotoSansCJKjp-Regular.otf"),
 		filepath.Join("/usr/share/fonts/truetype/noto-cjk/NotoSansCJK-Regular.ttc"),
+		filepath.Join("/usr/share/fonts/truetype/wqy/wqy-microhei.ttc"),
+		filepath.Join("/usr/share/fonts/truetype/droid/DroidSansFallbackFull.ttf"),
 	}
 }
