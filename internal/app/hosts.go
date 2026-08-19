@@ -94,20 +94,13 @@ func (h *modeHost) active() widget.Widget {
 func (h *modeHost) Layout(ctx widget.Context, cons geometry.Constraints) geometry.Size {
 	size := cons.BiggestFinite(windowWidth, windowHeight)
 	h.SetBounds(geometry.FromPointSize(h.Position(), size))
-	active := h.active()
 	for _, child := range []widget.Widget{h.image, h.screenshot, h.android} {
 		if child == nil {
 			continue
 		}
-		if child == active {
-			sz := widget.LayoutChild(child, ctx, geometry.Tight(size))
-			if b, ok := child.(boundsSetter); ok {
-				b.SetBounds(geometry.FromPointSize(geometry.Pt(0, 0), sz))
-			}
-			continue
-		}
+		sz := widget.LayoutChild(child, ctx, geometry.Tight(size))
 		if b, ok := child.(boundsSetter); ok {
-			b.SetBounds(geometry.Rect{})
+			b.SetBounds(geometry.FromPointSize(geometry.Pt(0, 0), sz))
 		}
 	}
 	return size
@@ -131,7 +124,7 @@ func (h *modeHost) Mount(ctx widget.Context) {
 	if sched == nil {
 		return
 	}
-	h.AddBinding(state.BindToScheduler(h.shell.rev, h, sched))
+	h.AddBinding(state.BindToSchedulerLayout(h.shell.rev, h, sched))
 }
 
 func (h *modeHost) Unmount() {}
