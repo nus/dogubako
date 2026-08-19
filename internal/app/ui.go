@@ -62,7 +62,7 @@ func (s *Shell) buildSidebar() widget.Widget {
 		))
 	}
 
-	lang := s.segBar(
+	lang := s.segBarFill(
 		segItem{
 			label:    func() string { return "日本語" },
 			selected: func() bool { return s.model.Lang() == i18n.JA },
@@ -184,26 +184,6 @@ func (s *Shell) buildImageForms() widget.Widget {
 		return !has() || s.model.Image().RotateDegrees() == 0
 	})
 
-	format := s.segBar(
-		segItem{
-			label:    func() string { return "PNG" },
-			selected: func() bool { return s.model.Image().Format() == imageproc.FormatPNG },
-			disabled: func() bool { return !has() },
-			onClick: func() {
-				s.model.Image().SetFormat(imageproc.FormatPNG)
-				s.bump()
-			},
-		},
-		segItem{
-			label:    func() string { return "JPEG" },
-			selected: func() bool { return s.model.Image().Format() == imageproc.FormatJPEG },
-			disabled: func() bool { return !has() },
-			onClick: func() {
-				s.model.Image().SetFormat(imageproc.FormatJPEG)
-				s.bump()
-			},
-		},
-	)
 	qual := slider.New(
 		slider.Min(1), slider.Max(100), slider.Step(1),
 		slider.ValueSignal(s.quality),
@@ -239,7 +219,26 @@ func (s *Shell) buildImageForms() widget.Widget {
 			s.formEnd(resetRot),
 		),
 		s.formPanel(i18n.Format,
-			s.formRow(i18n.OutputFormat, primitives.Box(format).Width(fieldWidth)),
+			s.formRow(i18n.OutputFormat, primitives.Box(s.segBarFill(
+				segItem{
+					label:    func() string { return "PNG" },
+					selected: func() bool { return s.model.Image().Format() == imageproc.FormatPNG },
+					disabled: func() bool { return !has() },
+					onClick: func() {
+						s.model.Image().SetFormat(imageproc.FormatPNG)
+						s.bump()
+					},
+				},
+				segItem{
+					label:    func() string { return "JPEG" },
+					selected: func() bool { return s.model.Image().Format() == imageproc.FormatJPEG },
+					disabled: func() bool { return !has() },
+					onClick: func() {
+						s.model.Image().SetFormat(imageproc.FormatJPEG)
+						s.bump()
+					},
+				},
+			)).Width(fieldWidth)),
 			s.formSlider(qual),
 		),
 	)

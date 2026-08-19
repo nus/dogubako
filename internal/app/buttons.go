@@ -63,8 +63,18 @@ type segItem struct {
 	disabled func() bool
 }
 
-// segBar is a compact segmented control: equal-width toggle buttons in one row.
+// segBar is a compact segmented control: buttons keep their label width.
 func (s *Shell) segBar(items ...segItem) widget.Widget {
+	children := make([]widget.Widget, 0, len(items))
+	for _, it := range items {
+		it := it
+		children = append(children, s.btnFn(it.label, it.onClick, it.selected, it.disabled))
+	}
+	return primitives.HBox(children...).Gap(2)
+}
+
+// segBarFill stretches segments across the parent width (sidebar language).
+func (s *Shell) segBarFill(items ...segItem) widget.Widget {
 	children := make([]widget.Widget, 0, len(items))
 	for _, it := range items {
 		it := it
