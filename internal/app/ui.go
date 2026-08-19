@@ -7,7 +7,6 @@ import (
 	"github.com/gogpu/ui/core/checkbox"
 	"github.com/gogpu/ui/core/datatable"
 	"github.com/gogpu/ui/core/listview"
-	"github.com/gogpu/ui/core/slider"
 	"github.com/gogpu/ui/core/textfield"
 	"github.com/gogpu/ui/primitives"
 	"github.com/gogpu/ui/state"
@@ -195,18 +194,11 @@ func (s *Shell) buildImageForms() widget.Widget {
 		return !has() || s.model.Image().RotateDegrees() == 0
 	})
 
-	qual := slider.New(
-		slider.Min(1), slider.Max(100), slider.Step(1),
-		slider.ValueSignal(s.quality),
-		slider.DisabledFn(func() bool {
-			return !has() || s.model.Image().Format() != imageproc.FormatJPEG
-		}),
-		slider.PainterOpt(material3.SliderPainter{Theme: s.theme}),
-		slider.OnChange(func(v float32) {
-			s.model.Image().SetJPEGQuality(int(v + 0.5))
-			s.bump()
-		}),
-	)
+	qual := newHSlider(s, s.quality, 1, 100, 1, func() bool {
+		return !has() || s.model.Image().Format() != imageproc.FormatJPEG
+	}, func(v float32) {
+		s.model.Image().SetJPEGQuality(int(v + 0.5))
+	})
 
 	return newEqualRow(8,
 		s.formPanel(i18n.Resize,
@@ -567,9 +559,11 @@ func (s *Shell) formEnd(control widget.Widget) widget.Widget {
 }
 
 func (s *Shell) formSlider(qual widget.Widget) widget.Widget {
-	label := s.txt("").ContentSignal(s.computed(func() string {
-		return i18n.T(s.model.Lang(), i18n.JPEGQuality, s.model.Image().JPEGQuality())
-	})).FontSize(13).Color(widget.RGBA8(70, 70, 70, 255))
+	label := s.txt("").ContentSignal(state.NewComputed(func() string {
+		_ = s.rev.Get()
+		q := int(s.quality.Get() + 0.5)
+		return i18n.T(s.model.Lang(), i18n.JPEGQuality, q)
+	}, s.rev.AsReadonly(), s.quality.AsReadonly())).FontSize(13).Color(widget.RGBA8(70, 70, 70, 255))
 	return primitives.HBox(
 		primitives.Expanded(label),
 		primitives.Box(qual).Width(fieldWidth).Height(formRowH),

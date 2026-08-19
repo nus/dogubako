@@ -243,7 +243,7 @@ func (s *Shell) computed(fn func() string) state.ReadonlySignal[string] {
 	return state.NewComputed(func() string {
 		_ = s.rev.Get()
 		return fn()
-	})
+	}, s.rev.AsReadonly())
 }
 
 func (s *Shell) handleKey(e *event.KeyEvent) bool {
