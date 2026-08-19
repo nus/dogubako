@@ -2,6 +2,7 @@ package app
 
 import (
 	"strings"
+	"time"
 
 	"github.com/gogpu/ui/event"
 	"github.com/gogpu/ui/geometry"
@@ -9,7 +10,11 @@ import (
 	"github.com/gogpu/ui/widget"
 )
 
-const spinBtnW float32 = 16
+const (
+	spinBtnW          float32 = 16
+	spinInitialDelay          = 400 * time.Millisecond
+	spinRepeatEvery           = 50 * time.Millisecond
+)
 
 type spinHalf int
 
@@ -26,8 +31,10 @@ type spinButtons struct {
 	disabled func() bool
 	onUp     func()
 	onDown   func()
-	hover    spinHalf
-	pressed  spinHalf
+	hover     spinHalf
+	pressed   spinHalf
+	pressedAt time.Time
+	lastStep  time.Time
 }
 
 func newSpinButtons(s *Shell, disabled func() bool, onUp, onDown func()) *spinButtons {
@@ -61,7 +68,7 @@ func (b *spinButtons) Layout(_ widget.Context, cons geometry.Constraints) geomet
 	return size
 }
 
-func (b *spinButtons) Draw(_ widget.Context, canvas widget.Canvas) {
+func (b *spinButtons) Draw(ctx widget.Context, canvas widget.Canvas) {
 	r := b.Bounds()
 	if r.IsEmpty() {
 		return
@@ -88,6 +95,7 @@ func (b *spinButtons) Draw(_ widget.Context, canvas widget.Canvas) {
 	canvas.DrawLine(geometry.Pt(r.Min.X+3, midY), geometry.Pt(r.Max.X-3, midY), border, 1)
 	drawSpinChevron(canvas, up, true, fg)
 	drawSpinChevron(canvas, down, false, fg)
+	b.tickRepeat(ctx)
 }
 
 func paintSpinHalf(canvas widget.Canvas, r geometry.Rect, hover, pressed bool) {
@@ -128,6 +136,17 @@ func (b *spinButtons) Event(ctx widget.Context, e event.Event) bool {
 	if !ok {
 		return false
 	}
+	if b.pressed != spinNone {
+		switch me.MouseType {
+		case event.MouseMove, event.MouseDrag:
+			return true
+		case event.MouseRelease:
+			if me.Button == event.ButtonLeft {
+				b.stopRepeat(ctx)
+				return true
+			}
+		}
+	}
 	half := b.halfAt(me.Position)
 	switch me.MouseType {
 	case event.MouseMove:
@@ -146,26 +165,81 @@ func (b *spinButtons) Event(ctx widget.Context, e event.Event) bool {
 	case event.MousePress:
 		if half != spinNone && me.Button == event.ButtonLeft && !b.inactive() {
 			b.pressed = half
-			b.SetNeedsRedraw(true)
-			return true
-		}
-	case event.MouseRelease:
-		if b.pressed != spinNone && me.Button == event.ButtonLeft {
-			was := b.pressed
-			b.pressed = spinNone
-			b.SetNeedsRedraw(true)
-			if half == was && !b.inactive() {
-				if was == spinUp && b.onUp != nil {
-					b.onUp()
-				}
-				if was == spinDown && b.onDown != nil {
-					b.onDown()
-				}
+			now := time.Now()
+			b.pressedAt = now
+			b.lastStep = now
+			if cap, ok := ctx.(widget.PointerCapturer); ok {
+				cap.CapturePointer(b)
 			}
+			b.fire()
+			b.SetNeedsRedraw(true)
+			b.scheduleRepeat(ctx)
 			return true
 		}
 	}
 	return false
+}
+
+func (b *spinButtons) fire() {
+	if b.inactive() {
+		return
+	}
+	if b.pressed == spinUp && b.onUp != nil {
+		b.onUp()
+	}
+	if b.pressed == spinDown && b.onDown != nil {
+		b.onDown()
+	}
+}
+
+func (b *spinButtons) maybeRepeat(now time.Time) bool {
+	if b.pressed == spinNone {
+		return false
+	}
+	if now.Sub(b.pressedAt) < spinInitialDelay {
+		return false
+	}
+	if now.Sub(b.lastStep) < spinRepeatEvery {
+		return false
+	}
+	b.fire()
+	b.lastStep = now
+	return true
+}
+
+func (b *spinButtons) tickRepeat(ctx widget.Context) {
+	if b.pressed == spinNone || ctx == nil {
+		return
+	}
+	if !b.inactive() {
+		b.maybeRepeat(time.Now())
+	}
+	b.SetNeedsRedraw(true)
+	b.scheduleRepeat(ctx)
+}
+
+func (b *spinButtons) scheduleRepeat(ctx widget.Context) {
+	if ctx != nil {
+		if sched, ok := ctx.(widget.AnimationScheduler); ok {
+			sched.ScheduleAnimationFrame()
+		} else {
+			ctx.InvalidateRect(b.Bounds())
+		}
+	}
+	if b.shell != nil && b.shell.gpu != nil {
+		b.shell.gpu.RequestRedraw()
+	}
+}
+
+func (b *spinButtons) stopRepeat(ctx widget.Context) {
+	b.pressed = spinNone
+	b.SetNeedsRedraw(true)
+	if ctx == nil {
+		return
+	}
+	if cap, ok := ctx.(widget.PointerCapturer); ok {
+		cap.ReleasePointer(b)
+	}
 }
 
 func (b *spinButtons) Children() []widget.Widget { return nil }
@@ -181,7 +255,9 @@ func (b *spinButtons) Mount(ctx widget.Context) {
 	b.AddBinding(state.BindToScheduler(b.shell.rev, b, sched))
 }
 
-func (b *spinButtons) Unmount() {}
+func (b *spinButtons) Unmount() {
+	b.pressed = spinNone
+}
 
 func stepIntValue(cur string, minV, maxV, delta int) int {
 	n, ok := parseInt(strings.TrimSpace(cur))

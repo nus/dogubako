@@ -2,8 +2,10 @@ package app
 
 import (
 	"testing"
+	"time"
 
 	"github.com/gogpu/ui/geometry"
+	"github.com/gogpu/ui/uitest"
 )
 
 func TestStepIntValueClamps(t *testing.T) {
@@ -35,5 +37,66 @@ func TestSpinButtonsHalfAt(t *testing.T) {
 	}
 	if b.halfAt(geometry.Pt(0, 0)) != spinNone {
 		t.Fatal("outside")
+	}
+}
+
+func TestSpinPressStepsImmediately(t *testing.T) {
+	n := 0
+	b := newSpinButtons(nil, nil, func() { n++ }, nil)
+	b.SetBounds(geometry.NewRect(0, 0, 16, 28))
+	ctx := uitest.NewMockContext()
+	if !b.Event(ctx, uitest.Click(8, 6)) {
+		t.Fatal("press should be consumed")
+	}
+	if n != 1 {
+		t.Fatalf("press steps = %d, want 1", n)
+	}
+	if b.pressed != spinUp {
+		t.Fatal("should stay pressed until release")
+	}
+	if !b.Event(ctx, uitest.Release(8, 6)) {
+		t.Fatal("release should be consumed")
+	}
+	if n != 1 {
+		t.Fatalf("release must not step again, got %d", n)
+	}
+	if b.pressed != spinNone {
+		t.Fatal("released")
+	}
+}
+
+func TestSpinMaybeRepeatAfterDelay(t *testing.T) {
+	n := 0
+	b := newSpinButtons(nil, nil, func() { n++ }, nil)
+	t0 := time.Unix(1, 0)
+	b.pressed = spinUp
+	b.pressedAt = t0
+	b.lastStep = t0
+
+	if b.maybeRepeat(t0.Add(100 * time.Millisecond)) {
+		t.Fatal("should wait for initial delay")
+	}
+	if n != 0 {
+		t.Fatalf("early steps = %d", n)
+	}
+	if !b.maybeRepeat(t0.Add(spinInitialDelay)) {
+		t.Fatal("first repeat at initial delay")
+	}
+	if n != 1 {
+		t.Fatalf("after delay = %d", n)
+	}
+	if b.maybeRepeat(t0.Add(spinInitialDelay + spinRepeatEvery/2)) {
+		t.Fatal("should wait for repeat interval")
+	}
+	if !b.maybeRepeat(t0.Add(spinInitialDelay + spinRepeatEvery)) {
+		t.Fatal("second repeat")
+	}
+	if n != 2 {
+		t.Fatalf("got %d", n)
+	}
+
+	b.pressed = spinNone
+	if b.maybeRepeat(t0.Add(10 * time.Second)) {
+		t.Fatal("stopped")
 	}
 }
