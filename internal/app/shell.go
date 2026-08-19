@@ -13,7 +13,6 @@ import (
 	_ "github.com/gogpu/gg/gpu"
 	"github.com/gogpu/gogpu"
 	uiapp "github.com/gogpu/ui/app"
-	"github.com/gogpu/ui/desktop"
 	"github.com/gogpu/ui/dnd"
 	"github.com/gogpu/ui/event"
 	"github.com/gogpu/ui/geometry"
@@ -156,7 +155,7 @@ func Run() error {
 	mgr := uiApp.Window().DndManager()
 	mgr.RegisterTarget(&fileDropTarget{shell: s}, geometry.NewRect(0, 0, 4000, 3000))
 
-	err := desktop.Run(gpuApp, uiApp)
+	err := runDesktop(gpuApp, uiApp)
 	s.mu.Lock()
 	s.closed = true
 	s.mu.Unlock()

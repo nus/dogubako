@@ -41,6 +41,10 @@ func (h *keyHost) Layout(ctx widget.Context, cons geometry.Constraints) geometry
 }
 
 func (h *keyHost) Draw(ctx widget.Context, canvas widget.Canvas) {
+	bounds := h.Bounds()
+	if !bounds.IsEmpty() {
+		canvas.DrawRect(bounds, widget.RGBA8(255, 255, 255, 255))
+	}
 	if h.child != nil {
 		widget.DrawChild(h.child, ctx, canvas)
 	}
