@@ -10,7 +10,6 @@ import (
 	"sync"
 	"time"
 
-	_ "github.com/gogpu/gg/gpu"
 	"github.com/gogpu/gogpu"
 	uiapp "github.com/gogpu/ui/app"
 	"github.com/gogpu/ui/dnd"
