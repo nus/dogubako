@@ -174,7 +174,7 @@ make test
 
 ## フォント
 
-日本語表示用の Noto Sans CJK は Linux ではシステムフォント（`fonts-noto-cjk`）から開きます。macOS では `/System/Library/Fonts/ヒラギノ角ゴシック W3.ttc`（無ければ W4 以降）を開きます。フォルダ／ファイルの絵文字アイコンは、macOS では Apple Color Emoji、Linux では Noto Color Emoji（入っていれば）を登録します。gogpu/ui はグリフ単位のフォールバックを持たないため、絵文字が欠ける場合があります。
+日本語表示用の Noto Sans CJK は Linux ではシステムフォント（`fonts-noto-cjk`）から開きます。macOS では `/System/Library/Fonts/ヒラギノ角ゴシック W3.ttc`（無ければ W4 以降）を開きます。フォルダ／ファイル／開閉マークは絵文字フォントを使わず、ベクトルで描きます。
 
 ## ディレクトリ
 

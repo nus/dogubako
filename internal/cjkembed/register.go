@@ -25,15 +25,13 @@ var (
 // Available reports whether a CJK face was registered for this process.
 func Available() bool { return cjkLoaded }
 
-// Register loads system CJK (and emoji, when present) into the gogpu/ui
-// font registry. Call once before creating the widget tree.
+// Register loads a system CJK face into the gogpu/ui font registry.
+// Call once before creating the widget tree.
 // It returns whether a CJK face was loaded.
 func Register() bool {
 	cjkLoaded = false
 	FamilyName = ""
-	ok := registerCJK()
-	registerEmoji()
-	return ok
+	return registerCJK()
 }
 
 func registerCJK() bool {

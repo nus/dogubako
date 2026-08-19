@@ -457,7 +457,14 @@ func (s *Shell) buildAndroidTool() widget.Widget {
 		datatable.SelectionModeOpt(datatable.SelectionSingle),
 		datatable.SelectedRowSignal(s.adbSel),
 		datatable.DisabledFn(func() bool { return busy() || !online() }),
-		datatable.PainterOpt(newQuietTablePainter(m3)),
+		datatable.PainterOpt(newQuietTablePainter(m3, func(row int) (int, bool, bool, bool) {
+			rows := s.model.Android().Rows()
+			if row < 0 || row >= len(rows) {
+				return 0, false, false, false
+			}
+			r := rows[row]
+			return r.Depth, r.Entry.IsDir, r.Expanded, true
+		})),
 		datatable.CellValue(func(row int, col string) string {
 			rows := s.model.Android().Rows()
 			if row < 0 || row >= len(rows) {
@@ -466,17 +473,7 @@ func (s *Shell) buildAndroidTool() widget.Widget {
 			r := rows[row]
 			switch col {
 			case "name":
-				mark := androidFileIcon
-				exp := ""
-				if r.Entry.IsDir {
-					mark = androidFolderIcon
-					if r.Expanded {
-						exp = androidExpandOpen + " "
-					} else {
-						exp = androidExpandClosed + " "
-					}
-				}
-				return strings.Repeat("  ", r.Depth) + exp + mark + " " + r.Entry.Name
+				return r.Entry.Name
 			case "size":
 				return formatFileSize(r.Entry.Size, r.Entry.IsDir)
 			case "mod":

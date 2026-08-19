@@ -54,11 +54,12 @@ func (p quietListPainter) PaintSelection(canvas widget.Canvas, state listview.It
 
 // quietTablePainter keeps Material 3 table chrome but skips "No data".
 type quietTablePainter struct {
-	inner material3.DataTablePainter
+	inner   material3.DataTablePainter
+	fileRow func(int) (depth int, isDir, expanded bool, ok bool)
 }
 
-func newQuietTablePainter(theme *material3.Theme) quietTablePainter {
-	return quietTablePainter{inner: material3.DataTablePainter{Theme: theme}}
+func newQuietTablePainter(theme *material3.Theme, fileRow func(int) (depth int, isDir, expanded bool, ok bool)) quietTablePainter {
+	return quietTablePainter{inner: material3.DataTablePainter{Theme: theme}, fileRow: fileRow}
 }
 
 func (p quietTablePainter) PaintHeader(canvas widget.Canvas, bounds geometry.Rect, state datatable.HeaderPaintState) {
@@ -74,6 +75,13 @@ func (p quietTablePainter) PaintRow(canvas widget.Canvas, state datatable.RowPai
 }
 
 func (p quietTablePainter) PaintCell(canvas widget.Canvas, state datatable.CellPaintState) {
+	if p.fileRow != nil && state.ColIndex == 0 {
+		depth, isDir, expanded, ok := p.fileRow(state.RowIndex)
+		if ok {
+			drawAndroidNameGlyphs(canvas, state.Bounds, depth, isDir, expanded, state.Disabled, state.Value)
+			return
+		}
+	}
 	p.inner.PaintCell(canvas, state)
 }
 
