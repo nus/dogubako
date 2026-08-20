@@ -191,6 +191,16 @@ func (s *Shell) bump() {
 	}
 }
 
+// forceFullRepaint asks the window to redraw every pixel. FrameworkManaged
+// otherwise clips to dirty widgets' previous ScreenBounds, so a tool switch
+// would leave the old panel on screen.
+func (s *Shell) forceFullRepaint() {
+	if s.ui == nil {
+		return
+	}
+	s.ui.Window().SetRenderMode(uiapp.RenderModeFrameworkManaged)
+}
+
 func (s *Shell) reloadUI() {
 	s.syncFields()
 	if s.ui != nil {
@@ -231,7 +241,7 @@ func (s *Shell) tick() {
 	s.model.Android().Drain()
 	s.model.Screenshot().RefreshFiles()
 	gen := s.model.Image().Generation() + s.model.Screenshot().Generation() + s.model.Android().Generation()
-	if gen != s.rev.Get() {
+	if gen > s.rev.Get() {
 		s.syncFields()
 		s.rev.Set(gen)
 	}
