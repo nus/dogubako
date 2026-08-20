@@ -153,7 +153,7 @@ func (b *screenshotListBody) Draw(_ widget.Context, canvas widget.Canvas) {
 		drawCheckerboard(canvas, thumbSlot)
 		if img := shot.Thumbnail(files[i].Path); img != nil {
 			fitted := fittedRect(toImageRect(thumbSlot), img.Bounds().Size())
-			drawFittedImage(canvas, img, fitted, img.Bounds().Size(), image.Rectangle{})
+			drawFittedImage(canvas, nil, img, fitted, img.Bounds().Size(), image.Rectangle{})
 		}
 		name := screenshotNameRect(row)
 		style := widget.TextStyle{
