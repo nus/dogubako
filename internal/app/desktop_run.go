@@ -19,10 +19,18 @@ func runDesktop(gpuApp *gogpu.App, uiApp *uiapp.App) error {
 	widget.RegisterClipboardProvider(gpuApp)
 
 	var canvas *ggcanvas.Canvas
+	var lastW, lastH int
 	gpuApp.OnDraw(func(dc *gogpu.Context) {
 		w, h := dc.Width(), dc.Height()
 		if w <= 0 || h <= 0 {
 			return
+		}
+		// EventResize is deferred during macOS live resize. HandleResize marks
+		// needsFullRepaint so the blank pixmap from canvas.Resize is fully
+		// redrawn instead of leaving black strips in the expanded area.
+		if w != lastW || h != lastH {
+			uiApp.Window().HandleResize(w, h)
+			lastW, lastH = w, h
 		}
 		if canvas == nil {
 			var err error
