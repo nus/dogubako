@@ -16,6 +16,16 @@ func TestPNGDecodes(t *testing.T) {
 	}
 }
 
+func TestWindowRGBASize(t *testing.T) {
+	img, err := WindowRGBA()
+	if err != nil {
+		t.Fatal(err)
+	}
+	if img.Bounds().Dx() != windowIconSize || img.Bounds().Dy() != windowIconSize {
+		t.Fatalf("window icon size %v, want %d", img.Bounds(), windowIconSize)
+	}
+}
+
 func TestRGBALightCorner(t *testing.T) {
 	img, err := RGBA()
 	if err != nil {

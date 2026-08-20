@@ -5,8 +5,6 @@ import (
 	"fmt"
 	"time"
 
-	"github.com/guigui-gui/guigui"
-
 	"github.com/nus/dogubako/internal/adbfs"
 	"github.com/nus/dogubako/internal/i18n"
 )
@@ -215,7 +213,6 @@ func (m *AndroidModel) drainDevices() {
 	case res := <-m.pendingDevices:
 		m.pendingDevices = nil
 		m.applyDevices(res.devices, res.err)
-		guigui.RequestRebuild()
 	default:
 	}
 }
@@ -228,7 +225,6 @@ func (m *AndroidModel) drainList() {
 	case res := <-m.pendingList:
 		m.pendingList = nil
 		m.applyList(res)
-		guigui.RequestRebuild()
 	default:
 	}
 }
@@ -248,7 +244,6 @@ func (m *AndroidModel) drainCopy() {
 				m.startList(m.Root(), false)
 			}
 		}
-		guigui.RequestRebuild()
 	default:
 	}
 }

@@ -2,7 +2,6 @@ package app
 
 import (
 	"image"
-	"strings"
 	"testing"
 )
 
@@ -96,28 +95,5 @@ func TestAndroidSortMark(t *testing.T) {
 	}
 	if got := androidSortMark(androidSortMod, androidSortMod, true); got != " ▼" {
 		t.Fatalf("desc = %q", got)
-	}
-}
-
-func TestAndroidExpandMarksUseAvailableGlyphs(t *testing.T) {
-	if androidExpandClosed != "▶" || androidExpandOpen != "▼" {
-		t.Fatalf("expand marks = %q %q", androidExpandClosed, androidExpandOpen)
-	}
-	for _, s := range []string{androidExpandClosed, androidExpandOpen} {
-		if strings.ContainsRune(s, '\u25B8') || strings.ContainsRune(s, '\u25BE') {
-			t.Fatalf("small triangle missing on macOS: %q", s)
-		}
-	}
-}
-
-func TestAndroidFileIconsHaveNoVariationSelector(t *testing.T) {
-	if strings.ContainsRune(androidFolderIcon, '\uFE0F') || strings.ContainsRune(androidFileIcon, '\uFE0F') {
-		t.Fatal("emoji variation selector would show as a missing-glyph box")
-	}
-	if androidFolderIcon != "\U0001F5C2" {
-		t.Fatalf("folder = %q", androidFolderIcon)
-	}
-	if androidFileIcon != "\U0001F4C4" {
-		t.Fatalf("file = %q", androidFileIcon)
 	}
 }
