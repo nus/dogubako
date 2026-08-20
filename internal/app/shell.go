@@ -139,7 +139,9 @@ func Run() error {
 	}
 	gpuApp := gogpu.NewApp(cfg)
 	uiApp := uiapp.New(
-		uiapp.WithWindowProvider(gpuApp),
+		// Live physical size so layout tracks macOS live-resize ticks
+		// (cached LogicalSize stays stale until the drag ends).
+		uiapp.WithWindowProvider(newLiveWindowProvider(gpuApp)),
 		uiapp.WithPlatformProvider(gpuApp),
 		uiapp.WithEventSource(gpuApp.EventSource()),
 		uiapp.WithTheme(theme.AsTheme()),
