@@ -532,14 +532,15 @@ func (s *Shell) sendScreenshotToImage() {
 }
 
 func (s *Shell) showScreenshotFolder() {
-	dir := s.model.Screenshot().DestDir()
-	if dir == "" {
-		s.model.Screenshot().SetStatus(i18n.StatusDestFailed, s.model.Screenshot().DestErr())
+	shot := s.model.Screenshot()
+	path := shot.RevealPath()
+	if path == "" {
+		shot.SetStatus(i18n.StatusDestFailed, shot.DestErr())
 		s.bump()
 		return
 	}
-	if err := userdir.OpenInFileManager(dir); err != nil {
-		s.model.Screenshot().SetStatus(i18n.StatusFolderOpenFailed, err)
+	if err := userdir.OpenInFileManager(path); err != nil {
+		shot.SetStatus(i18n.StatusFolderOpenFailed, err)
 	}
 	s.bump()
 }

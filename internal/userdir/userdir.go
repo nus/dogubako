@@ -3,10 +3,12 @@ package userdir
 import (
 	"bufio"
 	"fmt"
+	"net/url"
 	"os"
 	"os/exec"
 	"path/filepath"
 	"runtime"
+	"strconv"
 	"strings"
 	"time"
 )
@@ -33,6 +35,14 @@ var (
 	stat        = os.Stat
 	mkdirAll    = os.MkdirAll
 	readFile    = os.ReadFile
+
+	// startCommand / runCommand are vars so tests can stub file-manager launches.
+	startCommand = func(name string, args ...string) error {
+		return exec.Command(name, args...).Start()
+	}
+	runCommand = func(name string, args ...string) error {
+		return exec.Command(name, args...).Run()
+	}
 )
 
 // Pictures returns the user's pictures directory.
@@ -169,19 +179,61 @@ func parseUserDirs(contents, home string) map[string]string {
 	return out
 }
 
-// OpenInFileManager reveals dir in Finder (macOS) or the file manager (Ubuntu).
-func OpenInFileManager(dir string) error {
-	if dir == "" {
+// OpenInFileManager opens path in Finder (macOS) or the file manager (Ubuntu).
+// If path is a file, the containing folder is shown with that file selected.
+func OpenInFileManager(path string) error {
+	if path == "" {
 		return fmt.Errorf("no directory")
 	}
-	var cmd *exec.Cmd
-	switch currentOS {
-	case "darwin":
-		cmd = exec.Command("open", dir)
-	default:
-		cmd = exec.Command("xdg-open", dir)
+	fi, err := stat(path)
+	if err == nil && !fi.IsDir() {
+		if rerr := revealFile(path); rerr == nil {
+			return nil
+		}
+		path = filepath.Dir(path)
+	} else if err != nil {
+		parent := filepath.Dir(path)
+		if parent == "" || parent == path {
+			return err
+		}
+		path = parent
 	}
-	return cmd.Start()
+	return openDir(path)
+}
+
+func revealFile(path string) error {
+	if currentOS == "darwin" {
+		return runCommand("open", "-R", path)
+	}
+	return runCommand("dbus-send", linuxShowItemsArgs(fileURI(path))...)
+}
+
+func openDir(dir string) error {
+	if currentOS == "darwin" {
+		return startCommand("open", dir)
+	}
+	return startCommand("xdg-open", dir)
+}
+
+func fileURI(path string) string {
+	abs := path
+	if a, err := filepath.Abs(path); err == nil {
+		abs = a
+	}
+	return (&url.URL{Scheme: "file", Path: filepath.ToSlash(abs)}).String()
+}
+
+func linuxShowItemsArgs(uri string) []string {
+	return []string{
+		"--session",
+		"--print-reply",
+		"--dest=org.freedesktop.FileManager1",
+		"--type=method_call",
+		"/org/freedesktop/FileManager1",
+		"org.freedesktop.FileManager1.ShowItems",
+		"array:string:" + strconv.Quote(uri),
+		`string:""`,
+	}
 }
 
 // Override replaces OS/home lookup. Tests should defer the returned restore function.
