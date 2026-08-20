@@ -223,6 +223,76 @@ func TestSourcePreviewDrawBakesOverlayWhileDragging(t *testing.T) {
 	}
 }
 
+func TestApplyPaintOverlayBlendsSourceCoords(t *testing.T) {
+	dst := image.NewRGBA(image.Rect(0, 0, 10, 10))
+	for i := range dst.Pix {
+		dst.Pix[i] = 255
+	}
+	over := image.NewNRGBA(image.Rect(0, 0, 10, 10))
+	over.SetNRGBA(2, 3, color.NRGBA{R: 255, A: 255})
+	applyPaintOverlay(dst, over, image.Pt(10, 10))
+	if got := dst.RGBAAt(2, 3); got.R != 255 || got.G != 0 {
+		t.Fatalf("overlay pixel = %+v", got)
+	}
+	if got := dst.RGBAAt(0, 0); got.R != 255 || got.G != 255 {
+		t.Fatalf("clear pixel = %+v", got)
+	}
+}
+
+func TestPaintCanvasDrawsOverlay(t *testing.T) {
+	src := image.NewNRGBA(image.Rect(0, 0, 20, 20))
+	for y := 0; y < 20; y++ {
+		for x := 0; x < 20; x++ {
+			src.SetNRGBA(x, y, color.NRGBA{R: 255, G: 255, B: 255, A: 255})
+		}
+	}
+	over := image.NewNRGBA(image.Rect(0, 0, 20, 20))
+	over.SetNRGBA(0, 0, color.NRGBA{R: 255, A: 255})
+	p := newPaintCanvas(nil)
+	p.SetProvider(func() paintCanvasFrame {
+		return paintCanvasFrame{image: src, size: image.Pt(20, 20), overlay: over}
+	})
+	p.SetBounds(geometry.NewRect(0, 0, 20, 20))
+	canvas := &uitest.MockCanvas{}
+	p.Draw(nil, canvas)
+	if len(canvas.Images) != 1 {
+		t.Fatalf("DrawImage calls = %d, want 1", len(canvas.Images))
+	}
+	got, ok := canvas.Images[0].Image.(*image.RGBA)
+	if !ok {
+		t.Fatalf("drawn type %T", canvas.Images[0].Image)
+	}
+	if c := got.RGBAAt(0, 0); c.R != 255 || c.G != 0 {
+		t.Fatalf("painted corner = %+v", c)
+	}
+	if c := got.RGBAAt(10, 10); c.R != 255 || c.G != 255 {
+		t.Fatalf("untouched = %+v", c)
+	}
+}
+
+func TestPaintCanvasLocalMouseUsesScreenOriginWhileDragging(t *testing.T) {
+	p := newPaintCanvas(nil)
+	p.SetBounds(geometry.NewRect(0, 0, 200, 150))
+	p.SetScreenOrigin(geometry.Pt(192, 80))
+
+	press := event.NewMouseEvent(
+		event.MousePress, event.ButtonLeft, event.ButtonStateLeft,
+		geometry.Pt(40, 30), geometry.Pt(40, 30), event.ModNone,
+	)
+	if got := p.localMouse(press); got != (image.Point{X: 40, Y: 30}) {
+		t.Fatalf("press (tree-local) = %v, want (40,30)", got)
+	}
+
+	p.dragging = true
+	move := event.NewMouseEvent(
+		event.MouseMove, event.ButtonNone, event.ButtonStateLeft,
+		geometry.Pt(192+40, 80+30), geometry.Pt(192+40, 80+30), event.ModNone,
+	)
+	if got := p.localMouse(move); got != (image.Point{X: 40, Y: 30}) {
+		t.Fatalf("captured window coords = %v, want (40,30)", got)
+	}
+}
+
 func TestSourcePreviewLocalMouseUsesScreenOriginWhileDragging(t *testing.T) {
 	p := newSourcePreview(nil)
 	p.SetBounds(geometry.NewRect(0, 0, 200, 150))

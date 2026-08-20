@@ -88,6 +88,134 @@ func TestImageModelRotate90SwapsSize(t *testing.T) {
 	}
 }
 
+func TestImageModelPaintCompositesThenClips(t *testing.T) {
+	src := image.NewNRGBA(image.Rect(0, 0, 10, 10))
+	for y := 0; y < 10; y++ {
+		for x := 0; x < 10; x++ {
+			src.SetNRGBA(x, y, color.NRGBA{B: 255, A: 255})
+		}
+	}
+	var m ImageModel
+	m.setSource(src, "test.png", imageproc.FormatPNG)
+	m.SetPaintColor(color.NRGBA{R: 255, A: 255})
+	m.SetBrushSize(1)
+	m.BeginPaintStroke(image.Pt(1, 1))
+	m.EndPaintStroke()
+
+	got, err := m.Processed()
+	if err != nil {
+		t.Fatal(err)
+	}
+	nrgba, ok := got.(*image.NRGBA)
+	if !ok {
+		t.Fatalf("type %T", got)
+	}
+	if c := nrgba.NRGBAAt(1, 1); c.R < 250 || c.B > 10 {
+		t.Fatalf("painted pixel = %+v", c)
+	}
+	if c := nrgba.NRGBAAt(8, 8); c.B < 250 || c.R > 10 {
+		t.Fatalf("unpainted pixel = %+v", c)
+	}
+
+	m.SetCropEnabled(true)
+	m.SetCrop(image.Rect(0, 0, 4, 4))
+	m.SetWidth(4)
+	m.SetHeight(4)
+	got, err = m.Processed()
+	if err != nil {
+		t.Fatal(err)
+	}
+	if got.Bounds().Dx() != 4 || got.Bounds().Dy() != 4 {
+		t.Fatalf("cropped size = %v", got.Bounds())
+	}
+	nrgba = got.(*image.NRGBA)
+	if c := nrgba.NRGBAAt(1, 1); c.R < 250 {
+		t.Fatalf("paint should survive crop, got %+v", c)
+	}
+
+	if !m.CanUndoPaint() {
+		t.Fatal("expected undo")
+	}
+	m.UndoPaint()
+	got, err = m.Processed()
+	if err != nil {
+		t.Fatal(err)
+	}
+	nrgba = got.(*image.NRGBA)
+	if c := nrgba.NRGBAAt(1, 1); c.R > 10 {
+		t.Fatalf("undo should restore source, got %+v", c)
+	}
+}
+
+func TestImageModelPaintClearsOnNewSource(t *testing.T) {
+	src := image.NewNRGBA(image.Rect(0, 0, 6, 6))
+	var m ImageModel
+	m.setSource(src, "a.png", imageproc.FormatPNG)
+	m.BeginPaintStroke(image.Pt(2, 2))
+	m.EndPaintStroke()
+	if !m.HasPaint() {
+		t.Fatal("expected paint")
+	}
+	m.setSource(src, "b.png", imageproc.FormatPNG)
+	if m.HasPaint() || m.CanUndoPaint() {
+		t.Fatal("new source should drop paint")
+	}
+}
+
+func TestImageModelClearPaint(t *testing.T) {
+	src := image.NewNRGBA(image.Rect(0, 0, 8, 8))
+	src.SetNRGBA(0, 0, color.NRGBA{G: 255, A: 255})
+	var m ImageModel
+	m.setSource(src, "a.png", imageproc.FormatPNG)
+	m.SetPaintColor(color.NRGBA{R: 255, A: 255})
+	m.BeginPaintStroke(image.Pt(3, 3))
+	m.EndPaintStroke()
+	m.ClearPaint()
+	if m.HasPaint() {
+		t.Fatal("cleared")
+	}
+	got, err := m.Processed()
+	if err != nil {
+		t.Fatal(err)
+	}
+	nrgba := got.(*image.NRGBA)
+	if c := nrgba.NRGBAAt(3, 3); c.R != 0 {
+		t.Fatalf("cleared pixel = %+v", c)
+	}
+	if c := nrgba.NRGBAAt(0, 0); c != (color.NRGBA{G: 255, A: 255}) {
+		t.Fatalf("source pixel = %+v", c)
+	}
+}
+
+func TestImageModelPaintEraserRemovesStroke(t *testing.T) {
+	src := image.NewNRGBA(image.Rect(0, 0, 12, 12))
+	for y := 0; y < 12; y++ {
+		for x := 0; x < 12; x++ {
+			src.SetNRGBA(x, y, color.NRGBA{B: 200, A: 255})
+		}
+	}
+	var m ImageModel
+	m.setSource(src, "a.png", imageproc.FormatPNG)
+	m.SetPaintColor(color.NRGBA{R: 255, A: 255})
+	m.SetBrushSize(2)
+	m.BeginPaintStroke(image.Pt(6, 6))
+	m.EndPaintStroke()
+	m.SetPaintTool(PaintEraser)
+	m.BeginPaintStroke(image.Pt(6, 6))
+	m.EndPaintStroke()
+	got, err := m.Processed()
+	if err != nil {
+		t.Fatal(err)
+	}
+	c := got.(*image.NRGBA).NRGBAAt(6, 6)
+	if c.R > 10 || c.B < 190 {
+		t.Fatalf("erased pixel should show source, got %+v", c)
+	}
+	if m.HasPaint() {
+		t.Fatal("full erase of the only stroke should clear paint")
+	}
+}
+
 func TestImageModelSaveRoundTrip(t *testing.T) {
 	src := image.NewNRGBA(image.Rect(0, 0, 4, 4))
 	for y := 0; y < 4; y++ {
@@ -160,6 +288,33 @@ func TestToolTitle(t *testing.T) {
 	}
 	if got := android.Title(i18n.EN); got != "Android Files" {
 		t.Fatalf("en android = %q", got)
+	}
+}
+
+func TestImageFeatureTitle(t *testing.T) {
+	if got := ImageClip.Title(i18n.JA); got != "切り抜き" {
+		t.Fatalf("ja clip = %q", got)
+	}
+	if got := ImageClip.Title(i18n.EN); got != "Clip" {
+		t.Fatalf("en clip = %q", got)
+	}
+	if got := ImagePaint.Title(i18n.JA); got != "ペイント" {
+		t.Fatalf("ja paint = %q", got)
+	}
+	if got := ImagePaint.Title(i18n.EN); got != "Paint" {
+		t.Fatalf("en paint = %q", got)
+	}
+	var m ImageModel
+	if m.Feature() != ImageClip {
+		t.Fatalf("default feature = %q", m.Feature())
+	}
+	m.SetFeature(ImagePaint)
+	if m.Feature() != ImagePaint {
+		t.Fatalf("paint = %q", m.Feature())
+	}
+	m.SetFeature("nope")
+	if m.Feature() != ImageClip {
+		t.Fatalf("invalid falls back to clip, got %q", m.Feature())
 	}
 }
 

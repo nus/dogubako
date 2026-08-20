@@ -91,6 +91,53 @@ func (s *Shell) buildSidebar() widget.Widget {
 }
 
 func (s *Shell) buildImageTool() widget.Widget {
+	open := s.btn(i18n.OpenFile, func() { s.startOpen() }, false, nil)
+	paste := s.btn(i18n.PasteClipboard, func() { s.pasteClipboard() }, false, nil)
+	hint := s.txt("").ContentSignal(s.computed(func() string {
+		return i18n.T(s.model.Lang(), i18n.InputHint, ShortcutLabel("V"))
+	})).FontSize(13).Color(widget.RGBA8(90, 90, 90, 255))
+	toolbar := primitives.HBox(open, paste, primitives.Expanded(hint)).Gap(8).CrossAlign(primitives.CrossAxisCenter)
+
+	tabs := make([]segItem, 0, len(ImageFeatures))
+	for _, feature := range ImageFeatures {
+		feature := feature
+		tabs = append(tabs, segItem{
+			label:    func() string { return feature.Title(s.model.Lang()) },
+			selected: func() bool { return s.model.Image().Feature() == feature },
+			onClick: func() {
+				s.model.Image().SetFeature(feature)
+				s.bump()
+			},
+		})
+	}
+	features := s.segBar(tabs...)
+
+	save := s.btn(i18n.SaveFile, func() { s.startSave() }, true, func() bool { return !s.model.Image().HasSource() })
+	copyBtn := s.btn(i18n.CopyClipboard, func() { s.copyClipboard() }, false, func() bool { return !s.model.Image().HasSource() })
+	outHint := s.txt("").ContentSignal(s.computed(func() string {
+		return i18n.T(s.model.Lang(), i18n.OutputHint)
+	})).FontSize(13).Color(widget.RGBA8(90, 90, 90, 255))
+	output := primitives.HBox(
+		save, copyBtn,
+		s.imageFormatSeg(),
+		s.imageQualitySlider(),
+		primitives.Expanded(outHint),
+	).Gap(8).CrossAlign(primitives.CrossAxisCenter)
+
+	status := s.txt("").ContentSignal(s.computed(func() string {
+		return s.model.Image().StatusText(s.model.Lang())
+	})).FontSize(13)
+
+	return primitives.VBox(
+		toolbar,
+		features,
+		primitives.Expanded(newImageFeatureHost(s)),
+		output,
+		status,
+	).Padding(12).Gap(12)
+}
+
+func (s *Shell) buildClipFeature() widget.Widget {
 	before := newSourcePreview(s.rev)
 	after := newDestPreview(s.rev)
 	after.SetEmptyHint(func() string {
@@ -121,14 +168,6 @@ func (s *Shell) buildImageTool() widget.Widget {
 		return nil
 	})
 
-	open := s.btn(i18n.OpenFile, func() { s.startOpen() }, false, nil)
-	paste := s.btn(i18n.PasteClipboard, func() { s.pasteClipboard() }, false, nil)
-	hint := s.txt("").ContentSignal(s.computed(func() string {
-		return i18n.T(s.model.Lang(), i18n.InputHint, ShortcutLabel("V"))
-	})).FontSize(13).Color(widget.RGBA8(90, 90, 90, 255))
-
-	toolbar := primitives.HBox(open, paste, primitives.Expanded(hint)).Gap(8).CrossAlign(primitives.CrossAxisCenter)
-
 	beforeLabel := s.txt("").ContentSignal(s.computed(func() string {
 		img := s.model.Image()
 		if img.HasSource() {
@@ -138,40 +177,133 @@ func (s *Shell) buildImageTool() widget.Widget {
 		return i18n.T(s.model.Lang(), i18n.Before)
 	})).Bold().FontSize(14)
 
-	afterLabel := s.txt("").ContentSignal(s.computed(func() string {
+	afterLabel := s.imageAfterLabel()
+	previews := primitives.HBox(
+		primitives.Expanded(primitives.VBox(beforeLabel, primitives.Expanded(before)).Gap(6)),
+		primitives.Expanded(primitives.VBox(afterLabel, primitives.Expanded(after)).Gap(6)),
+	).Gap(unit)
+
+	return primitives.VBox(
+		primitives.Expanded(previews),
+		s.buildClipForms(),
+	).Gap(12)
+}
+
+func (s *Shell) buildPaintFeature() widget.Widget {
+	canvas := newPaintCanvas(s.rev)
+	canvas.SetEmptyHint(func() string {
+		if s.model.Image().HasSource() {
+			return ""
+		}
+		return i18n.T(s.model.Lang(), i18n.AfterEmpty)
+	})
+	canvas.SetProvider(func() paintCanvasFrame {
+		img := s.model.Image()
+		return paintCanvasFrame{
+			image:   img.SourcePreview(),
+			size:    img.SourceSize(),
+			overlay: img.PaintLayer(),
+		}
+	})
+	canvas.OnStroke(func(pt image.Point) {
+		s.model.Image().BeginPaintStroke(pt)
+		s.rev.Set(s.rev.Get() + 1)
+	}, func(pt image.Point) {
+		s.model.Image().ContinuePaintStroke(pt)
+		s.rev.Set(s.rev.Get() + 1)
+	}, func() {
+		s.model.Image().EndPaintStroke()
+		s.bump()
+	})
+
+	after := newDestPreview(s.rev)
+	after.SetEmptyHint(func() string {
+		img := s.model.Image()
+		if out, err := img.Processed(); err == nil && out != nil {
+			return ""
+		}
+		return i18n.T(s.model.Lang(), i18n.AfterEmpty)
+	})
+	after.SetProvider(func() image.Image {
+		img := s.model.Image()
+		if out, err := img.Processed(); err == nil && out != nil {
+			return img.ResultPreview()
+		}
+		return nil
+	})
+
+	canvasLabel := s.txt("").ContentSignal(s.computed(func() string {
+		img := s.model.Image()
+		if img.HasSource() {
+			sz := img.SourceSize()
+			return i18n.T(s.model.Lang(), i18n.PaintCanvasSize, sz.X, sz.Y)
+		}
+		return i18n.T(s.model.Lang(), i18n.PaintCanvas)
+	})).Bold().FontSize(14)
+	afterLabel := s.imageAfterLabel()
+	previews := primitives.HBox(
+		primitives.Expanded(primitives.VBox(canvasLabel, primitives.Expanded(canvas)).Gap(6)),
+		primitives.Expanded(primitives.VBox(afterLabel, primitives.Expanded(after)).Gap(6)),
+	).Gap(unit)
+
+	return primitives.VBox(
+		primitives.Expanded(previews),
+		s.buildPaintForms(),
+	).Gap(12)
+}
+
+func (s *Shell) imageAfterLabel() widget.Widget {
+	return s.txt("").ContentSignal(s.computed(func() string {
 		img := s.model.Image()
 		if out, err := img.Processed(); err == nil && out != nil {
 			return i18n.T(s.model.Lang(), i18n.AfterSize, out.Bounds().Dx(), out.Bounds().Dy(), img.Format())
 		}
 		return i18n.T(s.model.Lang(), i18n.After)
 	})).Bold().FontSize(14)
-
-	previews := primitives.HBox(
-		primitives.Expanded(primitives.VBox(beforeLabel, primitives.Expanded(before)).Gap(6)),
-		primitives.Expanded(primitives.VBox(afterLabel, primitives.Expanded(after)).Gap(6)),
-	).Gap(unit)
-
-	save := s.btn(i18n.SaveFile, func() { s.startSave() }, true, func() bool { return !s.model.Image().HasSource() })
-	copyBtn := s.btn(i18n.CopyClipboard, func() { s.copyClipboard() }, false, func() bool { return !s.model.Image().HasSource() })
-	outHint := s.txt("").ContentSignal(s.computed(func() string {
-		return i18n.T(s.model.Lang(), i18n.OutputHint)
-	})).FontSize(13).Color(widget.RGBA8(90, 90, 90, 255))
-	output := primitives.HBox(save, copyBtn, primitives.Expanded(outHint)).Gap(8).CrossAlign(primitives.CrossAxisCenter)
-
-	status := s.txt("").ContentSignal(s.computed(func() string {
-		return s.model.Image().StatusText(s.model.Lang())
-	})).FontSize(13)
-
-	return primitives.VBox(
-		toolbar,
-		primitives.Expanded(previews),
-		s.buildImageForms(),
-		output,
-		status,
-	).Padding(12).Gap(12)
 }
 
-func (s *Shell) buildImageForms() widget.Widget {
+func (s *Shell) imageFormatSeg() widget.Widget {
+	has := func() bool { return !s.model.Image().HasSource() }
+	return primitives.Box(s.segBar(
+		segItem{
+			label:    func() string { return "PNG" },
+			selected: func() bool { return s.model.Image().Format() == imageproc.FormatPNG },
+			disabled: has,
+			onClick: func() {
+				s.model.Image().SetFormat(imageproc.FormatPNG)
+				s.bump()
+			},
+		},
+		segItem{
+			label:    func() string { return "JPEG" },
+			selected: func() bool { return s.model.Image().Format() == imageproc.FormatJPEG },
+			disabled: has,
+			onClick: func() {
+				s.model.Image().SetFormat(imageproc.FormatJPEG)
+				s.bump()
+			},
+		},
+	))
+}
+
+func (s *Shell) imageQualitySlider() widget.Widget {
+	qual := newHSlider(s, s.quality, 1, 100, 1, func() bool {
+		return !s.model.Image().HasSource() || s.model.Image().Format() != imageproc.FormatJPEG
+	}, func(v float32) {
+		s.model.Image().SetJPEGQuality(int(v + 0.5))
+	})
+	label := s.txt("").ContentSignal(state.NewComputed(func() string {
+		_ = s.rev.Get()
+		q := int(s.quality.Get() + 0.5)
+		return i18n.T(s.model.Lang(), i18n.JPEGQuality, q)
+	}, s.rev.AsReadonly(), s.quality.AsReadonly())).FontSize(13).Color(widget.RGBA8(70, 70, 70, 255))
+	return primitives.HBox(
+		label,
+		primitives.Box(qual).Width(fieldWidth).Height(formRowH),
+	).Gap(8).Height(formRowH).CrossAlign(primitives.CrossAxisCenter)
+}
+
+func (s *Shell) buildClipForms() widget.Widget {
 	has := func() bool { return s.model.Image().HasSource() }
 	cropOn := func() bool { return s.model.Image().HasSource() && s.model.Image().CropEnabled() }
 
@@ -192,12 +324,6 @@ func (s *Shell) buildImageForms() widget.Widget {
 	rot90 := s.btn(i18n.Rotate90, func() { s.model.Image().Rotate90(); s.bump() }, false, func() bool { return !has() })
 	resetRot := s.btn(i18n.ResetRotate, func() { s.model.Image().ResetRotate(); s.bump() }, false, func() bool {
 		return !has() || s.model.Image().RotateDegrees() == 0
-	})
-
-	qual := newHSlider(s, s.quality, 1, 100, 1, func() bool {
-		return !has() || s.model.Image().Format() != imageproc.FormatJPEG
-	}, func(v float32) {
-		s.model.Image().SetJPEGQuality(int(v + 0.5))
 	})
 
 	return newEqualRow(8,
@@ -221,28 +347,72 @@ func (s *Shell) buildImageForms() widget.Widget {
 			s.formEnd(rot90),
 			s.formEnd(resetRot),
 		),
-		s.formPanel(i18n.Format,
-			s.formRow(i18n.OutputFormat, primitives.Box(s.segBarFill(
+	)
+}
+
+func (s *Shell) buildPaintForms() widget.Widget {
+	has := func() bool { return s.model.Image().HasSource() }
+	brushSize := newHSlider(s, s.brushSig, 1, float32(imageproc.MaxBrushSize), 1, func() bool {
+		return !has()
+	}, func(v float32) {
+		s.model.Image().SetBrushSize(int(v + 0.5))
+	})
+	r := s.intField(s.paintRSig, 0, 255, func(v int) {
+		c := s.model.Image().PaintColor()
+		c.R = uint8(v)
+		s.model.Image().SetPaintColor(c)
+	}, has)
+	g := s.intField(s.paintGSig, 0, 255, func(v int) {
+		c := s.model.Image().PaintColor()
+		c.G = uint8(v)
+		s.model.Image().SetPaintColor(c)
+	}, has)
+	b := s.intField(s.paintBSig, 0, 255, func(v int) {
+		c := s.model.Image().PaintColor()
+		c.B = uint8(v)
+		s.model.Image().SetPaintColor(c)
+	}, has)
+
+	swatches := make([]widget.Widget, 0, len(paintPalette))
+	for _, c := range paintPalette {
+		swatches = append(swatches, s.colorSwatch(c))
+	}
+
+	return newEqualRow(8,
+		s.formPanel(i18n.ImagePaint,
+			s.formRow(i18n.PaintTool, primitives.Box(s.segBar(
 				segItem{
-					label:    func() string { return "PNG" },
-					selected: func() bool { return s.model.Image().Format() == imageproc.FormatPNG },
+					label:    func() string { return i18n.T(s.model.Lang(), i18n.PaintBrush) },
+					selected: func() bool { return s.model.Image().PaintTool() == PaintBrush },
 					disabled: func() bool { return !has() },
 					onClick: func() {
-						s.model.Image().SetFormat(imageproc.FormatPNG)
+						s.model.Image().SetPaintTool(PaintBrush)
 						s.bump()
 					},
 				},
 				segItem{
-					label:    func() string { return "JPEG" },
-					selected: func() bool { return s.model.Image().Format() == imageproc.FormatJPEG },
+					label:    func() string { return i18n.T(s.model.Lang(), i18n.PaintEraser) },
+					selected: func() bool { return s.model.Image().PaintTool() == PaintEraser },
 					disabled: func() bool { return !has() },
 					onClick: func() {
-						s.model.Image().SetFormat(imageproc.FormatJPEG)
+						s.model.Image().SetPaintTool(PaintEraser)
 						s.bump()
 					},
 				},
-			)).Width(fieldWidth)),
-			s.formSlider(qual),
+			))),
+			s.formSlider(s.brushSig, i18n.PaintSize, brushSize),
+			s.formEnd(s.btn(i18n.PaintUndo, func() { s.model.Image().UndoPaint(); s.bump() }, false, func() bool {
+				return !s.model.Image().CanUndoPaint()
+			})),
+			s.formEnd(s.btn(i18n.PaintClear, func() { s.model.Image().ClearPaint(); s.bump() }, false, func() bool {
+				return !s.model.Image().HasPaint()
+			})),
+		),
+		s.formPanel(i18n.PaintColor,
+			primitives.HBox(swatches...).Gap(4).Height(formRowH).CrossAlign(primitives.CrossAxisCenter),
+			s.formRow(i18n.PaintR, r),
+			s.formRow(i18n.PaintG, g),
+			s.formRow(i18n.PaintB, b),
 		),
 	)
 }
@@ -558,15 +728,15 @@ func (s *Shell) formEnd(control widget.Widget) widget.Widget {
 	).Height(formRowH).CrossAlign(primitives.CrossAxisCenter)
 }
 
-func (s *Shell) formSlider(qual widget.Widget) widget.Widget {
+func (s *Shell) formSlider(sig state.Signal[float32], key i18n.Key, control widget.Widget) widget.Widget {
 	label := s.txt("").ContentSignal(state.NewComputed(func() string {
 		_ = s.rev.Get()
-		q := int(s.quality.Get() + 0.5)
-		return i18n.T(s.model.Lang(), i18n.JPEGQuality, q)
-	}, s.rev.AsReadonly(), s.quality.AsReadonly())).FontSize(13).Color(widget.RGBA8(70, 70, 70, 255))
+		v := int(sig.Get() + 0.5)
+		return i18n.T(s.model.Lang(), key, v)
+	}, s.rev.AsReadonly(), sig.AsReadonly())).FontSize(13).Color(widget.RGBA8(70, 70, 70, 255))
 	return primitives.HBox(
 		primitives.Expanded(label),
-		primitives.Box(qual).Width(fieldWidth).Height(formRowH),
+		primitives.Box(control).Width(fieldWidth).Height(formRowH),
 	).Gap(8).Height(formRowH).CrossAlign(primitives.CrossAxisCenter)
 }
 
