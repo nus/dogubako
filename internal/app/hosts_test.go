@@ -5,6 +5,7 @@ import (
 
 	"github.com/gogpu/ui/event"
 	"github.com/gogpu/ui/geometry"
+	"github.com/gogpu/ui/state"
 	"github.com/gogpu/ui/widget"
 )
 
@@ -51,6 +52,35 @@ func TestModeHostChildrenOnlyActive(t *testing.T) {
 	s.model.SetMode(ToolAndroid)
 	if got := h.Children(); len(got) != 1 || got[0] != h.android {
 		t.Fatalf("android children = %v", got)
+	}
+}
+
+func TestModeHostSwitchMarksNewToolDirty(t *testing.T) {
+	s := &Shell{}
+	img := newStubPanel()
+	shot := newStubPanel()
+	h := &modeHost{
+		shell:      s,
+		image:      img,
+		screenshot: shot,
+		android:    newStubPanel(),
+	}
+	h.Layout(nil, geometry.Tight(geometry.Sz(400, 300)))
+	img.ClearRedraw()
+	shot.ClearRedraw()
+
+	s.model.SetMode(ToolScreenshot)
+	h.Layout(nil, geometry.Tight(geometry.Sz(400, 300)))
+	if !shot.NeedsRedraw() {
+		t.Fatal("newly shown tool should be marked dirty for a full paint")
+	}
+}
+
+func TestTickDoesNotRewindRev(t *testing.T) {
+	s := &Shell{rev: state.NewSignal[uint64](10)}
+	s.tick()
+	if s.rev.Get() < 10 {
+		t.Fatalf("tick rewound rev to %d", s.rev.Get())
 	}
 }
 

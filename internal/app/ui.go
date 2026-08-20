@@ -248,7 +248,6 @@ func (s *Shell) buildImageForms() widget.Widget {
 }
 
 func (s *Shell) buildScreenshotTool() widget.Widget {
-	m3 := s.theme
 	busy := func() bool { return s.model.Screenshot().Capturing() }
 
 	setMode := func(mode capture.Mode) {
@@ -301,42 +300,7 @@ func (s *Shell) buildScreenshotTool() widget.Widget {
 	listLabel := s.txt("").ContentSignal(s.computed(func() string {
 		return i18n.T(s.model.Lang(), i18n.ScreenshotFiles)
 	})).Bold().FontSize(14)
-	files := listview.New(
-		listview.ItemCountFn(func() int { return len(s.model.Screenshot().Files()) }),
-		listview.FixedItemHeight(48),
-		listview.SelectionModeOpt(listview.SelectionSingle),
-		listview.SelectedIndexSignal(s.shotSel),
-		listview.PainterOpt(newQuietListPainter(m3)),
-		listview.DisabledFn(busy),
-		listview.BuildItem(func(ctx listview.ItemContext) widget.Widget {
-			files := s.model.Screenshot().Files()
-			if ctx.Index < 0 || ctx.Index >= len(files) {
-				return primitives.Box()
-			}
-			f := files[ctx.Index]
-			thumb := s.model.Screenshot().Thumbnail(f.Path)
-			row := []widget.Widget{
-				s.txt(f.Name).FontSize(13),
-			}
-			if thumb != nil {
-				preview := newDestPreview(nil)
-				preview.SetSource(thumb)
-				row = []widget.Widget{
-					primitives.Box(preview).Width(48).Height(48),
-					s.txt(f.Name).FontSize(13),
-				}
-			}
-			return primitives.HBox(row...).Gap(8).PaddingXY(8, 0).Height(48).CrossAlign(primitives.CrossAxisCenter)
-		}),
-		listview.OnItemClick(func(index int) {
-			files := s.model.Screenshot().Files()
-			if index < 0 || index >= len(files) {
-				return
-			}
-			_ = s.model.Screenshot().LoadPath(files[index].Path)
-			s.bump()
-		}),
-	)
+	files := newScreenshotFileList(s)
 
 	previewLabel := s.txt("").ContentSignal(s.computed(func() string {
 		shot := s.model.Screenshot()

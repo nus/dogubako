@@ -63,6 +63,7 @@ type modeHost struct {
 	image      widget.Widget
 	screenshot widget.Widget
 	android    widget.Widget
+	shown      widget.Widget
 }
 
 func newModeHost(s *Shell) *modeHost {
@@ -109,6 +110,18 @@ func (h *modeHost) Layout(ctx widget.Context, cons geometry.Constraints) geometr
 	size := cons.BiggestFinite(windowWidth, windowHeight)
 	h.SetBounds(geometry.FromPointSize(h.Position(), size))
 	active := h.active()
+	if active != h.shown {
+		h.shown = active
+		for _, child := range h.tools() {
+			invalidateToolLayout(child)
+		}
+		if active != nil {
+			widget.MarkRedrawInTree(active)
+		}
+		if h.shell != nil {
+			h.shell.forceFullRepaint()
+		}
+	}
 	for _, child := range h.tools() {
 		if child == nil {
 			continue
@@ -128,6 +141,16 @@ func (h *modeHost) Layout(ctx widget.Context, cons geometry.Constraints) geometr
 		}
 	}
 	return size
+}
+
+func invalidateToolLayout(w widget.Widget) {
+	if w == nil {
+		return
+	}
+	if lc, ok := w.(interface{ InvalidateLayoutCache() }); ok {
+		lc.InvalidateLayoutCache()
+	}
+	widget.InvalidateLayoutTree(w)
 }
 
 func (h *modeHost) Draw(ctx widget.Context, canvas widget.Canvas) {
