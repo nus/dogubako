@@ -300,6 +300,72 @@ func TestEncodePNGClipboardHelper(t *testing.T) {
 	}
 }
 
+func TestPreviewCapsLongEdge(t *testing.T) {
+	src := solidNRGBA(64, 32, color.NRGBA{R: 200, A: 255})
+	got, err := Preview(src, Params{Width: 64, Height: 32}, 16)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if got.Bounds().Dx() > 16 || got.Bounds().Dy() > 16 {
+		t.Fatalf("preview = %v, want max edge 16", got.Bounds())
+	}
+	if got.Bounds().Dx() != 16 || got.Bounds().Dy() != 8 {
+		t.Fatalf("preview = %v, want 16×8", got.Bounds().Size())
+	}
+}
+
+func TestPreviewMatchesApplyWhenSmall(t *testing.T) {
+	src := solidNRGBA(8, 6, color.NRGBA{G: 180, A: 255})
+	src.SetNRGBA(1, 1, color.NRGBA{B: 255, A: 255})
+	p := Params{Width: 8, Height: 6, RotateDegrees: 90}
+	full, err := Apply(src, p)
+	if err != nil {
+		t.Fatal(err)
+	}
+	got, err := Preview(src, p, 32)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if got.Bounds() != full.Bounds() {
+		t.Fatalf("preview %v vs apply %v", got.Bounds(), full.Bounds())
+	}
+}
+
+func TestPreviewCropThenRotateStaysCapped(t *testing.T) {
+	src := solidNRGBA(40, 20, color.NRGBA{B: 200, A: 255})
+	got, err := Preview(src, Params{
+		Width:         80,
+		Height:        160,
+		CropEnabled:   true,
+		Crop:          image.Rect(0, 0, 20, 20),
+		RotateDegrees: 90,
+	}, 10)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if max(got.Bounds().Dx(), got.Bounds().Dy()) > 10 {
+		t.Fatalf("capped preview = %v", got.Bounds())
+	}
+}
+
+func TestDecodeNativeKeepsJPEGYCbCr(t *testing.T) {
+	src := solidNRGBA(8, 6, color.NRGBA{R: 10, G: 20, B: 30, A: 255})
+	jpegBytes, err := Encode(src, FormatJPEG, 95)
+	if err != nil {
+		t.Fatal(err)
+	}
+	img, format, err := DecodeNative(bytes.NewReader(jpegBytes))
+	if err != nil {
+		t.Fatal(err)
+	}
+	if format != FormatJPEG {
+		t.Fatalf("format = %s", format)
+	}
+	if _, ok := img.(*image.YCbCr); !ok {
+		t.Fatalf("got %T, want YCbCr (no NRGBA conversion)", img)
+	}
+}
+
 func TestScaleAndAspectHelpers(t *testing.T) {
 	base := image.Pt(200, 100)
 	if got := ScaleSize(base, 50); got != (image.Point{X: 100, Y: 50}) {

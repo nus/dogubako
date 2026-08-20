@@ -114,6 +114,46 @@ func TestImageModelSaveRoundTrip(t *testing.T) {
 	}
 }
 
+func TestResultPreviewDoesNotKeepFullProcessed(t *testing.T) {
+	src := image.NewNRGBA(image.Rect(0, 0, 80, 40))
+	var m ImageModel
+	m.setSource(src, "wide.png", imageproc.FormatPNG)
+	m.SetWidth(2000)
+	if m.Width() != 2000 || m.Height() != 1000 {
+		t.Fatalf("size = %dx%d", m.Width(), m.Height())
+	}
+	prev := m.ResultPreview()
+	if prev == nil {
+		t.Fatal("expected preview")
+	}
+	if m.processed != nil {
+		t.Fatal("preview path must not retain a full-resolution processed bitmap")
+	}
+	if max(prev.Bounds().Dx(), prev.Bounds().Dy()) > previewMaxEdge {
+		t.Fatalf("preview = %v, want max edge %d", prev.Bounds(), previewMaxEdge)
+	}
+
+	got, err := m.Processed()
+	if err != nil {
+		t.Fatal(err)
+	}
+	if got.Bounds().Dx() != 2000 || got.Bounds().Dy() != 1000 {
+		t.Fatalf("full processed = %v", got.Bounds())
+	}
+}
+
+func TestSourcePreviewDoesNotProcess(t *testing.T) {
+	src := image.NewNRGBA(image.Rect(0, 0, 12, 8))
+	var m ImageModel
+	m.setSource(src, "a.png", imageproc.FormatPNG)
+	if m.SourcePreview() == nil {
+		t.Fatal("source preview")
+	}
+	if m.processed != nil {
+		t.Fatal("source preview must not run Apply")
+	}
+}
+
 func TestSuggestedFilename(t *testing.T) {
 	var m ImageModel
 	m.sourceName = "photo.jpeg"

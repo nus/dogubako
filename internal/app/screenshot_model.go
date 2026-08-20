@@ -431,7 +431,7 @@ func loadThumb(path string) *image.NRGBA {
 		return nil
 	}
 	defer f.Close()
-	img, _, err := imageproc.Decode(f)
+	img, _, err := imageproc.DecodeNative(f)
 	if err != nil {
 		return nil
 	}

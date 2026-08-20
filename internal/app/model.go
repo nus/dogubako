@@ -140,7 +140,9 @@ type statusMsg struct {
 	args []any
 }
 
-const previewMaxEdge = 2048
+// previewMaxEdge caps on-screen bitmaps. Preview panes are a few hundred
+// pixels; 1024 is enough for HiDPI without keeping a 2048² NRGBA (~16MiB).
+const previewMaxEdge = 1024
 
 func (m *ImageModel) Generation() uint64 { return m.generation }
 
@@ -232,7 +234,7 @@ func (m *ImageModel) JPEGQuality() int {
 }
 
 func (m *ImageModel) Processed() (image.Image, error) {
-	m.recompute()
+	m.recomputeFull()
 	return m.processed, m.processErr
 }
 
@@ -560,36 +562,36 @@ func (m *ImageModel) setSource(img image.Image, name string, format imageproc.Fo
 	m.params.Width = img.Bounds().Dx()
 	m.params.Height = img.Bounds().Dy()
 	m.params.RotateDegrees = 0
+	m.srcPreview = nil
 	m.markDirty()
 }
 
 func (m *ImageModel) markDirty() {
 	m.dirty = true
+	m.dstPreview = nil
+	m.processed = nil
+	m.processErr = nil
 	m.generation++
 }
 
-func (m *ImageModel) recompute() {
-	if !m.dirty {
-		return
-	}
-	m.dirty = false
-	m.ensureDefaults()
+func (m *ImageModel) recomputeFull() {
 	if m.source == nil {
 		m.processed = nil
 		m.processErr = nil
-		m.srcPreview = nil
-		m.dstPreview = nil
+		m.dirty = false
 		return
 	}
-	m.srcPreview = nil
-	m.dstPreview = nil
+	if !m.dirty && m.processed != nil {
+		return
+	}
+	m.ensureDefaults()
 	out, err := imageproc.Apply(m.source, m.params)
 	m.processed = out
 	m.processErr = err
+	m.dirty = false
 }
 
 func (m *ImageModel) SourcePreview() image.Image {
-	m.recompute()
 	if m.srcPreview == nil && m.source != nil {
 		m.srcPreview = previewImage(m.source)
 	}
@@ -597,10 +599,18 @@ func (m *ImageModel) SourcePreview() image.Image {
 }
 
 func (m *ImageModel) ResultPreview() image.Image {
-	m.recompute()
-	if m.dstPreview == nil && m.processed != nil && m.processErr == nil {
-		m.dstPreview = previewImage(m.processed)
+	if m.dstPreview != nil {
+		return m.dstPreview
 	}
+	if m.source == nil {
+		return nil
+	}
+	m.ensureDefaults()
+	out, err := imageproc.Preview(m.source, m.params, previewMaxEdge)
+	if err != nil {
+		return nil
+	}
+	m.dstPreview = out
 	return m.dstPreview
 }
 

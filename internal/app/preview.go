@@ -38,6 +38,7 @@ type sourcePreview struct {
 	dragging  bool
 	dragStart image.Point
 	dragRect  image.Rectangle
+	fitted    fittedCache
 }
 
 func newSourcePreview(rev state.ReadonlySignal[uint64]) *sourcePreview {
@@ -107,7 +108,7 @@ func (p *sourcePreview) Draw(_ widget.Context, canvas widget.Canvas) {
 			crop = p.dragRect
 		}
 	}
-	drawFittedImage(canvas, p.image, fitted, p.imageSize, crop)
+	drawFittedImage(canvas, &p.fitted, p.image, fitted, p.imageSize, crop)
 }
 
 func (p *sourcePreview) Event(ctx widget.Context, e event.Event) bool {
@@ -199,6 +200,7 @@ type destPreview struct {
 	source    image.Image
 	image     image.Image
 	emptyHint func() string
+	fitted    fittedCache
 }
 
 func newDestPreview(rev state.ReadonlySignal[uint64]) *destPreview {
@@ -267,7 +269,7 @@ func (p *destPreview) Draw(_ widget.Context, canvas widget.Canvas) {
 	drawCheckerboard(canvas, b)
 	img := p.resolvedImage()
 	if img != nil {
-		drawFittedImage(canvas, img, fittedRect(toImageRect(b), img.Bounds().Size()), img.Bounds().Size(), image.Rectangle{})
+		drawFittedImage(canvas, &p.fitted, img, fittedRect(toImageRect(b), img.Bounds().Size()), img.Bounds().Size(), image.Rectangle{})
 		return
 	}
 	if p.emptyHint == nil {
@@ -319,20 +321,50 @@ func fittedRect(bounds image.Rectangle, imgSize image.Point) image.Rectangle {
 	return image.Rect(x, y, x+w, y+h)
 }
 
-func drawFittedImage(canvas widget.Canvas, src image.Image, fitted image.Rectangle, imgSize image.Point, crop image.Rectangle) {
+func drawFittedImage(canvas widget.Canvas, cache *fittedCache, src image.Image, fitted image.Rectangle, imgSize image.Point, crop image.Rectangle) {
 	if src == nil || fitted.Empty() {
 		return
 	}
+	if cache != nil && cache.match(src, imgSize, fitted, crop) {
+		canvas.DrawImage(cache.rgba, geometry.Pt(float32(fitted.Min.X), float32(fitted.Min.Y)))
+		return
+	}
+	disp := src
 	size := src.Bounds().Size()
 	if size.X != fitted.Dx() || size.Y != fitted.Dy() {
-		src = imageproc.Resize(src, fitted.Dx(), fitted.Dy())
+		disp = imageproc.Resize(src, fitted.Dx(), fitted.Dy())
 	}
-	rgba := toDisplayRGBA(src)
+	rgba := toDisplayRGBA(disp)
 	if imgSize.X > 0 && imgSize.Y > 0 && !crop.Empty() {
 		rgba = cloneRGBA(rgba)
 		applyCropHighlight(rgba, imgSize, crop)
 	}
+	if cache != nil {
+		cache.set(src, imgSize, fitted, crop, rgba)
+	}
 	canvas.DrawImage(rgba, geometry.Pt(float32(fitted.Min.X), float32(fitted.Min.Y)))
+}
+
+// fittedCache keeps the last GPU-ready preview bitmap so Draw does not
+// resize and convert NRGBA→RGBA on every frame.
+type fittedCache struct {
+	src  image.Image
+	size image.Point
+	fit  image.Rectangle
+	crop image.Rectangle
+	rgba *image.RGBA
+}
+
+func (c *fittedCache) match(src image.Image, size image.Point, fit, crop image.Rectangle) bool {
+	return c != nil && c.rgba != nil && c.src == src && c.size == size && c.fit == fit && c.crop == crop
+}
+
+func (c *fittedCache) set(src image.Image, size image.Point, fit, crop image.Rectangle, rgba *image.RGBA) {
+	c.src = src
+	c.size = size
+	c.fit = fit
+	c.crop = crop
+	c.rgba = rgba
 }
 
 // toDisplayRGBA copies src into an origin-aligned RGBA buffer. GPU DrawImage

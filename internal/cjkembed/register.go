@@ -35,14 +35,14 @@ func Register() bool {
 }
 
 func registerCJK() bool {
-	src, path, err := openCJKFont(cjkPathList())
-	if err != nil || src == nil || path == "" {
+	file, err := openCJKFont(cjkPathList())
+	if err != nil || file == nil || file.path == "" {
 		if err != nil {
 			logFontErr("cjk", fmt.Errorf("%w (using English UI)", err))
 		}
 		return false
 	}
-	if err := registerLoaded("cjk", cjkFamily, path); err != nil {
+	if err := registerLoaded(file, cjkFamily); err != nil {
 		logFontErr("cjk", fmt.Errorf("%w (using English UI)", err))
 		return false
 	}

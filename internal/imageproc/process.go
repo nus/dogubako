@@ -114,6 +114,74 @@ func Apply(src image.Image, p Params) (image.Image, error) {
 	return Resize(img, p.Width, p.Height), nil
 }
 
+// Preview is Apply for on-screen use: the longest output edge is at most
+// maxEdge, and crop/rotate run on a downscaled copy so peak memory stays
+// near the preview bitmap instead of the full source.
+func Preview(src image.Image, p Params, maxEdge int) (image.Image, error) {
+	if src == nil {
+		return nil, fmt.Errorf("no image")
+	}
+	if p.Width <= 0 || p.Height <= 0 {
+		return nil, fmt.Errorf("invalid size %d×%d", p.Width, p.Height)
+	}
+	if p.Width > MaxDimension || p.Height > MaxDimension {
+		return nil, fmt.Errorf("size %d×%d exceeds the %dpx limit", p.Width, p.Height, MaxDimension)
+	}
+	if maxEdge < 1 {
+		maxEdge = 1
+	}
+
+	work := src.Bounds()
+	if p.CropEnabled {
+		work = p.Crop.Intersect(src.Bounds())
+		if work.Empty() {
+			return nil, fmt.Errorf("crop rectangle is empty")
+		}
+	}
+	srcMax := max(work.Dx(), work.Dy())
+	outMax := max(p.Width, p.Height)
+	if srcMax <= maxEdge && outMax <= maxEdge {
+		return Apply(src, p)
+	}
+
+	scale := float64(maxEdge) / float64(outMax)
+	pw := max(1, int(math.Round(float64(p.Width)*scale)))
+	ph := max(1, int(math.Round(float64(p.Height)*scale)))
+	k := math.Min(1, float64(maxEdge)/float64(srcMax))
+	sw := max(1, int(math.Round(float64(work.Dx())*k)))
+	sh := max(1, int(math.Round(float64(work.Dy())*k)))
+	small := scaleBounds(src, work, sw, sh)
+	if NormalizeDegrees(p.RotateDegrees) != 0 {
+		rotated, err := Rotate(small, p.RotateDegrees)
+		if err != nil {
+			return nil, err
+		}
+		small = rotated
+	}
+	if small.Bounds().Dx() == pw && small.Bounds().Dy() == ph {
+		return small, nil
+	}
+	return Resize(small, pw, ph), nil
+}
+
+// DecodeNative decodes without converting to NRGBA. Use this for
+// thumbnails so JPEG can stay YCbCr until the small resize.
+func DecodeNative(r io.Reader) (image.Image, Format, error) {
+	img, format, err := image.Decode(r)
+	if err != nil {
+		return nil, "", fmt.Errorf("decode image: %w", err)
+	}
+	return img, NormalizeFormat(format), nil
+}
+
+// scaleBounds resizes the src rectangle r to width×height without copying
+// the source into a full-size NRGBA first.
+func scaleBounds(src image.Image, r image.Rectangle, width, height int) *image.NRGBA {
+	dst := image.NewNRGBA(image.Rect(0, 0, width, height))
+	xdraw.CatmullRom.Scale(dst, dst.Bounds(), src, r, xdraw.Src, nil)
+	return dst
+}
+
 // Crop returns the intersection of src and rect as a new image origin at (0,0).
 func Crop(src image.Image, rect image.Rectangle) (*image.NRGBA, error) {
 	if src == nil {

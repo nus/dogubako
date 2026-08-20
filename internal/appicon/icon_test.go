@@ -26,6 +26,26 @@ func TestWindowRGBASize(t *testing.T) {
 	}
 }
 
+func TestWindowRGBADoesNotShare1024Master(t *testing.T) {
+	win, err := WindowRGBA()
+	if err != nil {
+		t.Fatal(err)
+	}
+	full, err := RGBA()
+	if err != nil {
+		t.Fatal(err)
+	}
+	if win.Bounds().Dx() != windowIconSize {
+		t.Fatalf("window = %v", win.Bounds())
+	}
+	if full.Bounds().Dx() != 1024 {
+		t.Fatalf("master = %v", full.Bounds())
+	}
+	if win == full {
+		t.Fatal("window icon must not alias the 1024px master")
+	}
+}
+
 func TestRGBALightCorner(t *testing.T) {
 	img, err := RGBA()
 	if err != nil {

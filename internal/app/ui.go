@@ -94,8 +94,7 @@ func (s *Shell) buildImageTool() widget.Widget {
 	before := newSourcePreview(s.rev)
 	after := newDestPreview(s.rev)
 	after.SetEmptyHint(func() string {
-		img := s.model.Image()
-		if out, err := img.Processed(); err == nil && out != nil {
+		if s.model.Image().HasSource() {
 			return ""
 		}
 		return i18n.T(s.model.Lang(), i18n.AfterEmpty)
@@ -114,11 +113,7 @@ func (s *Shell) buildImageTool() widget.Widget {
 		}
 	})
 	after.SetProvider(func() image.Image {
-		img := s.model.Image()
-		if out, err := img.Processed(); err == nil && out != nil {
-			return img.ResultPreview()
-		}
-		return nil
+		return s.model.Image().ResultPreview()
 	})
 
 	open := s.btn(i18n.OpenFile, func() { s.startOpen() }, false, nil)
@@ -140,8 +135,8 @@ func (s *Shell) buildImageTool() widget.Widget {
 
 	afterLabel := s.txt("").ContentSignal(s.computed(func() string {
 		img := s.model.Image()
-		if out, err := img.Processed(); err == nil && out != nil {
-			return i18n.T(s.model.Lang(), i18n.AfterSize, out.Bounds().Dx(), out.Bounds().Dy(), img.Format())
+		if img.HasSource() {
+			return i18n.T(s.model.Lang(), i18n.AfterSize, img.Width(), img.Height(), img.Format())
 		}
 		return i18n.T(s.model.Lang(), i18n.After)
 	})).Bold().FontSize(14)

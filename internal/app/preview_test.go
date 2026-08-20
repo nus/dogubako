@@ -66,6 +66,27 @@ func TestDestPreviewDrawsProviderWithoutSetImage(t *testing.T) {
 	}
 }
 
+func TestDestPreviewDrawCacheReusesBitmap(t *testing.T) {
+	src := image.NewNRGBA(image.Rect(0, 0, 12, 8))
+	src.SetNRGBA(0, 0, color.NRGBA{R: 255, A: 255})
+	p := newDestPreview(nil)
+	p.SetSource(src)
+	p.SetBounds(geometry.NewRect(0, 0, 120, 80))
+	first := &uitest.MockCanvas{}
+	p.Draw(nil, first)
+	if len(first.Images) != 1 {
+		t.Fatalf("first draw = %d", len(first.Images))
+	}
+	second := &uitest.MockCanvas{}
+	p.Draw(nil, second)
+	if len(second.Images) != 1 {
+		t.Fatalf("cached draw = %d", len(second.Images))
+	}
+	if first.Images[0].Image != second.Images[0].Image {
+		t.Fatal("second Draw should reuse the fitted RGBA")
+	}
+}
+
 func TestSourcePreviewDrawsProviderWithoutSetImage(t *testing.T) {
 	src := image.NewNRGBA(image.Rect(0, 0, 10, 8))
 	src.SetNRGBA(1, 1, color.NRGBA{G: 255, A: 255})

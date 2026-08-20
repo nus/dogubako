@@ -23,9 +23,13 @@ const windowIconSize = 128
 var pngBytes []byte
 
 var (
-	once    sync.Once
-	master  *image.RGBA
-	loadErr error
+	fullOnce sync.Once
+	master   *image.RGBA
+	fullErr  error
+
+	winOnce sync.Once
+	window  *image.RGBA
+	winErr  error
 )
 
 // PNG returns the original icon file bytes.
@@ -35,29 +39,34 @@ func PNG() []byte {
 
 // RGBA returns the decoded icon as a top-left-origin RGBA image.
 func RGBA() (*image.RGBA, error) {
-	once.Do(func() {
+	fullOnce.Do(func() {
 		img, err := png.Decode(bytes.NewReader(pngBytes))
 		if err != nil {
-			loadErr = fmt.Errorf("decode icon: %w", err)
+			fullErr = fmt.Errorf("decode icon: %w", err)
 			return
 		}
 		master = toRGBA(img)
 	})
-	return master, loadErr
+	return master, fullErr
 }
 
 // WindowRGBA returns a downscaled copy for the native window icon.
+// The 1024px master is not kept; only this 128px bitmap is cached at runtime.
 func WindowRGBA() (*image.RGBA, error) {
-	src, err := RGBA()
-	if err != nil {
-		return nil, err
-	}
-	if src.Bounds().Dx() == windowIconSize && src.Bounds().Dy() == windowIconSize {
-		return src, nil
-	}
-	dst := image.NewRGBA(image.Rect(0, 0, windowIconSize, windowIconSize))
-	xdraw.CatmullRom.Scale(dst, dst.Bounds(), src, src.Bounds(), xdraw.Src, nil)
-	return dst, nil
+	winOnce.Do(func() {
+		img, err := png.Decode(bytes.NewReader(pngBytes))
+		if err != nil {
+			winErr = fmt.Errorf("decode icon: %w", err)
+			return
+		}
+		if img.Bounds().Dx() == windowIconSize && img.Bounds().Dy() == windowIconSize {
+			window = toRGBA(img)
+			return
+		}
+		window = image.NewRGBA(image.Rect(0, 0, windowIconSize, windowIconSize))
+		xdraw.CatmullRom.Scale(window, window.Bounds(), img, img.Bounds(), xdraw.Src, nil)
+	})
+	return window, winErr
 }
 
 func toRGBA(src image.Image) *image.RGBA {

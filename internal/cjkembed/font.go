@@ -44,26 +44,54 @@ func expandPathNorms(paths []string) []string {
 	return out
 }
 
-func loadFaceSources(path string) ([]*text.FontSource, error) {
+type cjkFile struct {
+	data  []byte
+	index int
+	path  string
+	name  string
+}
+
+func loadCJKFile(path string) (*cjkFile, error) {
 	data, err := os.ReadFile(path)
 	if err != nil {
 		return nil, err
 	}
-	var sources []*text.FontSource
+	index, name, err := pickCollectionFace(data)
+	if err != nil {
+		return nil, err
+	}
+	return &cjkFile{data: data, index: index, path: path, name: name}, nil
+}
+
+func pickCollectionFace(data []byte) (int, string, error) {
+	var fallback int
+	var fallbackName string
+	found := false
 	for i := 0; i < maxCollectionFaces; i++ {
 		src, err := text.NewFontSource(data, text.WithCollectionIndex(i))
 		if err != nil {
 			if i == 0 {
-				return nil, err
+				return 0, "", err
 			}
 			break
 		}
-		sources = append(sources, src)
+		fam := src.Name()
+		if skipHiraginoFamily(fam) {
+			continue
+		}
+		if preferHiraginoFamily(fam) {
+			return i, fam, nil
+		}
+		if !found {
+			fallback = i
+			fallbackName = fam
+			found = true
+		}
 	}
-	if len(sources) == 0 {
-		return nil, fmt.Errorf("no faces in %s", path)
+	if found {
+		return fallback, fallbackName, nil
 	}
-	return sources, nil
+	return 0, "", fmt.Errorf("no usable face")
 }
 
 func skipHiraginoFamily(family string) bool {
@@ -85,36 +113,10 @@ func preferHiraginoFamily(family string) bool {
 	return strings.Contains(fam, "sans") || strings.Contains(fam, "角ゴ")
 }
 
-func pickHiraginoFace(sources []*text.FontSource) *text.FontSource {
-	var fallback *text.FontSource
-	for _, src := range sources {
-		if src == nil {
-			continue
-		}
-		fam := src.Name()
-		if skipHiraginoFamily(fam) {
-			continue
-		}
-		if preferHiraginoFamily(fam) {
-			return src
-		}
-		if fallback == nil {
-			fallback = src
-		}
-	}
-	if fallback != nil {
-		return fallback
-	}
-	if len(sources) > 0 {
-		return sources[0]
-	}
-	return nil
-}
-
-func openCJKFont(paths []string) (*text.FontSource, string, error) {
+func openCJKFont(paths []string) (*cjkFile, error) {
 	var firstErr error
 	for _, path := range expandPathNorms(paths) {
-		sources, err := loadFaceSources(path)
+		file, err := loadCJKFile(path)
 		if err != nil {
 			if os.IsNotExist(err) {
 				continue
@@ -124,26 +126,30 @@ func openCJKFont(paths []string) (*text.FontSource, string, error) {
 			}
 			continue
 		}
-		face := pickHiraginoFace(sources)
-		if face == nil {
-			continue
-		}
-		return face, path, nil
+		return file, nil
 	}
 	if firstErr != nil {
-		return nil, "", firstErr
+		return nil, firstErr
 	}
-	return nil, "", fmt.Errorf("cjk font not found")
+	return nil, fmt.Errorf("cjk font not found")
 }
 
 func openHiragino(paths []string) (*text.FontSource, string, error) {
-	return openCJKFont(paths)
+	file, err := openCJKFont(paths)
+	if err != nil {
+		return nil, "", err
+	}
+	src, err := text.NewFontSource(file.data, text.WithCollectionIndex(file.index))
+	if err != nil {
+		return nil, "", err
+	}
+	return src, file.path, nil
 }
 
-func registerLoaded(_ string, family, path string) error {
-	data, err := os.ReadFile(path)
+func registerLoaded(file *cjkFile, family string) error {
+	face, err := extractCollectionFace(file.data, file.index)
 	if err != nil {
-		return err
+		face = file.data
 	}
-	return loadFamily(family, data)
+	return loadFamily(family, face)
 }
