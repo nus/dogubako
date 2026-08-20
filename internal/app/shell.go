@@ -77,6 +77,10 @@ type Shell struct {
 	angleSig  state.Signal[string]
 	delaySig  state.Signal[string]
 	quality   state.Signal[float32]
+	brushSig  state.Signal[float32]
+	paintRSig state.Signal[string]
+	paintGSig state.Signal[string]
+	paintBSig state.Signal[string]
 	keepAsp   state.Signal[bool]
 	cropOn    state.Signal[bool]
 	hideWin   state.Signal[bool]
@@ -109,6 +113,10 @@ func Run() error {
 		angleSig:  state.NewSignal("0"),
 		delaySig:  state.NewSignal("1"),
 		quality:   state.NewSignal[float32](float32(imageproc.DefaultJPEGQuality)),
+		brushSig:  state.NewSignal[float32](float32(imageproc.DefaultBrushSize)),
+		paintRSig: state.NewSignal("0"),
+		paintGSig: state.NewSignal("0"),
+		paintBSig: state.NewSignal("0"),
 		keepAsp:   state.NewSignal(true),
 		cropOn:    state.NewSignal(false),
 		hideWin:   state.NewSignal(true),
@@ -211,6 +219,11 @@ func (s *Shell) syncFields() {
 	s.cropHSig.Set(strconv.Itoa(max(1, c.Dy())))
 	s.angleSig.Set(strconv.Itoa(img.RotateDegrees()))
 	s.quality.Set(float32(img.JPEGQuality()))
+	s.brushSig.Set(float32(img.BrushSize()))
+	pc := img.PaintColor()
+	s.paintRSig.Set(strconv.Itoa(int(pc.R)))
+	s.paintGSig.Set(strconv.Itoa(int(pc.G)))
+	s.paintBSig.Set(strconv.Itoa(int(pc.B)))
 	s.keepAsp.Set(img.KeepAspect())
 	s.cropOn.Set(img.CropEnabled())
 	s.fmtSig.Set(string(img.Format()))

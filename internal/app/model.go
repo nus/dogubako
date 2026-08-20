@@ -3,6 +3,7 @@ package app
 import (
 	"fmt"
 	"image"
+	"image/color"
 	"io"
 	"io/fs"
 	"os"
@@ -112,18 +113,59 @@ func (m *Model) Android() *AndroidModel {
 	return &m.android
 }
 
-// ImageModel holds the first tool: resize, crop, rotate, and JPEG/PNG conversion.
+// ImageFeature is a sub-mode of the image tool. The main panel switches UI
+// for each feature (clip vs paint).
+type ImageFeature string
+
+const (
+	ImageClip  ImageFeature = "clip"
+	ImagePaint ImageFeature = "paint"
+)
+
+// ImageFeatures is the ordered catalog of image-tool functions.
+var ImageFeatures = []ImageFeature{ImageClip, ImagePaint}
+
+// Title returns the localized label for this image-tool function.
+func (f ImageFeature) Title(lang i18n.Lang) string {
+	switch f {
+	case ImagePaint:
+		return i18n.T(lang, i18n.ImagePaint)
+	default:
+		return i18n.T(lang, i18n.ImageClip)
+	}
+}
+
+// PaintTool is the active brush in paint mode.
+type PaintTool string
+
+const (
+	PaintBrush  PaintTool = "brush"
+	PaintEraser PaintTool = "eraser"
+)
+
+// ImageModel holds the first tool: clip (resize, rotate, crop) and paint.
 type ImageModel struct {
 	generation uint64
 
 	source     image.Image
 	sourceName string
 
+	feature ImageFeature
+
 	// keepAspect defaults to true until the user changes it.
 	keepAspect            bool
 	keepAspectInitialized bool
 
 	params imageproc.Params
+
+	paintLayer *image.NRGBA
+	paintUsed  bool
+	paintUndo  []*image.NRGBA
+	paintColor color.NRGBA
+	brushSize  int
+	paintTool  PaintTool
+	strokeLast image.Point
+	stroking   bool
 
 	processed  image.Image
 	processErr error
@@ -190,6 +232,24 @@ func (m *ImageModel) BaseSize() image.Point {
 }
 
 func (m *ImageModel) Params() imageproc.Params { return m.params }
+
+func (m *ImageModel) Feature() ImageFeature {
+	if m.feature == "" {
+		return ImageClip
+	}
+	return m.feature
+}
+
+func (m *ImageModel) SetFeature(feature ImageFeature) {
+	if feature != ImagePaint {
+		feature = ImageClip
+	}
+	if m.Feature() == feature {
+		return
+	}
+	m.feature = feature
+	m.generation++
+}
 
 func (m *ImageModel) KeepAspect() bool {
 	if !m.keepAspectInitialized {
@@ -560,6 +620,7 @@ func (m *ImageModel) setSource(img image.Image, name string, format imageproc.Fo
 	m.params.Width = img.Bounds().Dx()
 	m.params.Height = img.Bounds().Dy()
 	m.params.RotateDegrees = 0
+	m.resetPaintLayer()
 	m.markDirty()
 }
 
@@ -583,7 +644,11 @@ func (m *ImageModel) recompute() {
 	}
 	m.srcPreview = nil
 	m.dstPreview = nil
-	out, err := imageproc.Apply(m.source, m.params)
+	src := m.source
+	if m.paintUsed && m.paintLayer != nil {
+		src = imageproc.CompositeOver(m.source, m.paintLayer)
+	}
+	out, err := imageproc.Apply(src, m.params)
 	m.processed = out
 	m.processErr = err
 }

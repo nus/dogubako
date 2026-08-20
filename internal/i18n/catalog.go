@@ -43,6 +43,21 @@ const (
 	OutputFormat   Key = "image.output_format"
 	JPEGQuality    Key = "image.jpeg_quality"
 
+	ImageClip       Key = "image.feature_clip"
+	ImagePaint      Key = "image.feature_paint"
+	PaintCanvas     Key = "image.paint_canvas"
+	PaintCanvasSize Key = "image.paint_canvas_size"
+	PaintTool       Key = "image.paint_tool"
+	PaintBrush      Key = "image.paint_brush"
+	PaintEraser     Key = "image.paint_eraser"
+	PaintSize       Key = "image.paint_size"
+	PaintColor      Key = "image.paint_color"
+	PaintR          Key = "image.paint_r"
+	PaintG          Key = "image.paint_g"
+	PaintB          Key = "image.paint_b"
+	PaintUndo       Key = "image.paint_undo"
+	PaintClear      Key = "image.paint_clear"
+
 	ScreenshotCapture      Key = "screenshot.capture"
 	ScreenshotCaptureRetry Key = "screenshot.capture_retry"
 	ScreenshotMode         Key = "screenshot.mode"
@@ -161,6 +176,20 @@ var catalogs = map[Lang]map[Key]string{
 		Format:                         "形式",
 		OutputFormat:                   "出力形式",
 		JPEGQuality:                    "JPEG 品質  %d",
+		ImageClip:                      "切り抜き",
+		ImagePaint:                     "ペイント",
+		PaintCanvas:                    "キャンバス",
+		PaintCanvasSize:                "キャンバス  %d×%d",
+		PaintTool:                      "ツール",
+		PaintBrush:                     "ブラシ",
+		PaintEraser:                    "消しゴム",
+		PaintSize:                      "サイズ  %d",
+		PaintColor:                     "色",
+		PaintR:                         "R",
+		PaintG:                         "G",
+		PaintB:                         "B",
+		PaintUndo:                      "元に戻す",
+		PaintClear:                     "描画を消す",
 		ScreenshotCapture:              "キャプチャ",
 		ScreenshotCaptureRetry:         "やり直す",
 		ScreenshotMode:                 "対象",
@@ -274,6 +303,20 @@ var catalogs = map[Lang]map[Key]string{
 		Format:                         "Format",
 		OutputFormat:                   "Output format",
 		JPEGQuality:                    "JPEG quality  %d",
+		ImageClip:                      "Clip",
+		ImagePaint:                     "Paint",
+		PaintCanvas:                    "Canvas",
+		PaintCanvasSize:                "Canvas  %d×%d",
+		PaintTool:                      "Tool",
+		PaintBrush:                     "Brush",
+		PaintEraser:                    "Eraser",
+		PaintSize:                      "Size  %d",
+		PaintColor:                     "Color",
+		PaintR:                         "R",
+		PaintG:                         "G",
+		PaintB:                         "B",
+		PaintUndo:                      "Undo",
+		PaintClear:                     "Clear drawing",
 		ScreenshotCapture:              "Capture",
 		ScreenshotCaptureRetry:         "Retry",
 		ScreenshotMode:                 "Target",

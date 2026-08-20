@@ -167,3 +167,101 @@ func (h *modeHost) Unmount() {
 		}
 	}
 }
+
+// imageFeatureHost shows clip or paint UI inside the image tool.
+type imageFeatureHost struct {
+	widget.WidgetBase
+	shell *Shell
+	clip  widget.Widget
+	paint widget.Widget
+}
+
+func newImageFeatureHost(s *Shell) *imageFeatureHost {
+	h := &imageFeatureHost{
+		shell: s,
+		clip:  s.buildClipFeature(),
+		paint: s.buildPaintFeature(),
+	}
+	h.SetVisible(true)
+	h.SetEnabled(true)
+	h.AddChild(h.clip)
+	h.AddChild(h.paint)
+	return h
+}
+
+func (h *imageFeatureHost) features() []widget.Widget {
+	return []widget.Widget{h.clip, h.paint}
+}
+
+func (h *imageFeatureHost) active() widget.Widget {
+	if h.shell.model.Image().Feature() == ImagePaint {
+		return h.paint
+	}
+	return h.clip
+}
+
+func (h *imageFeatureHost) Children() []widget.Widget {
+	if c := h.active(); c != nil {
+		return []widget.Widget{c}
+	}
+	return nil
+}
+
+func (h *imageFeatureHost) Layout(ctx widget.Context, cons geometry.Constraints) geometry.Size {
+	size := cons.BiggestFinite(windowWidth, windowHeight)
+	h.SetBounds(geometry.FromPointSize(h.Position(), size))
+	active := h.active()
+	for _, child := range h.features() {
+		if child == nil {
+			continue
+		}
+		if vis, ok := child.(interface{ SetVisible(bool) }); ok {
+			vis.SetVisible(child == active)
+		}
+		if child == active {
+			sz := widget.LayoutChild(child, ctx, geometry.Tight(size))
+			if b, ok := child.(boundsSetter); ok {
+				b.SetBounds(geometry.FromPointSize(geometry.Pt(0, 0), sz))
+			}
+			continue
+		}
+		if b, ok := child.(boundsSetter); ok {
+			b.SetBounds(geometry.Rect{})
+		}
+	}
+	return size
+}
+
+func (h *imageFeatureHost) Draw(ctx widget.Context, canvas widget.Canvas) {
+	if child := h.active(); child != nil {
+		widget.DrawChild(child, ctx, canvas)
+	}
+}
+
+func (h *imageFeatureHost) Event(ctx widget.Context, e event.Event) bool {
+	if child := h.active(); child != nil {
+		return child.Event(ctx, e)
+	}
+	return false
+}
+
+func (h *imageFeatureHost) Mount(ctx widget.Context) {
+	active := h.active()
+	for _, child := range h.features() {
+		if child != nil && child != active {
+			widget.MountTree(child, ctx)
+		}
+	}
+	if sched := ctx.Scheduler(); sched != nil {
+		h.AddBinding(state.BindToSchedulerLayout(h.shell.rev, h, sched))
+	}
+}
+
+func (h *imageFeatureHost) Unmount() {
+	active := h.active()
+	for _, child := range h.features() {
+		if child != nil && child != active {
+			widget.UnmountTree(child)
+		}
+	}
+}

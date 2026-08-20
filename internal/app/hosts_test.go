@@ -79,3 +79,52 @@ func TestModeHostHidesInactive(t *testing.T) {
 		t.Fatal("previous tools should be hidden")
 	}
 }
+
+func TestImageFeatureHostChildrenOnlyActive(t *testing.T) {
+	s := &Shell{}
+	h := &imageFeatureHost{
+		shell: s,
+		clip:  newStubPanel(),
+		paint: newStubPanel(),
+	}
+	h.SetVisible(true)
+
+	if got := h.Children(); len(got) != 1 || got[0] != h.clip {
+		t.Fatalf("default children = %v", got)
+	}
+
+	s.model.Image().SetFeature(ImagePaint)
+	if got := h.Children(); len(got) != 1 || got[0] != h.paint {
+		t.Fatalf("paint children = %v", got)
+	}
+
+	s.model.Image().SetFeature(ImageClip)
+	if got := h.Children(); len(got) != 1 || got[0] != h.clip {
+		t.Fatalf("clip children = %v", got)
+	}
+}
+
+func TestImageFeatureHostHidesInactive(t *testing.T) {
+	s := &Shell{}
+	h := &imageFeatureHost{
+		shell: s,
+		clip:  newStubPanel(),
+		paint: newStubPanel(),
+	}
+	h.Layout(nil, geometry.Tight(geometry.Sz(400, 300)))
+	if !h.clip.(*stubPanel).IsVisible() {
+		t.Fatal("clip should be visible")
+	}
+	if h.paint.(*stubPanel).IsVisible() {
+		t.Fatal("paint should be hidden")
+	}
+
+	s.model.Image().SetFeature(ImagePaint)
+	h.Layout(nil, geometry.Tight(geometry.Sz(400, 300)))
+	if !h.paint.(*stubPanel).IsVisible() {
+		t.Fatal("paint should be visible")
+	}
+	if h.clip.(*stubPanel).IsVisible() {
+		t.Fatal("clip should be hidden")
+	}
+}
