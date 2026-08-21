@@ -537,7 +537,7 @@ func (s *Shell) zoomBar(zoom previewZoomer, hasImage func() bool) widget.Widget 
 			return ""
 		}
 		return strconv.Itoa(zoom.ZoomPercent()) + "%"
-	}, 12, widget.RGBA8(90, 90, 90, 255), 0)
+	}, 12, widget.RGBA8(90, 90, 90, 255), 8)
 	out := s.btnFn(func() string { return zoomOutLabel }, zoom.ZoomOut, nil, off).Compact()
 	in := s.btnFn(func() string { return zoomInLabel }, zoom.ZoomIn, nil, off).Compact()
 	fit := s.btn(i18n.ZoomFit, zoom.ZoomFit, false, off).Compact()

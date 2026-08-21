@@ -136,13 +136,14 @@ func TestZoomViewHugeImageZoomsOutToFit(t *testing.T) {
 }
 
 func TestWheelZoomFactorDirectionAndCap(t *testing.T) {
-	if wheelZoomFactor(1) <= 1 {
+	// Delta.Y is negative when the wheel turns away from the user.
+	if wheelZoomFactor(-1) <= 1 {
 		t.Fatal("scrolling up should zoom in")
 	}
-	if wheelZoomFactor(-1) >= 1 {
+	if wheelZoomFactor(1) >= 1 {
 		t.Fatal("scrolling down should zoom out")
 	}
-	if got := wheelZoomFactor(50); got != wheelZoomFactor(3) {
+	if got := wheelZoomFactor(-50); got != wheelZoomFactor(-3) {
 		t.Fatalf("large trackpad deltas should be capped, got %v", got)
 	}
 }

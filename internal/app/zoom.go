@@ -213,14 +213,16 @@ func clampAbs(v, limit int) int {
 }
 
 // wheelZoomFactor converts a wheel or trackpad delta into a scale factor.
-// Trackpads send long streams of small deltas, so a single event is capped.
-func wheelZoomFactor(delta float32) float32 {
-	d := float64(delta)
+// Delta.Y is positive when scrolling down, so the sign is flipped to zoom in
+// when the wheel turns away from the user. Trackpads send long streams of
+// deltas, so one event is capped.
+func wheelZoomFactor(deltaY float32) float32 {
+	d := float64(deltaY)
 	if d > 3 {
 		d = 3
 	}
 	if d < -3 {
 		d = -3
 	}
-	return float32(math.Pow(1.2, d))
+	return float32(math.Pow(1.2, -d))
 }

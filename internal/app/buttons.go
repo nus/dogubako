@@ -234,15 +234,17 @@ type cjkLabel struct {
 	text     func() string
 	fontSize float32
 	color    widget.Color
-	padEnd   float32
+	// slack widens the layout box beyond the estimate. Glyphs such as "%"
+	// are wider than labelWidth assumes and would be clipped without it.
+	slack float32
 }
 
 func (s *Shell) toolbarLabel(key i18n.Key) *cjkLabel {
 	return s.cjkLabelFn(func() string { return i18n.T(s.model.Lang(), key) }, 13, widget.RGBA8(33, 33, 33, 255), 0)
 }
 
-func (s *Shell) cjkLabelFn(text func() string, fontSize float32, color widget.Color, padEnd float32) *cjkLabel {
-	l := &cjkLabel{shell: s, text: text, fontSize: fontSize, color: color, padEnd: padEnd}
+func (s *Shell) cjkLabelFn(text func() string, fontSize float32, color widget.Color, slack float32) *cjkLabel {
+	l := &cjkLabel{shell: s, text: text, fontSize: fontSize, color: color, slack: slack}
 	l.SetVisible(true)
 	l.SetEnabled(true)
 	return l
@@ -253,7 +255,7 @@ func (l *cjkLabel) Layout(_ widget.Context, cons geometry.Constraints) geometry.
 	if l.text != nil {
 		label = l.text()
 	}
-	w := labelWidth(label) + l.padEnd
+	w := labelWidth(label) + l.slack
 	h := btnHeight
 	size := cons.Constrain(geometry.Sz(w, h))
 	l.SetBounds(geometry.FromPointSize(l.Position(), size))
@@ -274,11 +276,7 @@ func (l *cjkLabel) Draw(_ widget.Context, canvas widget.Canvas) {
 	}
 	textH := l.fontSize * 1.2
 	y := bounds.Min.Y + (bounds.Height()-textH)/2
-	textW := bounds.Width() - l.padEnd
-	if textW < 1 {
-		textW = bounds.Width()
-	}
-	textBounds := geometry.NewRect(bounds.Min.X, y, textW, textH)
+	textBounds := geometry.NewRect(bounds.Min.X, y, bounds.Width(), textH)
 	style := widget.TextStyle{
 		FontFamily: cjkembed.FamilyName,
 		FontSize:   l.fontSize,

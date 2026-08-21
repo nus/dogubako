@@ -233,7 +233,7 @@ func TestSourcePreviewWheelZoomsIn(t *testing.T) {
 	if before != 200 {
 		t.Fatalf("fitted percent = %d, want 200", before)
 	}
-	if !p.Event(ctx, uitest.WheelScroll(100, 100, 3)) {
+	if !p.Event(ctx, uitest.WheelScroll(100, 100, -3)) {
 		t.Fatal("wheel over the preview should be consumed")
 	}
 	if got := p.ZoomPercent(); got <= before {
