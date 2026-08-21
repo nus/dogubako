@@ -12,9 +12,10 @@ import (
 )
 
 const (
-	btnHeight float32 = 28
-	btnPadX   float32 = 10
-	navHeight float32 = 28
+	btnHeight   float32 = 28
+	btnPadX     float32 = 10
+	btnMinWidth float32 = 64
+	navHeight   float32 = 28
 )
 
 func labelWidth(s string) float32 {
@@ -38,6 +39,7 @@ type cjkButton struct {
 	onClick  func()
 	disabled func() bool
 	filled   func() bool
+	minWidth float32
 	hover    bool
 	pressed  bool
 }
@@ -83,6 +85,13 @@ func (s *Shell) segBarFill(items ...segItem) widget.Widget {
 	return primitives.HBox(children...).Gap(2)
 }
 
+// Compact drops the wide minimum width so short labels such as the zoom
+// symbols keep the button close to its text.
+func (b *cjkButton) Compact() *cjkButton {
+	b.minWidth = btnHeight
+	return b
+}
+
 func (b *cjkButton) inactive() bool {
 	return b.disabled != nil && b.disabled()
 }
@@ -92,9 +101,13 @@ func (b *cjkButton) Layout(ctx widget.Context, cons geometry.Constraints) geomet
 	if b.label != nil {
 		label = b.label()
 	}
+	minW := b.minWidth
+	if minW <= 0 {
+		minW = btnMinWidth
+	}
 	w := labelWidth(label) + 2*btnPadX
-	if w < 64 {
-		w = 64
+	if w < minW {
+		w = minW
 	}
 	size := cons.Constrain(geometry.Sz(w, btnHeight))
 	if size.Height < btnHeight && cons.MaxHeight >= btnHeight {

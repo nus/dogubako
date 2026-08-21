@@ -136,6 +136,14 @@ func Resize(src image.Image, width, height int) *image.NRGBA {
 	return dst
 }
 
+// ResizeNearest scales src to width×height without interpolation, keeping
+// pixel edges hard when a preview is magnified.
+func ResizeNearest(src image.Image, width, height int) *image.NRGBA {
+	dst := image.NewNRGBA(image.Rect(0, 0, width, height))
+	xdraw.NearestNeighbor.Scale(dst, dst.Bounds(), src, src.Bounds(), xdraw.Src, nil)
+	return dst
+}
+
 // Encode writes img in the requested format.
 func Encode(img image.Image, format Format, jpegQuality int) ([]byte, error) {
 	if img == nil {

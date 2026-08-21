@@ -1,8 +1,6 @@
 package app
 
 import (
-	"image"
-
 	"github.com/gogpu/ui/core/scrollview"
 	"github.com/gogpu/ui/event"
 	"github.com/gogpu/ui/geometry"
@@ -152,8 +150,7 @@ func (b *screenshotListBody) Draw(_ widget.Context, canvas widget.Canvas) {
 		thumbSlot := screenshotThumbRect(row)
 		drawCheckerboard(canvas, thumbSlot)
 		if img := shot.Thumbnail(files[i].Path); img != nil {
-			fitted := fittedRect(toImageRect(thumbSlot), img.Bounds().Size())
-			drawFittedImage(canvas, img, fitted, img.Bounds().Size(), image.Rectangle{})
+			drawFittedImage(canvas, img, fittedRect(toImageRect(thumbSlot), img.Bounds().Size()))
 		}
 		name := screenshotNameRect(row)
 		style := widget.TextStyle{

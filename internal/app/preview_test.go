@@ -72,8 +72,8 @@ func TestSourcePreviewDrawsProviderWithoutSetImage(t *testing.T) {
 	var m ImageModel
 	m.setSource(src, "test.png", imageproc.FormatPNG)
 	p := newSourcePreview(state.NewSignal[uint64](1))
-	p.SetProvider(func() sourcePreviewFrame {
-		return sourcePreviewFrame{
+	p.SetProvider(func() previewFrame {
+		return previewFrame{
 			image:       m.SourcePreview(),
 			size:        m.SourceSize(),
 			crop:        m.Crop(),
@@ -153,7 +153,7 @@ func TestApplyCropHighlightDarkensOutsideAndPaintsBorder(t *testing.T) {
 	for i := range dst.Pix {
 		dst.Pix[i] = 255
 	}
-	applyCropHighlight(dst, image.Pt(100, 100), image.Rect(20, 20, 80, 80))
+	applyCropHighlight(dst, image.Rect(20, 20, 80, 80))
 
 	outside := dst.RGBAAt(0, 0)
 	if outside.R > 130 || outside.A != 255 {
@@ -220,6 +220,185 @@ func TestSourcePreviewDrawBakesOverlayWhileDragging(t *testing.T) {
 	}
 	if got.RGBAAt(18, 18).R != 255 {
 		t.Fatal("inside drag rect should stay bright")
+	}
+}
+
+func TestSourcePreviewWheelZoomsIn(t *testing.T) {
+	p := newSourcePreview(nil)
+	p.SetImage(image.NewNRGBA(image.Rect(0, 0, 100, 100)), image.Pt(100, 100))
+	p.SetBounds(geometry.NewRect(0, 0, 200, 200))
+	ctx := uitest.NewMockContext()
+
+	before := p.ZoomPercent()
+	if before != 200 {
+		t.Fatalf("fitted percent = %d, want 200", before)
+	}
+	if !p.Event(ctx, uitest.WheelScroll(100, 100, 3)) {
+		t.Fatal("wheel over the preview should be consumed")
+	}
+	if got := p.ZoomPercent(); got <= before {
+		t.Fatalf("percent after zoom in = %d, want more than %d", got, before)
+	}
+	p.ZoomFit()
+	if got := p.ZoomPercent(); got != before {
+		t.Fatalf("percent after fit = %d, want %d", got, before)
+	}
+}
+
+func TestPreviewZoomButtonsReportChanges(t *testing.T) {
+	p := newDestPreview(nil)
+	p.SetImage(image.NewNRGBA(image.Rect(0, 0, 40, 40)))
+	p.SetBounds(geometry.NewRect(0, 0, 80, 80))
+	calls := 0
+	p.SetOnZoom(func() { calls++ })
+
+	p.ZoomIn()
+	if calls != 1 {
+		t.Fatalf("zoom in notifications = %d, want 1", calls)
+	}
+	if p.ZoomPercent() <= 200 {
+		t.Fatalf("percent = %d, want more than the 200 fit", p.ZoomPercent())
+	}
+	p.ZoomOut()
+	p.ZoomFit()
+	if !p.view.fitted() {
+		t.Fatal("fit button should restore the fitted view")
+	}
+}
+
+func TestDestPreviewDrawStaysInsideBoundsWhenZoomed(t *testing.T) {
+	src := image.NewNRGBA(image.Rect(0, 0, 60, 40))
+	p := newDestPreview(nil)
+	p.SetImage(src)
+	bounds := geometry.NewRect(0, 0, 120, 80)
+	p.SetBounds(bounds)
+	for i := 0; i < 6; i++ {
+		p.ZoomIn()
+	}
+	canvas := &uitest.MockCanvas{}
+	p.Draw(nil, canvas)
+
+	if len(canvas.Images) != 1 {
+		t.Fatalf("DrawImage calls = %d, want 1", len(canvas.Images))
+	}
+	drawn := canvas.Images[0]
+	size := drawn.Image.Bounds().Size()
+	view := toImageRect(bounds)
+	got := image.Rect(int(drawn.At.X), int(drawn.At.Y), int(drawn.At.X)+size.X, int(drawn.At.Y)+size.Y)
+	if !got.In(view) {
+		t.Fatalf("zoomed raster %v spills outside the preview %v", got, view)
+	}
+	if got.Dx() < view.Dx() || got.Dy() < view.Dy() {
+		t.Fatalf("zoomed raster %v should cover the preview %v", got, view)
+	}
+}
+
+func TestDestPreviewDragPansZoomedImage(t *testing.T) {
+	p := newDestPreview(nil)
+	p.SetImage(image.NewNRGBA(image.Rect(0, 0, 100, 100)))
+	p.SetBounds(geometry.NewRect(0, 0, 100, 100))
+	ctx := uitest.NewMockContext()
+	for i := 0; i < 4; i++ {
+		p.ZoomIn()
+	}
+	view := toImageRect(p.Bounds())
+	start := p.view.displayRect(view, p.imageSize)
+
+	if !p.Event(ctx, uitest.Click(50, 50)) {
+		t.Fatal("press on a zoomed preview should start a pan")
+	}
+	if !p.Event(ctx, uitest.MouseDrag(70, 50)) {
+		t.Fatal("drag should be consumed while panning")
+	}
+	moved := p.view.displayRect(view, p.imageSize)
+	if moved.Min.X <= start.Min.X {
+		t.Fatalf("drag right should move the image right: %v -> %v", start, moved)
+	}
+	p.Event(ctx, uitest.Release(70, 50))
+	if p.panning {
+		t.Fatal("release should end the pan")
+	}
+}
+
+func TestDestPreviewIgnoresDragWhenFitted(t *testing.T) {
+	p := newDestPreview(nil)
+	p.SetImage(image.NewNRGBA(image.Rect(0, 0, 10, 10)))
+	p.SetBounds(geometry.NewRect(0, 0, 100, 100))
+	if p.Event(uitest.NewMockContext(), uitest.Click(50, 50)) {
+		t.Fatal("a fitted preview has nothing to pan")
+	}
+}
+
+func TestSourcePreviewCropFollowsZoomedView(t *testing.T) {
+	src := image.NewNRGBA(image.Rect(0, 0, 100, 100))
+	p := newSourcePreview(nil)
+	p.SetImage(src, image.Pt(100, 100))
+	p.SetBounds(geometry.NewRect(0, 0, 100, 100))
+	var got image.Rectangle
+	p.OnCropChanged(func(r image.Rectangle) { got = r })
+	for i := 0; i < 4; i++ {
+		p.ZoomIn()
+	}
+	ctx := uitest.NewMockContext()
+	view := toImageRect(p.Bounds())
+	disp := p.view.displayRect(view, p.imageSize)
+	scale := float32(disp.Dx()) / 100
+
+	p.Event(ctx, uitest.Click(10, 10))
+	p.Event(ctx, uitest.MouseDrag(60, 60))
+	p.Event(ctx, uitest.Release(60, 60))
+
+	want := screenToImage(image.Pt(10, 10), disp, p.imageSize)
+	if got.Min != want {
+		t.Fatalf("crop origin = %v, want %v (scale %v)", got.Min, want, scale)
+	}
+	if got.Dx() >= 50 {
+		t.Fatalf("crop width = %d, a zoomed drag must cover fewer image pixels", got.Dx())
+	}
+}
+
+func TestPreviewResetsZoomWhenImageChanges(t *testing.T) {
+	p := newDestPreview(nil)
+	p.SetImage(image.NewNRGBA(image.Rect(0, 0, 40, 40)))
+	p.SetBounds(geometry.NewRect(0, 0, 80, 80))
+	p.ZoomIn()
+	if p.view.fitted() {
+		t.Fatal("should be zoomed")
+	}
+	p.SetImage(image.NewNRGBA(image.Rect(0, 0, 60, 60)))
+	if !p.view.fitted() {
+		t.Fatal("a new image should start fitted")
+	}
+}
+
+func TestDestPreviewSamplesFullImageWhenZoomedPastPreview(t *testing.T) {
+	full := image.NewNRGBA(image.Rect(0, 0, 400, 400))
+	small := image.NewNRGBA(image.Rect(0, 0, 100, 100))
+	p := newDestPreview(nil)
+	p.SetFrameProvider(func() previewFrame {
+		return previewFrame{image: small, full: full, size: image.Pt(400, 400)}
+	})
+	p.SetBounds(geometry.NewRect(0, 0, 100, 100))
+	if got := sharpestRaster(small, full, image.Rect(0, 0, 100, 100)); got != image.Image(small) {
+		t.Fatal("a fitted view should use the cheap preview raster")
+	}
+	if got := sharpestRaster(small, full, image.Rect(0, 0, 400, 400)); got != image.Image(full) {
+		t.Fatal("zooming past the preview raster should sample the full image")
+	}
+}
+
+func TestPreviewTileCoversOnlyTheVisiblePart(t *testing.T) {
+	src := image.NewNRGBA(image.Rect(0, 0, 50, 50))
+	view := image.Rect(0, 0, 100, 100)
+	disp := image.Rect(-100, -100, 300, 300) // 8x zoom, image larger than the view
+
+	tile, origin := previewTile(src, disp, view)
+	if tile == nil {
+		t.Fatal("no tile")
+	}
+	got := image.Rect(origin.X, origin.Y, origin.X+tile.Bounds().Dx(), origin.Y+tile.Bounds().Dy())
+	if got != view {
+		t.Fatalf("tile = %v, want exactly the visible area %v", got, view)
 	}
 }
 

@@ -15,22 +15,64 @@ import (
 	"github.com/nus/dogubako/internal/imageproc"
 )
 
-// sourcePreviewFrame is one source-preview draw: raster, original size, crop overlay.
-type sourcePreviewFrame struct {
+// previewFrame is one preview draw: the raster to scale, the full-resolution
+// image used once zoomed past that raster, the original pixel size, and the
+// crop overlay.
+type previewFrame struct {
 	image       image.Image
+	full        image.Image
 	size        image.Point
 	crop        image.Rectangle
 	cropEnabled bool
 }
 
-// sourcePreview shows the original image and lets the user drag a crop rectangle.
+// zoomable is the zoom and pan state shared by the preview widgets. The
+// embedding widget supplies its own bounds because the two previews are
+// laid out separately.
+type zoomable struct {
+	view      zoomView
+	imageSize image.Point
+	panning   bool
+	panLast   image.Point
+	onZoom    func()
+}
+
+// SetOnZoom registers the callback that refreshes the zoom readout.
+func (z *zoomable) SetOnZoom(f func()) { z.onZoom = f }
+
+// setImageSize resets the view when a different image arrives, so a new
+// picture always starts fitted.
+func (z *zoomable) setImageSize(size image.Point) {
+	if size == z.imageSize {
+		return
+	}
+	z.imageSize = size
+	z.view.reset()
+	z.panning = false
+}
+
+func (z *zoomable) zoomed(bounds image.Rectangle) bool {
+	return z.view.canPan(bounds, z.imageSize)
+}
+
+func (z *zoomable) notifyZoom() {
+	if z.onZoom != nil {
+		z.onZoom()
+	}
+}
+
+// sourcePreview shows the original image and lets the user drag a crop
+// rectangle. Zoom is by wheel or by the buttons next to the panel title;
+// panning uses the middle button or Shift with the left button, because a
+// plain left drag draws the crop.
 type sourcePreview struct {
 	widget.WidgetBase
+	zoomable
 
 	rev           state.ReadonlySignal[uint64]
-	provider      func() sourcePreviewFrame
+	provider      func() previewFrame
 	image         image.Image
-	imageSize     image.Point
+	full          image.Image
 	crop          image.Rectangle
 	cropEnabled   bool
 	onCropChanged func(image.Rectangle)
@@ -47,14 +89,14 @@ func newSourcePreview(rev state.ReadonlySignal[uint64]) *sourcePreview {
 	return p
 }
 
-func (p *sourcePreview) SetProvider(f func() sourcePreviewFrame) {
+func (p *sourcePreview) SetProvider(f func() previewFrame) {
 	p.provider = f
 	p.SetNeedsRedraw(true)
 }
 
 func (p *sourcePreview) SetImage(img image.Image, srcSize image.Point) {
 	p.image = img
-	p.imageSize = srcSize
+	p.setImageSize(srcSize)
 	p.SetNeedsRedraw(true)
 }
 
@@ -73,7 +115,8 @@ func (p *sourcePreview) sync() {
 	}
 	frame := p.provider()
 	p.image = frame.image
-	p.imageSize = frame.size
+	p.full = frame.full
+	p.setImageSize(frame.size)
 	p.crop = frame.crop
 	p.cropEnabled = frame.cropEnabled
 }
@@ -98,8 +141,8 @@ func (p *sourcePreview) Draw(_ widget.Context, canvas widget.Canvas) {
 	if p.image == nil || p.imageSize.X <= 0 || p.imageSize.Y <= 0 {
 		return
 	}
-	ib := toImageRect(b)
-	fitted := fittedRect(ib, p.imageSize)
+	view := toImageRect(b)
+	disp := p.view.displayRect(view, p.imageSize)
 	crop := image.Rectangle{}
 	if p.cropEnabled || p.dragging {
 		crop = p.crop
@@ -107,51 +150,64 @@ func (p *sourcePreview) Draw(_ widget.Context, canvas widget.Canvas) {
 			crop = p.dragRect
 		}
 	}
-	drawFittedImage(canvas, p.image, fitted, p.imageSize, crop)
+	drawPreviewImage(canvas, p.raster(disp), disp, view, p.imageSize, crop)
+}
+
+// raster picks the sharpest source available for disp. The cached preview
+// raster is capped at previewMaxEdge, so zooming past it falls back to the
+// full-resolution image.
+func (p *sourcePreview) raster(disp image.Rectangle) image.Image {
+	return sharpestRaster(p.image, p.full, disp)
 }
 
 func (p *sourcePreview) Event(ctx widget.Context, e event.Event) bool {
 	p.sync()
-	me, ok := e.(*event.MouseEvent)
-	if !ok || p.image == nil || p.imageSize.X <= 0 || p.imageSize.Y <= 0 {
+	if p.image == nil || p.imageSize.X <= 0 || p.imageSize.Y <= 0 {
 		return false
 	}
-	fitted := fittedRect(toImageRect(p.Bounds()), p.imageSize)
-	if fitted.Empty() {
+	view := toImageRect(p.Bounds())
+	if we, ok := e.(*event.WheelEvent); ok {
+		return p.wheel(ctx, we, view)
+	}
+	me, ok := e.(*event.MouseEvent)
+	if !ok {
+		return false
+	}
+	disp := p.view.displayRect(view, p.imageSize)
+	if disp.Empty() {
 		return false
 	}
 	pt := p.localMouse(me)
+	if p.panEvent(ctx, me, pt, view) {
+		return true
+	}
 
 	switch me.MouseType {
 	case event.MousePress:
-		if me.Button == event.ButtonLeft && pt.In(fitted) {
+		if me.Button == event.ButtonLeft && !p.panning && pt.In(disp) {
 			p.dragging = true
-			p.dragStart = screenToImage(pt, fitted, p.imageSize)
+			p.dragStart = screenToImage(pt, disp, p.imageSize)
 			p.dragRect = image.Rectangle{Min: p.dragStart, Max: p.dragStart.Add(image.Pt(1, 1))}.Canon()
-			if cap, ok := ctx.(widget.PointerCapturer); ok {
-				cap.CapturePointer(p)
-			}
+			capturePointer(ctx, p)
 			ctx.SetCursor(widget.CursorCrosshair)
 			p.SetNeedsRedraw(true)
 			return true
 		}
 	case event.MouseDrag, event.MouseMove:
 		if p.dragging {
-			cur := screenToImage(pt, fitted, p.imageSize)
+			cur := screenToImage(pt, disp, p.imageSize)
 			p.dragRect = normalizeCrop(image.Rectangle{Min: p.dragStart, Max: cur.Add(image.Pt(1, 1))}, p.imageSize)
 			ctx.SetCursor(widget.CursorCrosshair)
 			p.SetNeedsRedraw(true)
 			return true
 		}
-		if pt.In(fitted) {
+		if pt.In(disp) {
 			ctx.SetCursor(widget.CursorCrosshair)
 		}
 	case event.MouseRelease:
 		if p.dragging && me.Button == event.ButtonLeft {
 			p.dragging = false
-			if cap, ok := ctx.(widget.PointerCapturer); ok {
-				cap.ReleasePointer(p)
-			}
+			releasePointer(ctx, p)
 			rect := normalizeCrop(p.dragRect, p.imageSize)
 			if rect.Dx() >= 1 && rect.Dy() >= 1 && p.onCropChanged != nil {
 				p.onCropChanged(rect)
@@ -163,16 +219,34 @@ func (p *sourcePreview) Event(ctx widget.Context, e event.Event) bool {
 	return false
 }
 
+// panEvent handles the middle-button and Shift+left drag that moves a
+// zoomed-in image. It reports whether the event was consumed.
+func (p *sourcePreview) panEvent(ctx widget.Context, me *event.MouseEvent, pt image.Point, view image.Rectangle) bool {
+	switch me.MouseType {
+	case event.MousePress:
+		if p.dragging || !startsPan(me) || !pt.In(view) || !p.zoomed(view) {
+			return false
+		}
+		p.beginPan(ctx, p, pt)
+		return true
+	case event.MouseDrag, event.MouseMove:
+		return p.continuePan(ctx, pt, view)
+	case event.MouseRelease:
+		return p.endPan(ctx, p, me)
+	}
+	return false
+}
+
+func (p *sourcePreview) wheel(ctx widget.Context, we *event.WheelEvent, view image.Rectangle) bool {
+	return applyWheelZoom(ctx, p, &p.zoomable, we, view)
+}
+
 // localMouse maps an event into this widget's bounds space.
 // Tree dispatch translates through parents (local). After CapturePointer,
 // the window delivers the same events in window coordinates — subtracting
 // ScreenOrigin puts the crop corner back on the cursor.
 func (p *sourcePreview) localMouse(me *event.MouseEvent) image.Point {
-	pos := me.Position
-	if p.dragging && p.IsScreenOriginValid() {
-		pos = pos.Sub(p.ScreenOrigin()).Add(p.Bounds().Min)
-	}
-	return image.Pt(int(math.Round(float64(pos.X))), int(math.Round(float64(pos.Y))))
+	return localMousePoint(p, me.Position, p.dragging || p.panning)
 }
 
 func (p *sourcePreview) Children() []widget.Widget { return nil }
@@ -190,14 +264,18 @@ func (p *sourcePreview) Mount(ctx widget.Context) {
 
 func (p *sourcePreview) Unmount() {}
 
-// destPreview shows a processed image fitted into its bounds.
+// destPreview shows a processed image fitted into its bounds, with the same
+// zoom and pan controls as the source preview. Here a plain left drag pans,
+// because there is nothing to select.
 type destPreview struct {
 	widget.WidgetBase
+	zoomable
 
 	rev       state.ReadonlySignal[uint64]
-	provider  func() image.Image
+	provider  func() previewFrame
 	source    image.Image
 	image     image.Image
+	full      image.Image
 	emptyHint func() string
 }
 
@@ -208,7 +286,22 @@ func newDestPreview(rev state.ReadonlySignal[uint64]) *destPreview {
 	return p
 }
 
+// SetProvider shows the image returned by f, scaled to fit.
 func (p *destPreview) SetProvider(f func() image.Image) {
+	if f == nil {
+		p.SetFrameProvider(nil)
+		return
+	}
+	p.SetFrameProvider(func() previewFrame {
+		img := f()
+		return previewFrame{image: img, size: imageSizeOf(img)}
+	})
+}
+
+// SetFrameProvider also supplies the full-resolution image and the original
+// pixel size, so the zoom readout and zoomed-in detail stay accurate when the
+// preview raster is a downscaled copy.
+func (p *destPreview) SetFrameProvider(f func() previewFrame) {
 	p.provider = f
 	p.SetNeedsRedraw(true)
 }
@@ -216,12 +309,14 @@ func (p *destPreview) SetProvider(f func() image.Image) {
 func (p *destPreview) SetImage(img image.Image) {
 	p.image = img
 	p.source = nil
+	p.setImageSize(imageSizeOf(img))
 	p.SetNeedsRedraw(true)
 }
 
 func (p *destPreview) SetSource(img image.Image) {
 	p.source = img
 	p.image = nil
+	p.setImageSize(imageSizeOf(img))
 	p.SetNeedsRedraw(true)
 }
 
@@ -231,7 +326,7 @@ func (p *destPreview) SetEmptyHint(f func() string) {
 
 func (p *destPreview) HasImage() bool {
 	if p.provider != nil {
-		return p.provider() != nil
+		return p.provider().image != nil
 	}
 	return p.source != nil || p.image != nil
 }
@@ -241,7 +336,11 @@ func (p *destPreview) resolvedImage() image.Image {
 		_ = p.rev.Get()
 	}
 	if p.provider != nil {
-		return p.provider()
+		frame := p.provider()
+		p.image = frame.image
+		p.full = frame.full
+		p.setImageSize(frame.size)
+		return p.image
 	}
 	if p.image != nil {
 		return p.image
@@ -250,6 +349,7 @@ func (p *destPreview) resolvedImage() image.Image {
 		return nil
 	}
 	p.image = previewImage(p.source)
+	p.full = p.source
 	return p.image
 }
 
@@ -267,7 +367,9 @@ func (p *destPreview) Draw(_ widget.Context, canvas widget.Canvas) {
 	drawCheckerboard(canvas, b)
 	img := p.resolvedImage()
 	if img != nil {
-		drawFittedImage(canvas, img, fittedRect(toImageRect(b), img.Bounds().Size()), img.Bounds().Size(), image.Rectangle{})
+		view := toImageRect(b)
+		disp := p.view.displayRect(view, p.imageSize)
+		drawPreviewImage(canvas, sharpestRaster(img, p.full, disp), disp, view, p.imageSize, image.Rectangle{})
 		return
 	}
 	if p.emptyHint == nil {
@@ -290,7 +392,42 @@ func (p *destPreview) Draw(_ widget.Context, canvas widget.Canvas) {
 	}
 }
 
-func (p *destPreview) Event(_ widget.Context, _ event.Event) bool { return false }
+func (p *destPreview) Event(ctx widget.Context, e event.Event) bool {
+	if p.resolvedImage() == nil || p.imageSize.X <= 0 || p.imageSize.Y <= 0 {
+		return false
+	}
+	view := toImageRect(p.Bounds())
+	if we, ok := e.(*event.WheelEvent); ok {
+		return applyWheelZoom(ctx, p, &p.zoomable, we, view)
+	}
+	me, ok := e.(*event.MouseEvent)
+	if !ok {
+		return false
+	}
+	pt := localMousePoint(p, me.Position, p.panning)
+	switch me.MouseType {
+	case event.MousePress:
+		if me.Button != event.ButtonLeft && me.Button != event.ButtonMiddle {
+			return false
+		}
+		if !pt.In(view) || !p.zoomed(view) {
+			return false
+		}
+		p.beginPan(ctx, p, pt)
+		return true
+	case event.MouseDrag, event.MouseMove:
+		if p.continuePan(ctx, pt, view) {
+			return true
+		}
+		if pt.In(view) && p.zoomed(view) {
+			ctx.SetCursor(widget.CursorMove)
+			return true
+		}
+	case event.MouseRelease:
+		return p.endPan(ctx, p, me)
+	}
+	return false
+}
 
 func (p *destPreview) Children() []widget.Widget { return nil }
 
@@ -307,6 +444,167 @@ func (p *destPreview) Mount(ctx widget.Context) {
 
 func (p *destPreview) Unmount() {}
 
+// previewZoomer is what the zoom buttons next to a panel title drive.
+type previewZoomer interface {
+	ZoomIn()
+	ZoomOut()
+	ZoomFit()
+	ZoomPercent() int
+}
+
+func (p *sourcePreview) ZoomIn()          { zoomFromButton(p, &p.zoomable, zoomStepFactor) }
+func (p *sourcePreview) ZoomOut()         { zoomFromButton(p, &p.zoomable, 1/zoomStepFactor) }
+func (p *sourcePreview) ZoomFit()         { fitFromButton(p, &p.zoomable) }
+func (p *sourcePreview) ZoomPercent() int { return zoomPercentOf(p, &p.zoomable) }
+
+func (p *destPreview) ZoomIn()          { zoomFromButton(p, &p.zoomable, zoomStepFactor) }
+func (p *destPreview) ZoomOut()         { zoomFromButton(p, &p.zoomable, 1/zoomStepFactor) }
+func (p *destPreview) ZoomFit()         { fitFromButton(p, &p.zoomable) }
+func (p *destPreview) ZoomPercent() int { return zoomPercentOf(p, &p.zoomable) }
+
+// previewWidget is the part of a preview the shared zoom helpers need.
+type previewWidget interface {
+	widget.Widget
+	Bounds() geometry.Rect
+	ScreenOrigin() geometry.Point
+	IsScreenOriginValid() bool
+	SetNeedsRedraw(bool)
+	sync()
+}
+
+func (p *destPreview) sync() { _ = p.resolvedImage() }
+
+func zoomFromButton(w previewWidget, z *zoomable, factor float32) {
+	w.sync()
+	view := toImageRect(w.Bounds())
+	center := image.Pt(view.Min.X+view.Dx()/2, view.Min.Y+view.Dy()/2)
+	if !z.view.zoomBy(view, z.imageSize, factor, center) {
+		return
+	}
+	w.SetNeedsRedraw(true)
+	z.notifyZoom()
+}
+
+func fitFromButton(w previewWidget, z *zoomable) {
+	w.sync()
+	if z.view.fitted() {
+		return
+	}
+	z.view.reset()
+	w.SetNeedsRedraw(true)
+	z.notifyZoom()
+}
+
+func zoomPercentOf(w previewWidget, z *zoomable) int {
+	w.sync()
+	return z.view.percent(toImageRect(w.Bounds()), z.imageSize)
+}
+
+func applyWheelZoom(ctx widget.Context, w previewWidget, z *zoomable, we *event.WheelEvent, view image.Rectangle) bool {
+	anchor := image.Pt(int(math.Round(float64(we.Position.X))), int(math.Round(float64(we.Position.Y))))
+	if !anchor.In(view) {
+		return false
+	}
+	if !z.view.zoomBy(view, z.imageSize, wheelZoomFactor(we.DeltaY()), anchor) {
+		return true
+	}
+	w.SetNeedsRedraw(true)
+	if ctx != nil {
+		ctx.InvalidateRect(w.Bounds())
+	}
+	z.notifyZoom()
+	return true
+}
+
+// startsPan reports whether a press should start a pan instead of the
+// widget's normal left-drag action.
+func startsPan(me *event.MouseEvent) bool {
+	if me.Button == event.ButtonMiddle {
+		return true
+	}
+	return me.Button == event.ButtonLeft && me.Modifiers().IsShift()
+}
+
+func (z *zoomable) beginPan(ctx widget.Context, w previewWidget, pt image.Point) {
+	z.panning = true
+	z.panLast = pt
+	capturePointer(ctx, w)
+	if ctx != nil {
+		ctx.SetCursor(widget.CursorMove)
+	}
+	w.SetNeedsRedraw(true)
+}
+
+func (z *zoomable) continuePan(ctx widget.Context, pt image.Point, view image.Rectangle) bool {
+	if !z.panning {
+		return false
+	}
+	if z.view.panBy(view, z.imageSize, pt.Sub(z.panLast)) {
+		z.notifyZoom()
+	}
+	z.panLast = pt
+	if ctx != nil {
+		ctx.SetCursor(widget.CursorMove)
+	}
+	return true
+}
+
+func (z *zoomable) endPan(ctx widget.Context, w previewWidget, me *event.MouseEvent) bool {
+	if !z.panning {
+		return false
+	}
+	if me.Button != event.ButtonLeft && me.Button != event.ButtonMiddle {
+		return false
+	}
+	z.panning = false
+	releasePointer(ctx, w)
+	w.SetNeedsRedraw(true)
+	return true
+}
+
+func capturePointer(ctx widget.Context, w widget.Widget) {
+	if cap, ok := ctx.(widget.PointerCapturer); ok {
+		cap.CapturePointer(w)
+	}
+}
+
+func releasePointer(ctx widget.Context, w widget.Widget) {
+	if cap, ok := ctx.(widget.PointerCapturer); ok {
+		cap.ReleasePointer(w)
+	}
+}
+
+// localMousePoint maps a pointer position into the widget's bounds space.
+// While the pointer is captured the window reports window coordinates.
+func localMousePoint(w previewWidget, pos geometry.Point, captured bool) image.Point {
+	if captured && w.IsScreenOriginValid() {
+		pos = pos.Sub(w.ScreenOrigin()).Add(w.Bounds().Min)
+	}
+	return image.Pt(int(math.Round(float64(pos.X))), int(math.Round(float64(pos.Y))))
+}
+
+func imageSizeOf(img image.Image) image.Point {
+	if img == nil {
+		return image.Point{}
+	}
+	return img.Bounds().Size()
+}
+
+// sharpestRaster picks the image to sample from. preview is a cheap
+// downscaled copy; full is used once the display is larger than it.
+func sharpestRaster(preview, full image.Image, disp image.Rectangle) image.Image {
+	if preview == nil {
+		return full
+	}
+	if full == nil || disp.Empty() {
+		return preview
+	}
+	if disp.Dx() <= preview.Bounds().Dx() {
+		return preview
+	}
+	return full
+}
+
 func fittedRect(bounds image.Rectangle, imgSize image.Point) image.Rectangle {
 	if imgSize.X <= 0 || imgSize.Y <= 0 || bounds.Empty() {
 		return image.Rectangle{}
@@ -319,20 +617,95 @@ func fittedRect(bounds image.Rectangle, imgSize image.Point) image.Rectangle {
 	return image.Rect(x, y, x+w, y+h)
 }
 
-func drawFittedImage(canvas widget.Canvas, src image.Image, fitted image.Rectangle, imgSize image.Point, crop image.Rectangle) {
-	if src == nil || fitted.Empty() {
+// drawFittedImage scales src into fitted. It is the thumbnail path, where the
+// image always fits its slot.
+func drawFittedImage(canvas widget.Canvas, src image.Image, fitted image.Rectangle) {
+	drawPreviewImage(canvas, src, fitted, fitted, imageSizeOf(src), image.Rectangle{})
+}
+
+// drawPreviewImage paints the part of src that falls inside view when the
+// whole image occupies disp, baking the crop overlay into the same raster.
+func drawPreviewImage(canvas widget.Canvas, src image.Image, disp, view image.Rectangle, imgSize image.Point, crop image.Rectangle) {
+	tile, origin := previewTile(src, disp, view)
+	if tile == nil {
 		return
 	}
-	size := src.Bounds().Size()
-	if size.X != fitted.Dx() || size.Y != fitted.Dy() {
-		src = imageproc.Resize(src, fitted.Dx(), fitted.Dy())
-	}
-	rgba := toDisplayRGBA(src)
 	if imgSize.X > 0 && imgSize.Y > 0 && !crop.Empty() {
-		rgba = cloneRGBA(rgba)
-		applyCropHighlight(rgba, imgSize, crop)
+		tile = cloneRGBA(tile)
+		applyCropHighlight(tile, imageRectToScreen(crop, imgSize, disp).Sub(origin))
 	}
-	canvas.DrawImage(rgba, geometry.Pt(float32(fitted.Min.X), float32(fitted.Min.Y)))
+	canvas.DrawImage(tile, geometry.Pt(float32(origin.X), float32(origin.Y)))
+}
+
+// previewTile rasterizes only the visible part of src and returns it with the
+// position to draw it at. Scaling the whole image would allocate gigabytes
+// once the user zooms in.
+func previewTile(src image.Image, disp, view image.Rectangle) (*image.RGBA, image.Point) {
+	if src == nil || disp.Empty() {
+		return nil, image.Point{}
+	}
+	visible := disp.Intersect(view)
+	if visible.Empty() {
+		return nil, image.Point{}
+	}
+	sb := src.Bounds()
+	if sb.Dx() <= 0 || sb.Dy() <= 0 {
+		return nil, image.Point{}
+	}
+	scaleX := float64(disp.Dx()) / float64(sb.Dx())
+	scaleY := float64(disp.Dy()) / float64(sb.Dy())
+	tile := image.Rect(
+		sb.Min.X+int(math.Floor(float64(visible.Min.X-disp.Min.X)/scaleX)),
+		sb.Min.Y+int(math.Floor(float64(visible.Min.Y-disp.Min.Y)/scaleY)),
+		sb.Min.X+int(math.Ceil(float64(visible.Max.X-disp.Min.X)/scaleX)),
+		sb.Min.Y+int(math.Ceil(float64(visible.Max.Y-disp.Min.Y)/scaleY)),
+	).Intersect(sb)
+	if tile.Empty() {
+		return nil, image.Point{}
+	}
+	outW := max(1, int(math.Round(float64(tile.Dx())*scaleX)))
+	outH := max(1, int(math.Round(float64(tile.Dy())*scaleY)))
+	origin := image.Pt(
+		disp.Min.X+int(math.Round(float64(tile.Min.X-sb.Min.X)*scaleX)),
+		disp.Min.Y+int(math.Round(float64(tile.Min.Y-sb.Min.Y)*scaleY)),
+	)
+	rgba := toDisplayRGBA(scaleTile(src, tile, outW, outH, math.Min(scaleX, scaleY)))
+	clip := visible.Sub(origin).Intersect(image.Rect(0, 0, outW, outH))
+	if clip.Empty() {
+		return nil, image.Point{}
+	}
+	if clip != image.Rect(0, 0, outW, outH) {
+		rgba = cropRGBA(rgba, clip)
+		origin = origin.Add(clip.Min)
+	}
+	return rgba, origin
+}
+
+// scaleTile resamples the tile of src to w×h. Deep zoom keeps hard pixel
+// edges; Catmull-Rom would turn them into mush.
+func scaleTile(src image.Image, tile image.Rectangle, w, h int, scale float64) image.Image {
+	sub := subImage(src, tile)
+	if w == tile.Dx() && h == tile.Dy() {
+		return sub
+	}
+	if scale >= pixelZoomScale {
+		return imageproc.ResizeNearest(sub, w, h)
+	}
+	return imageproc.Resize(sub, w, h)
+}
+
+func subImage(src image.Image, r image.Rectangle) image.Image {
+	if r == src.Bounds() {
+		return src
+	}
+	if si, ok := src.(interface {
+		SubImage(image.Rectangle) image.Image
+	}); ok {
+		return si.SubImage(r)
+	}
+	dst := image.NewNRGBA(image.Rect(0, 0, r.Dx(), r.Dy()))
+	draw.Draw(dst, dst.Bounds(), src, r.Min, draw.Src)
+	return dst
 }
 
 // toDisplayRGBA copies src into an origin-aligned RGBA buffer. GPU DrawImage
@@ -360,22 +733,26 @@ func cloneRGBA(src *image.RGBA) *image.RGBA {
 	return dst
 }
 
+// cropRGBA copies r out of src into a fresh origin-aligned buffer.
+func cropRGBA(src *image.RGBA, r image.Rectangle) *image.RGBA {
+	dst := image.NewRGBA(image.Rect(0, 0, r.Dx(), r.Dy()))
+	draw.Draw(dst, dst.Bounds(), src, r.Min, draw.Src)
+	return dst
+}
+
 const cropDimMul = 112 // 112/256 ≈ remaining luminance under 0x90 black overlay
 
 var cropBorder = color.RGBA{R: 0x2f, G: 0x81, B: 0xff, A: 0xff}
 
-// applyCropHighlight darkens pixels outside crop and draws a 2px accent border.
+// applyCropHighlight darkens pixels outside screen, the crop rectangle in
+// dst-local coordinates, and draws a 2px accent border around it.
 // Overlay is baked into the bitmap because GPU DrawImage is composited over
 // later DrawRect/StrokeRect, so a separate highlight pass is invisible.
-func applyCropHighlight(dst *image.RGBA, imgSize image.Point, crop image.Rectangle) {
-	if dst == nil || imgSize.X <= 0 || imgSize.Y <= 0 {
+func applyCropHighlight(dst *image.RGBA, screen image.Rectangle) {
+	if dst == nil || screen.Empty() {
 		return
 	}
 	b := dst.Rect
-	screen := imageRectToScreen(crop, imgSize, b)
-	if screen.Empty() {
-		return
-	}
 	dimRGBA(dst, image.Rect(b.Min.X, b.Min.Y, screen.Min.X, b.Max.Y))
 	dimRGBA(dst, image.Rect(screen.Max.X, b.Min.Y, b.Max.X, b.Max.Y))
 	dimRGBA(dst, image.Rect(screen.Min.X, b.Min.Y, screen.Max.X, screen.Min.Y))

@@ -44,6 +44,16 @@ const (
 	deviceListH             = 4 * unit
 	formRowH        float32 = 32
 	fieldH          float32 = 28
+	// zoomReadoutW fits "1600%" so the zoom buttons keep their place while
+	// the percentage changes.
+	zoomReadoutW float32 = 44
+)
+
+// Zoom button captions. Both are full-width symbols so the two buttons get
+// the same width in either language.
+const (
+	zoomInLabel  = "＋"
+	zoomOutLabel = "−"
 )
 
 // Shell is the application controller: model, window, and widget tree.
