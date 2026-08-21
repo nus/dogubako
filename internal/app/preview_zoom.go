@@ -304,14 +304,23 @@ func handlePreviewWheel(view *previewView, bounds geometry.Rect, imgSize image.P
 	if view == nil || imgSize.X <= 0 || imgSize.Y <= 0 {
 		return false
 	}
-	if !bounds.Contains(we.Position) {
-		return false
-	}
 	factor := previewZoomFactor(we.Delta.Y)
 	if factor == 1 {
 		return false
 	}
+	ib := toImageRect(bounds)
+	if ib.Empty() {
+		return false
+	}
 	cursor := image.Pt(int(math.Round(float64(we.Position.X))), int(math.Round(float64(we.Position.Y))))
-	view.zoomAt(toImageRect(bounds), imgSize, cursor, factor)
+	if !cursor.In(ib) {
+		shifted := cursor.Add(ib.Min)
+		if shifted.In(ib) {
+			cursor = shifted
+		} else {
+			cursor = previewCenter(ib)
+		}
+	}
+	view.zoomAt(ib, imgSize, cursor, factor)
 	return true
 }

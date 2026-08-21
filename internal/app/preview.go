@@ -129,6 +129,7 @@ func (p *sourcePreview) Layout(_ widget.Context, cons geometry.Constraints) geom
 
 func (p *sourcePreview) Draw(_ widget.Context, canvas widget.Canvas) {
 	p.sync()
+	widget.StampScreenOrigin(p, canvas)
 	b := p.Bounds()
 	if b.IsEmpty() {
 		return
@@ -287,6 +288,7 @@ type destPreview struct {
 
 	rev          state.ReadonlySignal[uint64]
 	provider     func() image.Image
+	sizeProvider func() image.Point
 	source       image.Image
 	image        image.Image
 	emptyHint    func() string
@@ -306,6 +308,13 @@ func newDestPreview(rev state.ReadonlySignal[uint64]) *destPreview {
 
 func (p *destPreview) SetProvider(f func() image.Image) {
 	p.provider = f
+	p.SetNeedsRedraw(true)
+}
+
+// SetSizeProvider sets the original image size used for zoom math.
+// The raster from SetProvider may be a downscaled preview.
+func (p *destPreview) SetSizeProvider(f func() image.Point) {
+	p.sizeProvider = f
 	p.SetNeedsRedraw(true)
 }
 
@@ -334,7 +343,7 @@ func (p *destPreview) ZoomIn() {
 	if img == nil {
 		return
 	}
-	p.view.zoomIn(toImageRect(p.Bounds()), img.Bounds().Size())
+	p.view.zoomIn(toImageRect(p.Bounds()), p.viewSize(img))
 	p.notifyView()
 }
 
@@ -343,7 +352,7 @@ func (p *destPreview) ZoomOut() {
 	if img == nil {
 		return
 	}
-	p.view.zoomOut(toImageRect(p.Bounds()), img.Bounds().Size())
+	p.view.zoomOut(toImageRect(p.Bounds()), p.viewSize(img))
 	p.notifyView()
 }
 
@@ -383,6 +392,18 @@ func (p *destPreview) resolvedImage() image.Image {
 	return p.image
 }
 
+func (p *destPreview) viewSize(img image.Image) image.Point {
+	if p.sizeProvider != nil {
+		if sz := p.sizeProvider(); sz.X > 0 && sz.Y > 0 {
+			return sz
+		}
+	}
+	if img == nil {
+		return image.Point{}
+	}
+	return img.Bounds().Size()
+}
+
 func (p *destPreview) Layout(_ widget.Context, cons geometry.Constraints) geometry.Size {
 	size := cons.BiggestFinite(400, 300)
 	p.SetBounds(geometry.FromPointSize(p.Position(), size))
@@ -390,6 +411,7 @@ func (p *destPreview) Layout(_ widget.Context, cons geometry.Constraints) geomet
 }
 
 func (p *destPreview) Draw(_ widget.Context, canvas widget.Canvas) {
+	widget.StampScreenOrigin(p, canvas)
 	b := p.Bounds()
 	if b.IsEmpty() {
 		return
@@ -397,7 +419,7 @@ func (p *destPreview) Draw(_ widget.Context, canvas widget.Canvas) {
 	drawCheckerboard(canvas, b)
 	img := p.resolvedImage()
 	if img != nil {
-		sz := img.Bounds().Size()
+		sz := p.viewSize(img)
 		p.view.syncKey(sz)
 		drawViewedImage(canvas, img, b, sz, image.Rectangle{}, &p.view)
 		drawZoomBadge(canvas, b, p.view.Scale())
@@ -428,7 +450,7 @@ func (p *destPreview) Event(ctx widget.Context, e event.Event) bool {
 	if img == nil {
 		return false
 	}
-	sz := img.Bounds().Size()
+	sz := p.viewSize(img)
 	p.view.syncKey(sz)
 	if we, ok := e.(*event.WheelEvent); ok {
 		if p.panning {

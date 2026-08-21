@@ -104,13 +104,8 @@ func (s *Shell) buildImageTool() widget.Widget {
 		s.model.Image().SetCrop(rect)
 		s.bump()
 	})
-	redraw := func() {
-		if s.gpu != nil {
-			s.gpu.RequestRedraw()
-		}
-	}
-	before.SetOnViewChange(redraw)
-	after.SetOnViewChange(redraw)
+	before.SetOnViewChange(s.previewViewChanged)
+	after.SetOnViewChange(s.previewViewChanged)
 	before.SetProvider(func() sourcePreviewFrame {
 		img := s.model.Image()
 		return sourcePreviewFrame{
@@ -126,6 +121,14 @@ func (s *Shell) buildImageTool() widget.Widget {
 			return img.ResultPreview()
 		}
 		return nil
+	})
+	after.SetSizeProvider(func() image.Point {
+		img := s.model.Image()
+		out, err := img.Processed()
+		if err != nil || out == nil {
+			return image.Point{}
+		}
+		return out.Bounds().Size()
 	})
 
 	open := s.btn(i18n.OpenFile, func() { s.startOpen() }, false, nil)
@@ -327,11 +330,10 @@ func (s *Shell) buildScreenshotTool() widget.Widget {
 	preview.SetProvider(func() image.Image {
 		return s.model.Screenshot().Preview()
 	})
-	preview.SetOnViewChange(func() {
-		if s.gpu != nil {
-			s.gpu.RequestRedraw()
-		}
+	preview.SetSizeProvider(func() image.Point {
+		return s.model.Screenshot().Size()
 	})
+	preview.SetOnViewChange(s.previewViewChanged)
 
 	listCol := primitives.Box(
 		listLabel,
@@ -504,6 +506,11 @@ func (s *Shell) buildAndroidTool() widget.Widget {
 		primitives.HBox(pull, pushFile, pushDir, primitives.Expanded(hint)).Gap(8).CrossAlign(primitives.CrossAxisCenter),
 		status,
 	).Padding(12).Gap(12)
+}
+
+func (s *Shell) previewViewChanged() {
+	s.bump()
+	s.forceFullRepaint()
 }
 
 func (s *Shell) previewHeader(label widget.Widget, z previewZoomer) widget.Widget {

@@ -7,6 +7,7 @@ import (
 
 	"github.com/gogpu/ui/event"
 	"github.com/gogpu/ui/geometry"
+	"github.com/gogpu/ui/state"
 	"github.com/gogpu/ui/uitest"
 )
 
@@ -201,6 +202,103 @@ func TestDrawViewedImageClipsToBoundsWhenZoomed(t *testing.T) {
 	}
 	if len(canvas.Clips) != 1 {
 		t.Fatalf("clips = %d, want 1", len(canvas.Clips))
+	}
+}
+
+func TestHandlePreviewWheelZoomsWithoutLocalHit(t *testing.T) {
+	var v previewView
+	bounds := geometry.NewRect(10, 20, 80, 80)
+	we := event.NewWheelEvent(geometry.Pt(0, -1), geometry.Pt(5, 5), geometry.Pt(5, 5), event.ModNone)
+	if !handlePreviewWheel(&v, bounds, image.Pt(40, 40), we) {
+		t.Fatal("wheel should zoom even if the cursor is not in widget bounds")
+	}
+	if v.Scale() <= 1 {
+		t.Fatalf("scale = %v", v.Scale())
+	}
+}
+
+func TestDestPreviewZoomInChangesDrawnPixels(t *testing.T) {
+	src := image.NewNRGBA(image.Rect(0, 0, 40, 40))
+	for y := 0; y < 40; y++ {
+		for x := 0; x < 40; x++ {
+			src.SetNRGBA(x, y, color.NRGBA{R: uint8(x * 6), G: uint8(y * 6), A: 255})
+		}
+	}
+	p := newDestPreview(nil)
+	p.SetProvider(func() image.Image { return src })
+	p.SetBounds(geometry.NewRect(0, 0, 80, 80))
+
+	fit := &uitest.MockCanvas{}
+	p.Draw(nil, fit)
+	if len(fit.Images) != 1 {
+		t.Fatalf("fit draws = %d", len(fit.Images))
+	}
+	fitPx := toDisplayRGBA(fit.Images[0].Image).RGBAAt(2, 2)
+
+	p.ZoomIn()
+	p.ZoomIn()
+	p.ZoomIn()
+	if p.view.Scale() <= 1 {
+		t.Fatalf("scale = %v", p.view.Scale())
+	}
+
+	zoomed := &uitest.MockCanvas{}
+	p.Draw(nil, zoomed)
+	if len(zoomed.Images) != 1 {
+		t.Fatalf("zoomed draws = %d", len(zoomed.Images))
+	}
+	zoomPx := toDisplayRGBA(zoomed.Images[0].Image).RGBAAt(2, 2)
+	if fitPx == zoomPx {
+		t.Fatalf("zoom should change the corner pixel, both %+v", fitPx)
+	}
+}
+
+func TestScreenshotFileListIgnoresWheelOutsideBounds(t *testing.T) {
+	l := newScreenshotFileList(&Shell{rev: state.NewSignal[uint64](0)})
+	l.SetBounds(geometry.NewRect(0, 0, 100, 200))
+	we := event.NewWheelEvent(geometry.Pt(0, -1), geometry.Pt(400, 40), geometry.Pt(400, 40), event.ModNone)
+	if l.Event(nil, we) {
+		t.Fatal("wheel over the preview must not be taken by the file list")
+	}
+}
+
+func TestDestPreviewZoomsUsingLogicalSize(t *testing.T) {
+	raster := image.NewNRGBA(image.Rect(0, 0, 20, 20))
+	for y := 0; y < 20; y++ {
+		for x := 0; x < 20; x++ {
+			raster.SetNRGBA(x, y, color.NRGBA{R: uint8(x * 12), G: uint8(y * 12), A: 255})
+		}
+	}
+	p := newDestPreview(nil)
+	p.SetProvider(func() image.Image { return raster })
+	p.SetSizeProvider(func() image.Point { return image.Pt(200, 200) })
+	p.SetBounds(geometry.NewRect(0, 0, 80, 80))
+
+	fit := &uitest.MockCanvas{}
+	p.Draw(nil, fit)
+	if len(fit.Images) != 1 {
+		t.Fatalf("fit draws = %d", len(fit.Images))
+	}
+	fitPx := toDisplayRGBA(fit.Images[0].Image).RGBAAt(2, 2)
+
+	p.ZoomIn()
+	p.ZoomIn()
+	p.ZoomIn()
+	if p.view.Scale() <= 1 {
+		t.Fatalf("scale = %v", p.view.Scale())
+	}
+	if p.view.key != image.Pt(200, 200) {
+		t.Fatalf("zoom key = %v, want original size", p.view.key)
+	}
+
+	zoomed := &uitest.MockCanvas{}
+	p.Draw(nil, zoomed)
+	if len(zoomed.Images) != 1 {
+		t.Fatalf("zoomed draws = %d", len(zoomed.Images))
+	}
+	zoomPx := toDisplayRGBA(zoomed.Images[0].Image).RGBAAt(2, 2)
+	if fitPx == zoomPx {
+		t.Fatalf("logical-size zoom should change the corner pixel, both %+v", fitPx)
 	}
 }
 
