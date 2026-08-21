@@ -38,6 +38,12 @@ type sourcePreview struct {
 	dragging  bool
 	dragStart image.Point
 	dragRect  image.Rectangle
+
+	cam        previewCam
+	camImgSize image.Point
+	panning    bool
+	panLast    image.Point
+	onView     func()
 }
 
 func newSourcePreview(rev state.ReadonlySignal[uint64]) *sourcePreview {
@@ -76,10 +82,18 @@ func (p *sourcePreview) sync() {
 	p.imageSize = frame.size
 	p.crop = frame.crop
 	p.cropEnabled = frame.cropEnabled
+	if p.imageSize != p.camImgSize {
+		p.cam.resetFit()
+		p.camImgSize = p.imageSize
+	}
 }
 
 func (p *sourcePreview) OnCropChanged(f func(image.Rectangle)) {
 	p.onCropChanged = f
+}
+
+func (p *sourcePreview) OnViewChanged(f func()) {
+	p.onView = f
 }
 
 func (p *sourcePreview) Layout(_ widget.Context, cons geometry.Constraints) geometry.Size {
@@ -99,7 +113,7 @@ func (p *sourcePreview) Draw(_ widget.Context, canvas widget.Canvas) {
 		return
 	}
 	ib := toImageRect(b)
-	fitted := fittedRect(ib, p.imageSize)
+	view := p.cam.viewRect(ib, p.imageSize)
 	crop := image.Rectangle{}
 	if p.cropEnabled || p.dragging {
 		crop = p.crop
@@ -107,43 +121,62 @@ func (p *sourcePreview) Draw(_ widget.Context, canvas widget.Canvas) {
 			crop = p.dragRect
 		}
 	}
-	drawFittedImage(canvas, p.image, fitted, p.imageSize, crop)
+	drawViewImage(canvas, p.image, view, p.imageSize, crop, ib)
 }
 
 func (p *sourcePreview) Event(ctx widget.Context, e event.Event) bool {
 	p.sync()
-	me, ok := e.(*event.MouseEvent)
-	if !ok || p.image == nil || p.imageSize.X <= 0 || p.imageSize.Y <= 0 {
+	if p.image == nil || p.imageSize.X <= 0 || p.imageSize.Y <= 0 {
 		return false
 	}
-	fitted := fittedRect(toImageRect(p.Bounds()), p.imageSize)
-	if fitted.Empty() {
+	ib := toImageRect(p.Bounds())
+	if we, ok := e.(*event.WheelEvent); ok {
+		if applyPreviewWheel(&p.cam, ib, p.imageSize, we) {
+			p.viewChanged()
+			return true
+		}
+		return false
+	}
+	me, ok := e.(*event.MouseEvent)
+	if !ok {
+		return false
+	}
+	view := p.cam.viewRect(ib, p.imageSize)
+	if view.Empty() {
 		return false
 	}
 	pt := p.localMouse(me)
 
+	if p.handlePan(ctx, me, pt, ib) {
+		return true
+	}
+
 	switch me.MouseType {
 	case event.MousePress:
-		if me.Button == event.ButtonLeft && pt.In(fitted) {
+		if me.Button == event.ButtonLeft && pt.In(view) {
 			p.dragging = true
-			p.dragStart = screenToImage(pt, fitted, p.imageSize)
+			p.dragStart = screenToImage(pt, view, p.imageSize)
 			p.dragRect = image.Rectangle{Min: p.dragStart, Max: p.dragStart.Add(image.Pt(1, 1))}.Canon()
 			if cap, ok := ctx.(widget.PointerCapturer); ok {
 				cap.CapturePointer(p)
 			}
-			ctx.SetCursor(widget.CursorCrosshair)
+			if ctx != nil {
+				ctx.SetCursor(widget.CursorCrosshair)
+			}
 			p.SetNeedsRedraw(true)
 			return true
 		}
 	case event.MouseDrag, event.MouseMove:
 		if p.dragging {
-			cur := screenToImage(pt, fitted, p.imageSize)
+			cur := screenToImage(pt, view, p.imageSize)
 			p.dragRect = normalizeCrop(image.Rectangle{Min: p.dragStart, Max: cur.Add(image.Pt(1, 1))}, p.imageSize)
-			ctx.SetCursor(widget.CursorCrosshair)
+			if ctx != nil {
+				ctx.SetCursor(widget.CursorCrosshair)
+			}
 			p.SetNeedsRedraw(true)
 			return true
 		}
-		if pt.In(fitted) {
+		if pt.In(view) && ctx != nil {
 			ctx.SetCursor(widget.CursorCrosshair)
 		}
 	case event.MouseRelease:
@@ -163,13 +196,104 @@ func (p *sourcePreview) Event(ctx widget.Context, e event.Event) bool {
 	return false
 }
 
+func (p *sourcePreview) handlePan(ctx widget.Context, me *event.MouseEvent, pt image.Point, ib image.Rectangle) bool {
+	panBtn := me.Button == event.ButtonRight || me.Button == event.ButtonMiddle ||
+		(me.Button == event.ButtonLeft && me.Modifiers().HasAny(event.ModShift))
+	switch me.MouseType {
+	case event.MousePress:
+		if !panBtn || p.dragging {
+			return false
+		}
+		if !p.cam.canPan(ib, p.imageSize) {
+			return false
+		}
+		p.panning = true
+		p.panLast = pt
+		if cap, ok := ctx.(widget.PointerCapturer); ok {
+			cap.CapturePointer(p)
+		}
+		if ctx != nil {
+			ctx.SetCursor(widget.CursorMove)
+		}
+		return true
+	case event.MouseDrag, event.MouseMove:
+		if !p.panning {
+			return false
+		}
+		p.cam.panBy(ib, p.imageSize, float64(pt.X-p.panLast.X), float64(pt.Y-p.panLast.Y))
+		p.panLast = pt
+		if ctx != nil {
+			ctx.SetCursor(widget.CursorMove)
+		}
+		p.viewChanged()
+		return true
+	case event.MouseRelease:
+		if !p.panning {
+			return false
+		}
+		if me.Button != event.ButtonRight && me.Button != event.ButtonMiddle && me.Button != event.ButtonLeft {
+			return false
+		}
+		p.panning = false
+		if cap, ok := ctx.(widget.PointerCapturer); ok {
+			cap.ReleasePointer(p)
+		}
+		p.SetNeedsRedraw(true)
+		return true
+	}
+	return false
+}
+
+func (p *sourcePreview) viewChanged() {
+	p.SetNeedsRedraw(true)
+	if p.onView != nil {
+		p.onView()
+	}
+}
+
+func (p *sourcePreview) HasPreview() bool {
+	p.sync()
+	return p.image != nil && p.imageSize.X > 0 && p.imageSize.Y > 0
+}
+
+func (p *sourcePreview) zoomBounds() (image.Rectangle, image.Point) {
+	p.sync()
+	return toImageRect(p.Bounds()), p.imageSize
+}
+
+func (p *sourcePreview) ZoomPercent() int {
+	b, sz := p.zoomBounds()
+	return p.cam.percent(b, sz)
+}
+
+func (p *sourcePreview) ZoomFitting() bool {
+	return p.cam.fitting()
+}
+
+func (p *sourcePreview) ZoomIn() {
+	b, sz := p.zoomBounds()
+	p.cam.zoomIn(b, sz)
+	p.viewChanged()
+}
+
+func (p *sourcePreview) ZoomOut() {
+	b, sz := p.zoomBounds()
+	p.cam.zoomOut(b, sz)
+	p.viewChanged()
+}
+
+func (p *sourcePreview) ZoomFit() {
+	p.cam.resetFit()
+	p.viewChanged()
+}
+
 // localMouse maps an event into this widget's bounds space.
 // Tree dispatch translates through parents (local). After CapturePointer,
 // the window delivers the same events in window coordinates — subtracting
 // ScreenOrigin puts the crop corner back on the cursor.
 func (p *sourcePreview) localMouse(me *event.MouseEvent) image.Point {
 	pos := me.Position
-	if p.dragging && p.IsScreenOriginValid() {
+	if (p.dragging || p.panning) && p.IsScreenOriginValid() {
 		pos = pos.Sub(p.ScreenOrigin()).Add(p.Bounds().Min)
 	}
 	return image.Pt(int(math.Round(float64(pos.X))), int(math.Round(float64(pos.Y))))
@@ -199,6 +323,11 @@ type destPreview struct {
 	source    image.Image
 	image     image.Image
 	emptyHint func() string
+
+	cam     previewCam
+	panning bool
+	panLast image.Point
+	onView  func()
 }
 
 func newDestPreview(rev state.ReadonlySignal[uint64]) *destPreview {
@@ -227,6 +356,10 @@ func (p *destPreview) SetSource(img image.Image) {
 
 func (p *destPreview) SetEmptyHint(f func() string) {
 	p.emptyHint = f
+}
+
+func (p *destPreview) OnViewChanged(f func()) {
+	p.onView = f
 }
 
 func (p *destPreview) HasImage() bool {
@@ -267,7 +400,9 @@ func (p *destPreview) Draw(_ widget.Context, canvas widget.Canvas) {
 	drawCheckerboard(canvas, b)
 	img := p.resolvedImage()
 	if img != nil {
-		drawFittedImage(canvas, img, fittedRect(toImageRect(b), img.Bounds().Size()), img.Bounds().Size(), image.Rectangle{})
+		ib := toImageRect(b)
+		sz := img.Bounds().Size()
+		drawViewImage(canvas, img, p.cam.viewRect(ib, sz), sz, image.Rectangle{}, ib)
 		return
 	}
 	if p.emptyHint == nil {
@@ -290,7 +425,121 @@ func (p *destPreview) Draw(_ widget.Context, canvas widget.Canvas) {
 	}
 }
 
-func (p *destPreview) Event(_ widget.Context, _ event.Event) bool { return false }
+func (p *destPreview) Event(ctx widget.Context, e event.Event) bool {
+	img := p.resolvedImage()
+	if img == nil {
+		return false
+	}
+	ib := toImageRect(p.Bounds())
+	sz := img.Bounds().Size()
+	if we, ok := e.(*event.WheelEvent); ok {
+		if applyPreviewWheel(&p.cam, ib, sz, we) {
+			p.viewChanged()
+			return true
+		}
+		return false
+	}
+	me, ok := e.(*event.MouseEvent)
+	if !ok {
+		return false
+	}
+	pt := p.localMouse(me)
+	switch me.MouseType {
+	case event.MousePress:
+		if me.Button != event.ButtonLeft && me.Button != event.ButtonRight && me.Button != event.ButtonMiddle {
+			return false
+		}
+		if !p.cam.canPan(ib, sz) {
+			return false
+		}
+		p.panning = true
+		p.panLast = pt
+		if cap, ok := ctx.(widget.PointerCapturer); ok {
+			cap.CapturePointer(p)
+		}
+		if ctx != nil {
+			ctx.SetCursor(widget.CursorMove)
+		}
+		return true
+	case event.MouseDrag, event.MouseMove:
+		if p.panning {
+			p.cam.panBy(ib, sz, float64(pt.X-p.panLast.X), float64(pt.Y-p.panLast.Y))
+			p.panLast = pt
+			if ctx != nil {
+				ctx.SetCursor(widget.CursorMove)
+			}
+			p.viewChanged()
+			return true
+		}
+		if pt.In(ib) && p.cam.canPan(ib, sz) && ctx != nil {
+			ctx.SetCursor(widget.CursorMove)
+		}
+	case event.MouseRelease:
+		if !p.panning {
+			return false
+		}
+		p.panning = false
+		if cap, ok := ctx.(widget.PointerCapturer); ok {
+			cap.ReleasePointer(p)
+		}
+		p.SetNeedsRedraw(true)
+		return true
+	}
+	return false
+}
+
+func (p *destPreview) localMouse(me *event.MouseEvent) image.Point {
+	pos := me.Position
+	if p.panning && p.IsScreenOriginValid() {
+		pos = pos.Sub(p.ScreenOrigin()).Add(p.Bounds().Min)
+	}
+	return eventPoint(pos)
+}
+
+func (p *destPreview) viewChanged() {
+	p.SetNeedsRedraw(true)
+	if p.onView != nil {
+		p.onView()
+	}
+}
+
+func (p *destPreview) HasPreview() bool {
+	return p.HasImage()
+}
+
+func (p *destPreview) zoomSize() (image.Rectangle, image.Point) {
+	img := p.resolvedImage()
+	if img == nil {
+		return toImageRect(p.Bounds()), image.Point{}
+	}
+	return toImageRect(p.Bounds()), img.Bounds().Size()
+}
+
+func (p *destPreview) ZoomPercent() int {
+	b, sz := p.zoomSize()
+	return p.cam.percent(b, sz)
+}
+
+func (p *destPreview) ZoomFitting() bool {
+	return p.cam.fitting()
+}
+
+func (p *destPreview) ZoomIn() {
+	b, sz := p.zoomSize()
+	p.cam.zoomIn(b, sz)
+	p.viewChanged()
+}
+
+func (p *destPreview) ZoomOut() {
+	b, sz := p.zoomSize()
+	p.cam.zoomOut(b, sz)
+	p.viewChanged()
+}
+
+func (p *destPreview) ZoomFit() {
+	p.cam.resetFit()
+	p.viewChanged()
+}
 
 func (p *destPreview) Children() []widget.Widget { return nil }
 

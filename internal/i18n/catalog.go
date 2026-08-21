@@ -42,6 +42,7 @@ const (
 	Format         Key = "image.format"
 	OutputFormat   Key = "image.output_format"
 	JPEGQuality    Key = "image.jpeg_quality"
+	PreviewFit     Key = "preview.fit"
 
 	ScreenshotCapture      Key = "screenshot.capture"
 	ScreenshotCaptureRetry Key = "screenshot.capture_retry"
@@ -161,6 +162,7 @@ var catalogs = map[Lang]map[Key]string{
 		Format:                         "形式",
 		OutputFormat:                   "出力形式",
 		JPEGQuality:                    "JPEG 品質  %d",
+		PreviewFit:                     "全体",
 		ScreenshotCapture:              "キャプチャ",
 		ScreenshotCaptureRetry:         "やり直す",
 		ScreenshotMode:                 "対象",
@@ -274,6 +276,7 @@ var catalogs = map[Lang]map[Key]string{
 		Format:                         "Format",
 		OutputFormat:                   "Output format",
 		JPEGQuality:                    "JPEG quality  %d",
+		PreviewFit:                     "Fit",
 		ScreenshotCapture:              "Capture",
 		ScreenshotCaptureRetry:         "Retry",
 		ScreenshotMode:                 "Target",

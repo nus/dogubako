@@ -2,6 +2,7 @@ package app
 
 import (
 	"image"
+	"strconv"
 	"strings"
 
 	"github.com/gogpu/ui/core/checkbox"
@@ -104,6 +105,8 @@ func (s *Shell) buildImageTool() widget.Widget {
 		s.model.Image().SetCrop(rect)
 		s.bump()
 	})
+	before.OnViewChanged(func() { s.bump() })
+	after.OnViewChanged(func() { s.bump() })
 	before.SetProvider(func() sourcePreviewFrame {
 		img := s.model.Image()
 		return sourcePreviewFrame{
@@ -147,8 +150,8 @@ func (s *Shell) buildImageTool() widget.Widget {
 	})).Bold().FontSize(14)
 
 	previews := primitives.HBox(
-		primitives.Expanded(primitives.VBox(beforeLabel, primitives.Expanded(before)).Gap(6)),
-		primitives.Expanded(primitives.VBox(afterLabel, primitives.Expanded(after)).Gap(6)),
+		primitives.Expanded(primitives.VBox(beforeLabel, s.zoomControls(before), primitives.Expanded(before)).Gap(4)),
+		primitives.Expanded(primitives.VBox(afterLabel, s.zoomControls(after), primitives.Expanded(after)).Gap(4)),
 	).Gap(unit)
 
 	save := s.btn(i18n.SaveFile, func() { s.startSave() }, true, func() bool { return !s.model.Image().HasSource() })
@@ -311,6 +314,7 @@ func (s *Shell) buildScreenshotTool() widget.Widget {
 		return i18n.T(s.model.Lang(), i18n.ScreenshotPreview)
 	})).Bold().FontSize(14)
 	preview := newDestPreview(s.rev)
+	preview.OnViewChanged(func() { s.bump() })
 	preview.SetEmptyHint(func() string {
 		if s.model.Screenshot().HasImage() {
 			return ""
@@ -328,7 +332,7 @@ func (s *Shell) buildScreenshotTool() widget.Widget {
 
 	body := primitives.HBox(
 		listCol,
-		primitives.Expanded(primitives.VBox(previewLabel, primitives.Expanded(preview)).Gap(6)),
+		primitives.Expanded(primitives.VBox(previewLabel, s.zoomControls(preview), primitives.Expanded(preview)).Gap(4)),
 	).Gap(12)
 
 	saveAs := s.btn(i18n.ScreenshotSaveAs, func() { s.startScreenshotSave() }, false, func() bool { return !s.model.Screenshot().HasImage() || busy() })
@@ -492,6 +496,45 @@ func (s *Shell) buildAndroidTool() widget.Widget {
 		primitives.HBox(pull, pushFile, pushDir, primitives.Expanded(hint)).Gap(8).CrossAlign(primitives.CrossAxisCenter),
 		status,
 	).Padding(12).Gap(12)
+}
+
+func (s *Shell) zoomControls(z previewZoomer) widget.Widget {
+	none := func() bool { return z == nil || !z.HasPreview() }
+	minus := s.compactBtn("−", func() {
+		if z != nil {
+			z.ZoomOut()
+		}
+		s.bump()
+	}, nil, none)
+	plus := s.compactBtn("+", func() {
+		if z != nil {
+			z.ZoomIn()
+		}
+		s.bump()
+	}, nil, none)
+	fit := s.btnFn(
+		func() string { return i18n.T(s.model.Lang(), i18n.PreviewFit) },
+		func() {
+			if z != nil {
+				z.ZoomFit()
+			}
+			s.bump()
+		},
+		func() bool { return z != nil && z.HasPreview() && z.ZoomFitting() },
+		none,
+	)
+	pct := s.txt("").ContentSignal(s.computed(func() string {
+		if z == nil || !z.HasPreview() {
+			return "—"
+		}
+		return strconv.Itoa(z.ZoomPercent()) + "%"
+	})).FontSize(13).Align(primitives.TextAlignCenter)
+	return primitives.HBox(
+		minus,
+		primitives.Box(pct).Width(48),
+		plus,
+		fit,
+	).Gap(4).Height(btnHeight).CrossAlign(primitives.CrossAxisCenter)
 }
 
 func (s *Shell) formPanel(title i18n.Key, children ...widget.Widget) widget.Widget {
