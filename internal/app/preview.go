@@ -124,15 +124,7 @@ func (p *sourcePreview) Draw(context *guigui.Context, widgetBounds *guigui.Widge
 	}
 	if p.cropEnabled || p.dragging {
 		full := p.view.imageRect(b, p.imageSize)
-		screenCrop := imageRectToScreen(crop, p.imageSize, full)
-		if !screenCrop.Empty() {
-			dim := color.NRGBA{A: 0x90}
-			vector.FillRect(dst, float32(b.Min.X), float32(b.Min.Y), float32(screenCrop.Min.X-b.Min.X), float32(b.Dy()), dim, false)
-			vector.FillRect(dst, float32(screenCrop.Max.X), float32(b.Min.Y), float32(b.Max.X-screenCrop.Max.X), float32(b.Dy()), dim, false)
-			vector.FillRect(dst, float32(screenCrop.Min.X), float32(b.Min.Y), float32(screenCrop.Dx()), float32(screenCrop.Min.Y-b.Min.Y), dim, false)
-			vector.FillRect(dst, float32(screenCrop.Min.X), float32(screenCrop.Max.Y), float32(screenCrop.Dx()), float32(b.Max.Y-screenCrop.Max.Y), dim, false)
-			vector.StrokeRect(dst, float32(screenCrop.Min.X)+0.5, float32(screenCrop.Min.Y)+0.5, float32(screenCrop.Dx())-1, float32(screenCrop.Dy())-1, 2, color.NRGBA{R: 0x2f, G: 0x81, B: 0xff, A: 0xff}, false)
-		}
+		drawCropOverlay(dst, b, crop, p.imageSize, full)
 	}
 	drawZoomBadge(dst, b, p.view.Scale())
 }
@@ -441,35 +433,22 @@ func drawViewedImage(dst, src *ebiten.Image, bounds image.Rectangle, imgSize ima
 		return
 	}
 	full := view.imageRect(bounds, imgSize)
-	if full.Empty() {
+	if full.Empty() || full.Intersect(bounds).Empty() {
 		return
 	}
-	visible := full.Intersect(bounds)
-	if visible.Empty() {
+	srcSize := src.Bounds().Size()
+	if srcSize.X <= 0 || srcSize.Y <= 0 {
 		return
 	}
-	srcImg := visibleSourceRect(full, visible, imgSize)
-	if srcImg.Empty() {
-		return
-	}
-	raster := mapImageRect(src.Bounds(), imgSize, srcImg)
-	if raster.Empty() {
-		return
-	}
-	sub, ok := src.SubImage(raster).(*ebiten.Image)
-	if !ok {
-		return
-	}
-	subSize := sub.Bounds().Size()
-	if subSize.X <= 0 || subSize.Y <= 0 {
-		return
-	}
+	// Scale the whole raster into `full` so a crop overlay mapped through
+	// the same rectangle stays on the pixels. Stretching only the visible
+	// source subset to the widget made the blue frame drift under zoom.
 	op := &ebiten.DrawImageOptions{}
 	op.Filter = ebiten.FilterLinear
-	op.GeoM.Translate(-float64(sub.Bounds().Min.X), -float64(sub.Bounds().Min.Y))
-	op.GeoM.Scale(float64(visible.Dx())/float64(subSize.X), float64(visible.Dy())/float64(subSize.Y))
-	op.GeoM.Translate(float64(visible.Min.X), float64(visible.Min.Y))
-	dst.DrawImage(sub, op)
+	op.GeoM.Translate(-float64(src.Bounds().Min.X), -float64(src.Bounds().Min.Y))
+	op.GeoM.Scale(float64(full.Dx())/float64(srcSize.X), float64(full.Dy())/float64(srcSize.Y))
+	op.GeoM.Translate(float64(full.Min.X), float64(full.Min.Y))
+	dst.DrawImage(src, op)
 }
 
 func drawZoomBadge(dst *ebiten.Image, bounds image.Rectangle, scale float64) {
@@ -491,23 +470,70 @@ func drawZoomBadge(dst *ebiten.Image, bounds image.Rectangle, scale float64) {
 	ebitenutil.DebugPrintAt(dst, label, x, y)
 }
 
-func imageRectToScreen(rect image.Rectangle, imgSize image.Point, fitted image.Rectangle) image.Rectangle {
+func imageRectToScreenF(rect image.Rectangle, imgSize image.Point, fitted image.Rectangle) (minX, minY, maxX, maxY float32) {
 	if imgSize.X <= 0 || imgSize.Y <= 0 || fitted.Empty() || rect.Empty() {
+		return 0, 0, 0, 0
+	}
+	sx := float32(fitted.Dx()) / float32(imgSize.X)
+	sy := float32(fitted.Dy()) / float32(imgSize.Y)
+	minX = float32(fitted.Min.X) + float32(rect.Min.X)*sx
+	minY = float32(fitted.Min.Y) + float32(rect.Min.Y)*sy
+	maxX = float32(fitted.Min.X) + float32(rect.Max.X)*sx
+	maxY = float32(fitted.Min.Y) + float32(rect.Max.Y)*sy
+	return minX, minY, maxX, maxY
+}
+
+func imageRectToScreen(rect image.Rectangle, imgSize image.Point, fitted image.Rectangle) image.Rectangle {
+	x0, y0, x1, y1 := imageRectToScreenF(rect, imgSize, fitted)
+	if x1 <= x0 || y1 <= y0 {
 		return image.Rectangle{}
 	}
-	x0 := fitted.Min.X + rect.Min.X*fitted.Dx()/imgSize.X
-	y0 := fitted.Min.Y + rect.Min.Y*fitted.Dy()/imgSize.Y
-	x1 := fitted.Min.X + rect.Max.X*fitted.Dx()/imgSize.X
-	y1 := fitted.Min.Y + rect.Max.Y*fitted.Dy()/imgSize.Y
-	return image.Rect(x0, y0, x1, y1)
+	return image.Rect(int(math.Round(float64(x0))), int(math.Round(float64(y0))), int(math.Round(float64(x1))), int(math.Round(float64(y1))))
+}
+
+func drawCropOverlay(dst *ebiten.Image, bounds, crop image.Rectangle, imgSize image.Point, full image.Rectangle) {
+	x0, y0, x1, y1 := imageRectToScreenF(crop, imgSize, full)
+	if x1 <= x0 || y1 <= y0 {
+		return
+	}
+	dim := color.NRGBA{A: 0x90}
+	bx0, by0 := float32(bounds.Min.X), float32(bounds.Min.Y)
+	bx1, by1 := float32(bounds.Max.X), float32(bounds.Max.Y)
+	if w := clampf32(x0, bx0, bx1) - bx0; w > 0 {
+		vector.FillRect(dst, bx0, by0, w, by1-by0, dim, false)
+	}
+	if w := bx1 - clampf32(x1, bx0, bx1); w > 0 {
+		vector.FillRect(dst, clampf32(x1, bx0, bx1), by0, w, by1-by0, dim, false)
+	}
+	cx0 := clampf32(x0, bx0, bx1)
+	cx1 := clampf32(x1, bx0, bx1)
+	if cx1 > cx0 {
+		if h := clampf32(y0, by0, by1) - by0; h > 0 {
+			vector.FillRect(dst, cx0, by0, cx1-cx0, h, dim, false)
+		}
+		if h := by1 - clampf32(y1, by0, by1); h > 0 {
+			vector.FillRect(dst, cx0, clampf32(y1, by0, by1), cx1-cx0, h, dim, false)
+		}
+	}
+	vector.StrokeRect(dst, x0+0.5, y0+0.5, (x1-x0)-1, (y1-y0)-1, 2, color.NRGBA{R: 0x2f, G: 0x81, B: 0xff, A: 0xff}, false)
+}
+
+func clampf32(v, lo, hi float32) float32 {
+	if v < lo {
+		return lo
+	}
+	if v > hi {
+		return hi
+	}
+	return v
 }
 
 func screenToImage(pt image.Point, fitted image.Rectangle, imgSize image.Point) image.Point {
-	if fitted.Empty() {
+	if fitted.Empty() || imgSize.X <= 0 || imgSize.Y <= 0 {
 		return image.Point{}
 	}
-	x := (pt.X - fitted.Min.X) * imgSize.X / fitted.Dx()
-	y := (pt.Y - fitted.Min.Y) * imgSize.Y / fitted.Dy()
+	x := int(math.Floor(float64(pt.X-fitted.Min.X) * float64(imgSize.X) / float64(fitted.Dx())))
+	y := int(math.Floor(float64(pt.Y-fitted.Min.Y) * float64(imgSize.Y) / float64(fitted.Dy())))
 	if x < 0 {
 		x = 0
 	}

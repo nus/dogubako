@@ -2,6 +2,7 @@ package app
 
 import (
 	"image"
+	"math"
 	"testing"
 )
 
@@ -89,6 +90,44 @@ func TestVisibleSourceRectAndMapImageRect(t *testing.T) {
 	raster := mapImageRect(image.Rect(0, 0, 20, 20), image.Pt(20, 20), src)
 	if raster.Empty() {
 		t.Fatal("mapped raster empty")
+	}
+}
+
+func TestZoomedCropOverlayMatchesFullImageMapping(t *testing.T) {
+	bounds := image.Rect(0, 0, 200, 200)
+	imgSize := image.Pt(100, 100)
+	var view previewView
+	view.scale = 4
+	view.panX = 17
+	view.panY = -9
+	full := view.imageRect(bounds, imgSize)
+	if full.In(bounds) {
+		t.Fatalf("expected overflow, full=%v", full)
+	}
+	crop := image.Rect(25, 30, 55, 70)
+	x0, y0, x1, y1 := imageRectToScreenF(crop, imgSize, full)
+	gotMin := screenToImage(image.Pt(int(math.Floor(float64(x0))), int(math.Floor(float64(y0)))), full, imgSize)
+	if gotMin != crop.Min {
+		t.Fatalf("overlay min %v,%v inverted to %v, want %v (full=%v)", x0, y0, gotMin, crop.Min, full)
+	}
+	gotMax := screenToImage(image.Pt(int(math.Floor(float64(x1-0.001))), int(math.Floor(float64(y1-0.001)))), full, imgSize)
+	if gotMax.X != crop.Max.X-1 || gotMax.Y != crop.Max.Y-1 {
+		t.Fatalf("overlay max-epsilon inverted to %v, want inside last pixel of %v", gotMax, crop)
+	}
+}
+
+func TestVisibleStretchMismatchesCropOverlayWhenZoomed(t *testing.T) {
+	bounds := image.Rect(0, 0, 200, 200)
+	imgSize := image.Pt(100, 100)
+	full := image.Rect(-50, -50, 250, 250)
+	crop := image.Rect(30, 30, 60, 60)
+	wantX0, _, _, _ := imageRectToScreenF(crop, imgSize, full)
+	visible := full.Intersect(bounds)
+	srcImg := visibleSourceRect(full, visible, imgSize)
+	localX := crop.Min.X - srcImg.Min.X
+	stretchedX := float32(visible.Min.X) + float32(localX)*float32(visible.Dx())/float32(srcImg.Dx())
+	if math.Abs(float64(stretchedX-wantX0)) < 0.5 {
+		t.Fatalf("fixture should show stretch mismatch, stretched=%v overlay=%v srcImg=%v", stretchedX, wantX0, srcImg)
 	}
 }
 
