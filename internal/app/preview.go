@@ -1,17 +1,20 @@
 package app
 
 import (
+	"bytes"
 	"fmt"
 	"image"
 	"image/color"
 	"math"
 	"slices"
+	"sync"
 	"time"
 
 	"github.com/hajimehoshi/ebiten/v2"
-	"github.com/hajimehoshi/ebiten/v2/ebitenutil"
 	"github.com/hajimehoshi/ebiten/v2/inpututil"
+	"github.com/hajimehoshi/ebiten/v2/text/v2"
 	"github.com/hajimehoshi/ebiten/v2/vector"
+	"golang.org/x/image/font/gofont/goregular"
 
 	"github.com/guigui-gui/guigui"
 	"github.com/guigui-gui/guigui/basicwidget"
@@ -126,7 +129,7 @@ func (p *sourcePreview) Draw(context *guigui.Context, widgetBounds *guigui.Widge
 		full := p.view.imageRect(b, p.imageSize)
 		drawCropOverlay(dst, b, crop, p.imageSize, full)
 	}
-	drawZoomBadge(dst, b, p.view.Scale())
+	drawZoomBadge(dst, b, p.view.Scale(), context.Scale())
 }
 
 func (p *sourcePreview) HandlePointingInput(context *guigui.Context, widgetBounds *guigui.WidgetBounds) guigui.HandleInputResult {
@@ -304,7 +307,7 @@ func (p *destPreview) Draw(context *guigui.Context, widgetBounds *guigui.WidgetB
 	sz := p.viewSize()
 	p.view.syncKey(sz)
 	drawViewedImage(dst, p.gpu, b, sz, &p.view)
-	drawZoomBadge(dst, b, p.view.Scale())
+	drawZoomBadge(dst, b, p.view.Scale(), context.Scale())
 }
 
 func (p *destPreview) HandlePointingInput(context *guigui.Context, widgetBounds *guigui.WidgetBounds) guigui.HandleInputResult {
@@ -451,23 +454,71 @@ func drawViewedImage(dst, src *ebiten.Image, bounds image.Rectangle, imgSize ima
 	dst.DrawImage(src, op)
 }
 
-func drawZoomBadge(dst *ebiten.Image, bounds image.Rectangle, scale float64) {
+// zoomBadgeSizeAtScale1 is the badge font size in logical pixels. UI body text
+// is 12px; ebitenutil.DebugPrint is about 8px.
+const zoomBadgeSizeAtScale1 = 16
+
+var (
+	zoomBadgeFontOnce sync.Once
+	zoomBadgeFont     *text.GoTextFaceSource
+)
+
+func zoomBadgeLabel(scale float64) string {
+	return fmt.Sprintf("%d%%", int(math.Round(scale*100)))
+}
+
+func zoomBadgeFontSize(uiScale float64) float64 {
+	if uiScale <= 0 {
+		uiScale = 1
+	}
+	return zoomBadgeSizeAtScale1 * uiScale
+}
+
+func zoomBadgeTextFace(uiScale float64) *text.GoTextFace {
+	zoomBadgeFontOnce.Do(func() {
+		src, err := text.NewGoTextFaceSource(bytes.NewReader(goregular.TTF))
+		if err != nil {
+			return
+		}
+		zoomBadgeFont = src
+	})
+	if zoomBadgeFont == nil {
+		return nil
+	}
+	return &text.GoTextFace{Source: zoomBadgeFont, Size: zoomBadgeFontSize(uiScale)}
+}
+
+func drawZoomBadge(dst *ebiten.Image, bounds image.Rectangle, scale, uiScale float64) {
 	if bounds.Empty() || math.Abs(scale-1) < 0.001 {
 		return
 	}
-	label := fmt.Sprintf("%d%%", int(math.Round(scale*100)))
-	x := bounds.Max.X - 8 - 8*len(label)
-	y := bounds.Max.Y - 20
-	if x < bounds.Min.X+4 {
-		x = bounds.Min.X + 4
+	label := zoomBadgeLabel(scale)
+	face := zoomBadgeTextFace(uiScale)
+	if face == nil {
+		return
 	}
-	if y < bounds.Min.Y+4 {
-		y = bounds.Min.Y + 4
+	if uiScale <= 0 {
+		uiScale = 1
 	}
-	w := 8*len(label) + 10
-	h := 16
-	vector.FillRect(dst, float32(x-4), float32(y-2), float32(w), float32(h), color.NRGBA{A: 150}, false)
-	ebitenutil.DebugPrintAt(dst, label, x, y)
+	m := face.Metrics()
+	tw, th := text.Measure(label, face, m.HAscent+m.HDescent)
+	padX := 6 * uiScale
+	padY := 4 * uiScale
+	margin := 8 * uiScale
+	bw := tw + padX*2
+	bh := th + padY*2
+	x := float64(bounds.Max.X) - margin - bw
+	y := float64(bounds.Max.Y) - margin - bh
+	if x < float64(bounds.Min.X)+margin {
+		x = float64(bounds.Min.X) + margin
+	}
+	if y < float64(bounds.Min.Y)+margin {
+		y = float64(bounds.Min.Y) + margin
+	}
+	vector.FillRect(dst, float32(x), float32(y), float32(bw), float32(bh), color.NRGBA{A: 150}, false)
+	op := &text.DrawOptions{}
+	op.GeoM.Translate(x+padX, y+padY)
+	text.Draw(dst, label, face, op)
 }
 
 func imageRectToScreenF(rect image.Rectangle, imgSize image.Point, fitted image.Rectangle) (minX, minY, maxX, maxY float32) {

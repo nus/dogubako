@@ -4,6 +4,8 @@ import (
 	"image"
 	"math"
 	"testing"
+
+	"github.com/hajimehoshi/ebiten/v2/text/v2"
 )
 
 func TestPreviewImageRectAtFitMatchesFittedRect(t *testing.T) {
@@ -128,6 +130,37 @@ func TestVisibleStretchMismatchesCropOverlayWhenZoomed(t *testing.T) {
 	stretchedX := float32(visible.Min.X) + float32(localX)*float32(visible.Dx())/float32(srcImg.Dx())
 	if math.Abs(float64(stretchedX-wantX0)) < 0.5 {
 		t.Fatalf("fixture should show stretch mismatch, stretched=%v overlay=%v srcImg=%v", stretchedX, wantX0, srcImg)
+	}
+}
+
+func TestZoomBadgeLabel(t *testing.T) {
+	if got := zoomBadgeLabel(2); got != "200%" {
+		t.Fatalf("got %q", got)
+	}
+	if got := zoomBadgeLabel(1.5); got != "150%" {
+		t.Fatalf("got %q", got)
+	}
+}
+
+func TestZoomBadgeFontIsLargerThanDebugPrint(t *testing.T) {
+	if zoomBadgeFontSize(1) != 16 {
+		t.Fatalf("size at scale 1 = %v", zoomBadgeFontSize(1))
+	}
+	if zoomBadgeFontSize(2) != 32 {
+		t.Fatalf("size at scale 2 = %v", zoomBadgeFontSize(2))
+	}
+	face := zoomBadgeTextFace(1)
+	if face == nil {
+		t.Fatal("missing badge face")
+	}
+	m := face.Metrics()
+	w, h := text.Measure("200%", face, m.HAscent+m.HDescent)
+	// DebugPrint is ~8px tall and ~8px per glyph ("200%" → ~32×8).
+	if h < 14 {
+		t.Fatalf("height too small: %v", h)
+	}
+	if w <= 32 {
+		t.Fatalf("width not larger than debug font: %v", w)
 	}
 }
 
