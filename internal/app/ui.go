@@ -104,6 +104,8 @@ func (s *Shell) buildImageTool() widget.Widget {
 		s.model.Image().SetCrop(rect)
 		s.bump()
 	})
+	before.SetOnViewChange(s.previewViewChanged)
+	after.SetOnViewChange(s.previewViewChanged)
 	before.SetProvider(func() sourcePreviewFrame {
 		img := s.model.Image()
 		return sourcePreviewFrame{
@@ -119,6 +121,14 @@ func (s *Shell) buildImageTool() widget.Widget {
 			return img.ResultPreview()
 		}
 		return nil
+	})
+	after.SetSizeProvider(func() image.Point {
+		img := s.model.Image()
+		out, err := img.Processed()
+		if err != nil || out == nil {
+			return image.Point{}
+		}
+		return out.Bounds().Size()
 	})
 
 	open := s.btn(i18n.OpenFile, func() { s.startOpen() }, false, nil)
@@ -147,8 +157,8 @@ func (s *Shell) buildImageTool() widget.Widget {
 	})).Bold().FontSize(14)
 
 	previews := primitives.HBox(
-		primitives.Expanded(primitives.VBox(beforeLabel, primitives.Expanded(before)).Gap(6)),
-		primitives.Expanded(primitives.VBox(afterLabel, primitives.Expanded(after)).Gap(6)),
+		primitives.Expanded(primitives.VBox(s.previewHeader(beforeLabel, before), primitives.Expanded(before)).Gap(6)),
+		primitives.Expanded(primitives.VBox(s.previewHeader(afterLabel, after), primitives.Expanded(after)).Gap(6)),
 	).Gap(unit)
 
 	save := s.btn(i18n.SaveFile, func() { s.startSave() }, true, func() bool { return !s.model.Image().HasSource() })
@@ -320,6 +330,10 @@ func (s *Shell) buildScreenshotTool() widget.Widget {
 	preview.SetProvider(func() image.Image {
 		return s.model.Screenshot().Preview()
 	})
+	preview.SetSizeProvider(func() image.Point {
+		return s.model.Screenshot().Size()
+	})
+	preview.SetOnViewChange(s.previewViewChanged)
 
 	listCol := primitives.Box(
 		listLabel,
@@ -328,7 +342,7 @@ func (s *Shell) buildScreenshotTool() widget.Widget {
 
 	body := primitives.HBox(
 		listCol,
-		primitives.Expanded(primitives.VBox(previewLabel, primitives.Expanded(preview)).Gap(6)),
+		primitives.Expanded(primitives.VBox(s.previewHeader(previewLabel, preview), primitives.Expanded(preview)).Gap(6)),
 	).Gap(12)
 
 	saveAs := s.btn(i18n.ScreenshotSaveAs, func() { s.startScreenshotSave() }, false, func() bool { return !s.model.Screenshot().HasImage() || busy() })
@@ -492,6 +506,26 @@ func (s *Shell) buildAndroidTool() widget.Widget {
 		primitives.HBox(pull, pushFile, pushDir, primitives.Expanded(hint)).Gap(8).CrossAlign(primitives.CrossAxisCenter),
 		status,
 	).Padding(12).Gap(12)
+}
+
+func (s *Shell) previewViewChanged() {
+	s.bump()
+	s.forceFullRepaint()
+}
+
+func (s *Shell) previewHeader(label widget.Widget, z previewZoomer) widget.Widget {
+	return primitives.HBox(label, primitives.Expanded(primitives.Box()), s.previewZoomBar(z)).
+		Gap(8).CrossAlign(primitives.CrossAxisCenter)
+}
+
+func (s *Shell) previewZoomBar(z previewZoomer) widget.Widget {
+	noImg := func() bool { return z == nil || !z.HasImage() }
+	minus := s.btnFn(func() string { return "−" }, func() { z.ZoomOut() }, nil, noImg)
+	minus.minWidth = 28
+	plus := s.btnFn(func() string { return "+" }, func() { z.ZoomIn() }, nil, noImg)
+	plus.minWidth = 28
+	fit := s.btn(i18n.PreviewFit, func() { z.ResetZoom() }, false, noImg)
+	return primitives.HBox(minus, plus, fit).Gap(4).CrossAlign(primitives.CrossAxisCenter)
 }
 
 func (s *Shell) formPanel(title i18n.Key, children ...widget.Widget) widget.Widget {

@@ -94,6 +94,16 @@ func (l *screenshotFileList) Event(ctx widget.Context, e event.Event) bool {
 	if l.scroll == nil {
 		return false
 	}
+	switch ev := e.(type) {
+	case *event.WheelEvent:
+		if !l.Bounds().Contains(ev.Position) {
+			return false
+		}
+	case *event.MouseEvent:
+		if !l.Bounds().Contains(ev.Position) {
+			return false
+		}
+	}
 	return l.scroll.Event(ctx, e)
 }
 

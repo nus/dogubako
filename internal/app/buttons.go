@@ -38,6 +38,7 @@ type cjkButton struct {
 	onClick  func()
 	disabled func() bool
 	filled   func() bool
+	minWidth float32
 	hover    bool
 	pressed  bool
 }
@@ -93,8 +94,12 @@ func (b *cjkButton) Layout(ctx widget.Context, cons geometry.Constraints) geomet
 		label = b.label()
 	}
 	w := labelWidth(label) + 2*btnPadX
-	if w < 64 {
-		w = 64
+	minW := b.minWidth
+	if minW <= 0 {
+		minW = 64
+	}
+	if w < minW {
+		w = minW
 	}
 	size := cons.Constrain(geometry.Sz(w, btnHeight))
 	if size.Height < btnHeight && cons.MaxHeight >= btnHeight {

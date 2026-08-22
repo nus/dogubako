@@ -148,6 +148,17 @@ func TestScreenToImageRoundTrip(t *testing.T) {
 	}
 }
 
+func TestApplyCropHighlightDimsAllWhenCropMisses(t *testing.T) {
+	dst := image.NewRGBA(image.Rect(0, 0, 40, 40))
+	for i := range dst.Pix {
+		dst.Pix[i] = 255
+	}
+	applyCropHighlight(dst, image.Pt(40, 40), image.Rect(80, 80, 90, 90))
+	if dst.RGBAAt(0, 0).R > 130 {
+		t.Fatalf("missed crop should dim the view, got %+v", dst.RGBAAt(0, 0))
+	}
+}
+
 func TestApplyCropHighlightDarkensOutsideAndPaintsBorder(t *testing.T) {
 	dst := image.NewRGBA(image.Rect(0, 0, 100, 100))
 	for i := range dst.Pix {
