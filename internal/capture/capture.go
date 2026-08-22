@@ -31,7 +31,9 @@ const (
 
 // Result is the outcome of an asynchronous capture.
 type Result struct {
-	Image     image.Image
+	// Path is a PNG written by the helper. The receiver owns the file and
+	// must move or remove it. The image is not decoded here so RSS stays low.
+	Path      string
 	Cancelled bool
 	Err       error
 }
@@ -91,20 +93,20 @@ func Async(ctx context.Context, mode Mode, delay time.Duration) <-chan Result {
 			defer timer.Stop()
 			select {
 			case <-ctx.Done():
-				ch <- resultFrom(nil, classifyContextError(ctx.Err()))
+				ch <- resultFrom("", classifyContextError(ctx.Err()))
 				return
 			case <-timer.C:
 			}
 		}
-		img, err := Capture(ctx, mode)
-		ch <- resultFrom(img, err)
+		path, err := CaptureFile(ctx, mode)
+		ch <- resultFrom(path, err)
 	}()
 	return ch
 }
 
-func resultFrom(img image.Image, err error) Result {
+func resultFrom(path string, err error) Result {
 	if err == nil {
-		return Result{Image: img}
+		return Result{Path: path}
 	}
 	if errors.Is(err, ErrCancelled) {
 		return Result{Cancelled: true, Err: err}
@@ -114,35 +116,52 @@ func resultFrom(img image.Image, err error) Result {
 
 // Capture takes a screenshot with the platform helper and returns a decoded image.
 func Capture(ctx context.Context, mode Mode) (image.Image, error) {
+	path, err := CaptureFile(ctx, mode)
+	if err != nil {
+		return nil, err
+	}
+	defer os.Remove(path)
+	return decodeCaptureFile(path)
+}
+
+// CaptureFile writes a PNG with the platform helper and returns its path.
+// The caller owns the file.
+func CaptureFile(ctx context.Context, mode Mode) (string, error) {
 	if ctx == nil {
 		ctx = context.Background()
 	}
 	mode = Normalize(mode)
 	f, err := os.CreateTemp("", "dogubako-capture-*.png")
 	if err != nil {
-		return nil, err
+		return "", err
 	}
 	dest := f.Name()
 	_ = f.Close()
 	// Do not leave an empty file: gnome-screenshot can exit 0 without writing
 	// (GApplication single-instance), and an empty dest used to look like a cancel.
 	_ = os.Remove(dest)
-	defer os.Remove(dest)
 
 	if err := runOSCapture(ctx, mode, dest); err != nil {
-		return nil, err
+		_ = os.Remove(dest)
+		return "", err
 	}
-	data, err := os.ReadFile(dest)
+	if !hasImageFile(dest) {
+		_ = os.Remove(dest)
+		return "", fmt.Errorf("screenshot file is empty")
+	}
+	return dest, nil
+}
+
+func decodeCaptureFile(path string) (image.Image, error) {
+	f, err := os.Open(path)
 	if err != nil {
 		if errors.Is(err, os.ErrNotExist) {
 			return nil, ErrCancelled
 		}
 		return nil, err
 	}
-	if len(data) < minPNGSize {
-		return nil, fmt.Errorf("screenshot file is empty")
-	}
-	img, _, err := imageproc.DecodeBytes(data)
+	defer f.Close()
+	img, _, err := imageproc.Decode(f)
 	if err != nil {
 		return nil, fmt.Errorf("decode screenshot: %w", err)
 	}

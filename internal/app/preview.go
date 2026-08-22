@@ -51,7 +51,7 @@ func (p *sourcePreview) SetImage(img image.Image, srcSize image.Point) {
 		return
 	}
 	p.source = img
-	p.gpu = nil
+	clearEbitenImage(&p.gpu)
 	p.imageSize = srcSize
 	p.view.syncKey(srcSize)
 	p.generation++
@@ -233,7 +233,7 @@ func (p *destPreview) SetImage(img image.Image) {
 		return
 	}
 	p.source = img
-	p.gpu = nil
+	clearEbitenImage(&p.gpu)
 	if img == nil {
 		p.logical = image.Point{}
 	}
@@ -417,6 +417,14 @@ func (z *previewZoomBar) Layout(context *guigui.Context, widgetBounds *guigui.Wi
 		Items:     z.layoutItems,
 		Gap:       u / 8,
 	}).LayoutWidgets(context, widgetBounds.Bounds(), layouter)
+}
+
+func clearEbitenImage(dst **ebiten.Image) {
+	if dst == nil || *dst == nil {
+		return
+	}
+	(*dst).Deallocate()
+	*dst = nil
 }
 
 func fittedRect(bounds image.Rectangle, imgSize image.Point) image.Rectangle {

@@ -114,6 +114,27 @@ func TestImageModelSaveRoundTrip(t *testing.T) {
 	}
 }
 
+func TestResultPreviewCapsLargeOutput(t *testing.T) {
+	src := image.NewNRGBA(image.Rect(0, 0, 80, 40))
+	var m ImageModel
+	m.setSource(src, "t.png", imageproc.FormatPNG)
+	m.SetWidth(4000)
+	prev := m.ResultPreview()
+	if prev == nil {
+		t.Fatal("expected preview")
+	}
+	if max(prev.Bounds().Dx(), prev.Bounds().Dy()) > previewMaxEdge {
+		t.Fatalf("preview = %v", prev.Bounds())
+	}
+	got, err := m.Processed()
+	if err != nil {
+		t.Fatal(err)
+	}
+	if got.Bounds().Dx() != 4000 {
+		t.Fatalf("full processed = %v", got.Bounds())
+	}
+}
+
 func TestSuggestedFilename(t *testing.T) {
 	var m ImageModel
 	m.sourceName = "photo.jpeg"

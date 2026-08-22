@@ -110,14 +110,13 @@ func TestAndroidExpandMarksUseAvailableGlyphs(t *testing.T) {
 	}
 }
 
-func TestAndroidFileIconsHaveNoVariationSelector(t *testing.T) {
-	if strings.ContainsRune(androidFolderIcon, '\uFE0F') || strings.ContainsRune(androidFileIcon, '\uFE0F') {
-		t.Fatal("emoji variation selector would show as a missing-glyph box")
+func TestFileKindIconDefaultsToFile(t *testing.T) {
+	var k fileKindIcon
+	if k.folder {
+		t.Fatal("empty icon should be a file")
 	}
-	if androidFolderIcon != "\U0001F5C2" {
-		t.Fatalf("folder = %q", androidFolderIcon)
-	}
-	if androidFileIcon != "\U0001F4C4" {
-		t.Fatalf("file = %q", androidFileIcon)
+	k.SetFolder(true)
+	if !k.folder {
+		t.Fatal("expected folder")
 	}
 }

@@ -163,7 +163,7 @@ make test
 
 ## フォント
 
-日本語表示用の Noto Sans CJK は **Linux ビルドだけ** 埋め込みます。macOS では `/System/Library/Fonts/ヒラギノ角ゴシック W3.ttc`（無ければ W4 以降）を開き、Guigui のフォールバックに登録します。フォルダ／ファイルの絵文字アイコンは、macOS では Apple Color Emoji、Linux では Noto Color Emoji（入っていれば）を使います。
+日本語表示用の Noto Sans CJK は **Linux ビルドだけ** 埋め込みます。macOS では `/System/Library/Fonts/ヒラギノ角ゴシック W3.ttc`（無ければ W4 以降）を開き、Guigui のフォールバックに登録します。フォルダ／ファイルのアイコンはベクトル描画で、カラー絵文字フォントは読み込みません。
 
 ## ディレクトリ
 

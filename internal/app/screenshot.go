@@ -196,6 +196,9 @@ func (t *ScreenshotTool) Build(context *guigui.Context, adder *guigui.ChildAdder
 	}
 	for p := range t.thumbGPU {
 		if _, ok := liveThumbs[p]; !ok {
+			if img := t.thumbGPU[p]; img != nil {
+				img.Deallocate()
+			}
 			delete(t.thumbGPU, p)
 			delete(t.thumbMod, p)
 		}
@@ -374,6 +377,9 @@ func (t *ScreenshotTool) gpuThumb(path string, src image.Image, mod time.Time) *
 	nano := mod.UnixNano()
 	if t.thumbMod[path] == nano {
 		return t.thumbGPU[path]
+	}
+	if old := t.thumbGPU[path]; old != nil {
+		old.Deallocate()
 	}
 	img := ebiten.NewImageFromImage(src)
 	t.thumbGPU[path] = img

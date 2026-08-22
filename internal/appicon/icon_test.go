@@ -29,4 +29,7 @@ func TestRGBALightCorner(t *testing.T) {
 	if mid.R > 240 && mid.G > 240 && mid.B > 240 {
 		t.Fatalf("expected toolbox in the center, got %+v", mid)
 	}
+	if img.Bounds().Dx() > windowIconEdge || img.Bounds().Dy() > windowIconEdge {
+		t.Fatalf("window icon too large: %v", img.Bounds())
+	}
 }

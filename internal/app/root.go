@@ -156,7 +156,9 @@ func (r *Root) Tick(context *guigui.Context, widgetBounds *guigui.WidgetBounds) 
 	r.drainDialogs()
 	r.drainCapture()
 	r.model.Android().Drain()
-	r.model.Screenshot().RefreshFiles()
+	if r.model.Mode() == ToolScreenshot {
+		r.model.Screenshot().PollFiles()
+	}
 	if files := ebiten.DroppedFiles(); files != nil && r.model.Mode() == ToolImage {
 		_ = r.model.Image().LoadDropped(files)
 	}
@@ -385,7 +387,7 @@ func (r *Root) drainCapture() {
 			guigui.RequestRebuild()
 			return
 		}
-		_ = shot.ApplyCapture(res.Image)
+		_ = shot.ApplyCaptureFile(res.Path)
 		guigui.RequestRebuild()
 	default:
 	}

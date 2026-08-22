@@ -117,7 +117,6 @@ type ImageModel struct {
 
 	processed  image.Image
 	processErr error
-	dirty      bool
 
 	srcPreview image.Image
 	dstPreview image.Image
@@ -130,7 +129,7 @@ type statusMsg struct {
 	args []any
 }
 
-const previewMaxEdge = 2048
+const previewMaxEdge = 1280
 
 func (m *ImageModel) Generation() uint64 { return m.generation }
 
@@ -222,8 +221,21 @@ func (m *ImageModel) JPEGQuality() int {
 }
 
 func (m *ImageModel) Processed() (image.Image, error) {
-	m.recompute()
-	return m.processed, m.processErr
+	m.ensureDefaults()
+	if m.source == nil {
+		return nil, m.processErr
+	}
+	if err := imageproc.ValidateParams(m.params); err != nil {
+		m.processErr = err
+		return nil, err
+	}
+	if m.processed != nil {
+		return m.processed, m.processErr
+	}
+	out, err := imageproc.Apply(m.source, m.params)
+	m.processed = out
+	m.processErr = err
+	return out, err
 }
 
 func (m *ImageModel) LoadPath(path string) error {
@@ -346,6 +358,7 @@ func (m *ImageModel) SavePath(path string) error {
 		m.SetStatus(i18n.StatusEncodeFailed, err)
 		return err
 	}
+	m.processed = nil
 	if err := os.WriteFile(path, data, 0o644); err != nil {
 		m.SetStatus(i18n.StatusSaveFailed, err)
 		return err
@@ -365,6 +378,7 @@ func (m *ImageModel) ExportPNG() ([]byte, error) {
 		m.SetStatus(i18n.StatusEncodeFailed, err)
 		return nil, err
 	}
+	m.processed = nil
 	return data, nil
 }
 
@@ -554,32 +568,14 @@ func (m *ImageModel) setSource(img image.Image, name string, format imageproc.Fo
 }
 
 func (m *ImageModel) markDirty() {
-	m.dirty = true
+	m.processed = nil
+	m.processErr = nil
+	m.srcPreview = nil
+	m.dstPreview = nil
 	m.generation++
 }
 
-func (m *ImageModel) recompute() {
-	if !m.dirty {
-		return
-	}
-	m.dirty = false
-	m.ensureDefaults()
-	if m.source == nil {
-		m.processed = nil
-		m.processErr = nil
-		m.srcPreview = nil
-		m.dstPreview = nil
-		return
-	}
-	m.srcPreview = nil
-	m.dstPreview = nil
-	out, err := imageproc.Apply(m.source, m.params)
-	m.processed = out
-	m.processErr = err
-}
-
 func (m *ImageModel) SourcePreview() image.Image {
-	m.recompute()
 	if m.srcPreview == nil && m.source != nil {
 		m.srcPreview = previewImage(m.source)
 	}
@@ -587,11 +583,20 @@ func (m *ImageModel) SourcePreview() image.Image {
 }
 
 func (m *ImageModel) ResultPreview() image.Image {
-	m.recompute()
-	if m.dstPreview == nil && m.processed != nil && m.processErr == nil {
-		m.dstPreview = previewImage(m.processed)
+	m.ensureDefaults()
+	if m.source == nil {
+		return nil
 	}
-	return m.dstPreview
+	if m.dstPreview != nil {
+		return m.dstPreview
+	}
+	img, err := imageproc.ApplyPreview(m.source, m.params, previewMaxEdge)
+	m.processErr = err
+	if err != nil {
+		return nil
+	}
+	m.dstPreview = img
+	return img
 }
 
 func previewImage(src image.Image) image.Image {

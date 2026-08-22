@@ -170,10 +170,10 @@ func (t *ImageTool) Build(context *guigui.Context, adder *guigui.ChildAdder) err
 	t.beforeZoom.Configure(context, &t.beforePreview, lang, has)
 
 	setBoldText(&t.afterLabel, true)
-	if out, err := model.Processed(); err == nil && out != nil {
-		t.afterLabel.SetValue(i18n.T(lang, i18n.AfterSize, out.Bounds().Dx(), out.Bounds().Dy(), model.Format()))
-		t.afterImage.SetImage(model.ResultPreview())
-		t.afterImage.SetLogicalSize(out.Bounds().Size())
+	if preview := model.ResultPreview(); has && preview != nil {
+		t.afterLabel.SetValue(i18n.T(lang, i18n.AfterSize, model.Width(), model.Height(), model.Format()))
+		t.afterImage.SetImage(preview)
+		t.afterImage.SetLogicalSize(image.Pt(model.Width(), model.Height()))
 		t.afterZoom.Configure(context, &t.afterImage, lang, true)
 		adder.AddWidget(&t.afterImage)
 	} else {

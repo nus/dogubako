@@ -287,7 +287,7 @@ func TestCaptureTimeout(t *testing.T) {
 }
 
 func TestResultFromTimeout(t *testing.T) {
-	got := resultFrom(nil, ErrTimeout)
+	got := resultFrom("", ErrTimeout)
 	if got.Cancelled || !errors.Is(got.Err, ErrTimeout) {
 		t.Fatalf("%+v", got)
 	}
@@ -312,10 +312,10 @@ func TestNormalize(t *testing.T) {
 }
 
 func TestResultFrom(t *testing.T) {
-	if got := resultFrom(nil, ErrCancelled); !got.Cancelled {
+	if got := resultFrom("", ErrCancelled); !got.Cancelled {
 		t.Fatalf("%+v", got)
 	}
-	if got := resultFrom(nil, ErrNoTool); got.Cancelled || got.Err == nil {
+	if got := resultFrom("", ErrNoTool); got.Cancelled || got.Err == nil {
 		t.Fatalf("%+v", got)
 	}
 }

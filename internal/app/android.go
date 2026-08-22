@@ -544,7 +544,7 @@ type androidFileRow struct {
 	tool *AndroidTool
 
 	expand basicwidget.Button
-	icon   basicwidget.Text
+	icon   fileKindIcon
 	name   basicwidget.Text
 	size   basicwidget.Text
 	mod    basicwidget.Text
@@ -561,7 +561,7 @@ func (r *androidFileRow) Set(row AndroidTreeRow, onExpand func(), tool *AndroidT
 	r.depth = row.Depth
 	r.isDir = row.Entry.IsDir
 	if row.Entry.IsDir {
-		r.icon.SetValue(androidFolderIcon)
+		r.icon.SetFolder(true)
 		if row.Expanded {
 			r.expand.SetText(androidExpandOpen)
 		} else {
@@ -573,7 +573,7 @@ func (r *androidFileRow) Set(row AndroidTreeRow, onExpand func(), tool *AndroidT
 			}
 		})
 	} else {
-		r.icon.SetValue(androidFileIcon)
+		r.icon.SetFolder(false)
 		r.expand.SetText("")
 		r.expand.OnDown(func(context *guigui.Context) {})
 	}
@@ -590,8 +590,6 @@ func (r *androidFileRow) Build(context *guigui.Context, adder *guigui.ChildAdder
 	adder.AddWidget(&r.name)
 	adder.AddWidget(&r.size)
 	adder.AddWidget(&r.mod)
-	r.icon.SetVerticalAlign(basicwidget.VerticalAlignMiddle)
-	r.icon.SetHorizontalAlign(basicwidget.HorizontalAlignCenter)
 	r.name.SetVerticalAlign(basicwidget.VerticalAlignMiddle)
 	r.size.SetVerticalAlign(basicwidget.VerticalAlignMiddle)
 	r.mod.SetVerticalAlign(basicwidget.VerticalAlignMiddle)
@@ -641,7 +639,6 @@ func (r *androidFileRow) Layout(context *guigui.Context, widgetBounds *guigui.Wi
 	if clr != nil {
 		style.SetColor(clr)
 	}
-	r.icon.SetBaseStyle(&style)
 	r.name.SetBaseStyle(&style)
 	r.size.SetBaseStyle(&style)
 	r.mod.SetBaseStyle(&style)

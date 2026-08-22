@@ -9,6 +9,8 @@ import (
 	"image/draw"
 	"image/png"
 	"sync"
+
+	xdraw "golang.org/x/image/draw"
 )
 
 //go:embed icon.png
@@ -25,7 +27,10 @@ func PNG() []byte {
 	return pngBytes
 }
 
-// RGBA returns the decoded icon as a top-left-origin RGBA image.
+const windowIconEdge = 128
+
+// RGBA returns a window-sized icon. The embedded master is 1024px; keeping
+// that raster would cost 4MB for a title-bar glyph.
 func RGBA() (*image.RGBA, error) {
 	once.Do(func() {
 		img, err := png.Decode(bytes.NewReader(pngBytes))
@@ -33,9 +38,22 @@ func RGBA() (*image.RGBA, error) {
 			loadErr = fmt.Errorf("decode icon: %w", err)
 			return
 		}
-		master = toRGBA(img)
+		master = scaleRGBA(img, windowIconEdge)
 	})
 	return master, loadErr
+}
+
+func scaleRGBA(src image.Image, edge int) *image.RGBA {
+	b := src.Bounds()
+	if b.Dx() <= edge && b.Dy() <= edge {
+		return toRGBA(src)
+	}
+	s := float64(edge) / float64(max(b.Dx(), b.Dy()))
+	w := max(1, int(float64(b.Dx())*s))
+	h := max(1, int(float64(b.Dy())*s))
+	dst := image.NewRGBA(image.Rect(0, 0, w, h))
+	xdraw.ApproxBiLinear.Scale(dst, dst.Bounds(), src, b, xdraw.Src, nil)
+	return dst
 }
 
 func toRGBA(src image.Image) *image.RGBA {

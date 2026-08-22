@@ -3,6 +3,7 @@ package app
 import (
 	"image"
 	"image/color"
+	"image/png"
 	"os"
 	"path/filepath"
 	"strings"
@@ -96,6 +97,9 @@ func TestApplyCaptureAutoSavesAndLists(t *testing.T) {
 	if m.RevealPath() != firstPath {
 		t.Fatalf("reveal = %q", m.RevealPath())
 	}
+	if m.image != nil {
+		t.Fatal("full raster should be dropped after load")
+	}
 	if got := m.StatusText(i18n.EN); !strings.Contains(got, "Loaded") {
 		t.Fatalf("loaded status = %q", got)
 	}
@@ -165,6 +169,86 @@ func TestImageModelLoadImage(t *testing.T) {
 	}
 	if !m.HasSource() || m.SourceSize() != (image.Point{X: 2, Y: 2}) {
 		t.Fatalf("size = %v", m.SourceSize())
+	}
+}
+
+func TestApplyCaptureFileKeepsPreviewOnly(t *testing.T) {
+	home := t.TempDir()
+	restore := userdir.Override("linux", home, nil)
+	t.Cleanup(restore)
+
+	src := filepath.Join(t.TempDir(), "cap.png")
+	writeSolidPNG(t, src, 40, 20)
+	var m ScreenshotModel
+	if err := m.ApplyCaptureFile(src); err != nil {
+		t.Fatal(err)
+	}
+	if m.image != nil {
+		t.Fatal("full raster should be dropped")
+	}
+	if !m.HasImage() || m.Size() != (image.Point{X: 40, Y: 20}) {
+		t.Fatalf("size = %v has=%v", m.Size(), m.HasImage())
+	}
+	if m.Preview() == nil {
+		t.Fatal("expected preview")
+	}
+	data, err := m.ExportPNG()
+	if err != nil || len(data) == 0 {
+		t.Fatalf("export: %v len=%d", err, len(data))
+	}
+	if _, err := os.Stat(src); !os.IsNotExist(err) {
+		t.Fatal("temp capture file should have been moved")
+	}
+}
+
+func TestRefreshFilesLoadsThumbsIncrementally(t *testing.T) {
+	home := t.TempDir()
+	restore := userdir.Override("linux", home, nil)
+	t.Cleanup(restore)
+
+	var m ScreenshotModel
+	dir := m.DestDir()
+	if dir == "" {
+		t.Fatal("expected dest dir")
+	}
+	writeSolidPNG(t, filepath.Join(dir, "a.png"), 40, 20)
+	writeSolidPNG(t, filepath.Join(dir, "b.png"), 40, 20)
+
+	m.RefreshFiles()
+	if got := countThumbs(&m); got != 1 {
+		t.Fatalf("thumbs after first refresh = %d, want 1", got)
+	}
+	m.RefreshFiles()
+	if got := countThumbs(&m); got != 2 {
+		t.Fatalf("thumbs after second refresh = %d, want 2", got)
+	}
+}
+
+func countThumbs(m *ScreenshotModel) int {
+	n := 0
+	for _, f := range m.Files() {
+		if m.Thumbnail(f.Path) != nil {
+			n++
+		}
+	}
+	return n
+}
+
+func writeSolidPNG(t *testing.T, path string, w, h int) {
+	t.Helper()
+	img := image.NewNRGBA(image.Rect(0, 0, w, h))
+	for y := 0; y < h; y++ {
+		for x := 0; x < w; x++ {
+			img.SetNRGBA(x, y, color.NRGBA{R: 200, A: 255})
+		}
+	}
+	f, err := os.Create(path)
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer f.Close()
+	if err := png.Encode(f, img); err != nil {
+		t.Fatal(err)
 	}
 }
 
