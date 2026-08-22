@@ -1,111 +1,83 @@
 package app
 
 import (
+	"fmt"
 	"image"
 	"image/color"
-	"image/draw"
 	"math"
+	"slices"
+	"time"
 
-	"github.com/gogpu/ui/event"
-	"github.com/gogpu/ui/geometry"
-	"github.com/gogpu/ui/state"
-	"github.com/gogpu/ui/widget"
+	"github.com/hajimehoshi/ebiten/v2"
+	"github.com/hajimehoshi/ebiten/v2/ebitenutil"
+	"github.com/hajimehoshi/ebiten/v2/inpututil"
+	"github.com/hajimehoshi/ebiten/v2/vector"
 
-	"github.com/nus/dogubako/internal/cjkembed"
-	"github.com/nus/dogubako/internal/imageproc"
+	"github.com/guigui-gui/guigui"
+	"github.com/guigui-gui/guigui/basicwidget"
+
+	"github.com/nus/dogubako/internal/i18n"
 )
 
-// sourcePreviewFrame is one source-preview draw: raster, original size, crop overlay.
-type sourcePreviewFrame struct {
-	image       image.Image
-	size        image.Point
-	crop        image.Rectangle
-	cropEnabled bool
-}
+const previewDoubleClick = 280 * time.Millisecond
 
 // sourcePreview shows the original image and lets the user drag a crop rectangle.
 type sourcePreview struct {
-	widget.WidgetBase
+	guigui.DefaultWidget
 
-	rev           state.ReadonlySignal[uint64]
-	provider      func() sourcePreviewFrame
-	image         image.Image
+	source        image.Image
+	gpu           *ebiten.Image
 	imageSize     image.Point
 	crop          image.Rectangle
 	cropEnabled   bool
+	generation    uint64
 	onCropChanged func(image.Rectangle)
-	onViewChange  func()
 
 	view      previewView
+	bounds    image.Rectangle
 	dragging  bool
 	panning   bool
 	panLast   image.Point
 	dragStart image.Point
 	dragRect  image.Rectangle
-}
-
-func newSourcePreview(rev state.ReadonlySignal[uint64]) *sourcePreview {
-	p := &sourcePreview{rev: rev}
-	p.SetVisible(true)
-	p.SetEnabled(true)
-	return p
-}
-
-func (p *sourcePreview) SetProvider(f func() sourcePreviewFrame) {
-	p.provider = f
-	p.SetNeedsRedraw(true)
+	lastClick time.Time
 }
 
 func (p *sourcePreview) SetImage(img image.Image, srcSize image.Point) {
-	p.image = img
+	if p.source == img && p.imageSize == srcSize {
+		return
+	}
+	p.source = img
+	p.gpu = nil
 	p.imageSize = srcSize
 	p.view.syncKey(srcSize)
-	p.SetNeedsRedraw(true)
+	p.generation++
 }
 
 func (p *sourcePreview) SetCrop(crop image.Rectangle, enabled bool) {
-	p.crop = crop
-	p.cropEnabled = enabled
-	p.SetNeedsRedraw(true)
-}
-
-func (p *sourcePreview) sync() {
-	if p.rev != nil {
-		_ = p.rev.Get()
-	}
-	if p.provider == nil {
+	if p.crop == crop && p.cropEnabled == enabled {
 		return
 	}
-	frame := p.provider()
-	p.image = frame.image
-	p.imageSize = frame.size
-	p.crop = frame.crop
-	p.cropEnabled = frame.cropEnabled
-	p.view.syncKey(p.imageSize)
+	p.crop = crop
+	p.cropEnabled = enabled
+	p.generation++
 }
 
 func (p *sourcePreview) OnCropChanged(f func(image.Rectangle)) {
 	p.onCropChanged = f
 }
 
-func (p *sourcePreview) SetOnViewChange(f func()) {
-	p.onViewChange = f
-}
-
 func (p *sourcePreview) HasImage() bool {
-	p.sync()
-	return p.image != nil && p.imageSize.X > 0 && p.imageSize.Y > 0
+	return p.source != nil && p.imageSize.X > 0 && p.imageSize.Y > 0
 }
 
 func (p *sourcePreview) ZoomIn() {
-	p.sync()
-	p.view.zoomIn(toImageRect(p.Bounds()), p.imageSize)
+	p.view.zoomIn(p.bounds, p.imageSize)
 	p.notifyView()
 }
 
 func (p *sourcePreview) ZoomOut() {
-	p.sync()
-	p.view.zoomOut(toImageRect(p.Bounds()), p.imageSize)
+	p.view.zoomOut(p.bounds, p.imageSize)
 	p.notifyView()
 }
 
@@ -115,244 +87,196 @@ func (p *sourcePreview) ResetZoom() {
 }
 
 func (p *sourcePreview) notifyView() {
-	p.SetNeedsRedraw(true)
-	if p.onViewChange != nil {
-		p.onViewChange()
-	}
+	p.generation++
+	guigui.RequestRedraw(p)
 }
 
-func (p *sourcePreview) Layout(_ widget.Context, cons geometry.Constraints) geometry.Size {
-	size := cons.BiggestFinite(400, 300)
-	p.SetBounds(geometry.FromPointSize(p.Position(), size))
-	return size
+func (p *sourcePreview) WriteStateKey(context *guigui.Context, w *guigui.StateKeyWriter) {
+	w.WriteUint64(p.generation)
+	w.WriteBool(p.cropEnabled)
+	w.WriteInt(p.crop.Min.X)
+	w.WriteInt(p.crop.Min.Y)
+	w.WriteInt(p.crop.Max.X)
+	w.WriteInt(p.crop.Max.Y)
+	w.WriteFloat64(p.view.Scale())
 }
 
-func (p *sourcePreview) Draw(_ widget.Context, canvas widget.Canvas) {
-	p.sync()
-	widget.StampScreenOrigin(p, canvas)
-	b := p.Bounds()
-	if b.IsEmpty() {
+func (p *sourcePreview) Layout(context *guigui.Context, widgetBounds *guigui.WidgetBounds, layouter *guigui.ChildLayouter) {
+	p.bounds = widgetBounds.Bounds()
+}
+
+func (p *sourcePreview) Draw(context *guigui.Context, widgetBounds *guigui.WidgetBounds, dst *ebiten.Image) {
+	b := widgetBounds.Bounds()
+	p.bounds = b
+	drawCheckerboard(dst, b)
+	if p.source == nil || p.imageSize.X <= 0 || p.imageSize.Y <= 0 {
 		return
 	}
-	drawCheckerboard(canvas, b)
-	if p.image == nil || p.imageSize.X <= 0 || p.imageSize.Y <= 0 {
-		return
+	if p.gpu == nil {
+		p.gpu = ebiten.NewImageFromImage(p.source)
 	}
-	crop := image.Rectangle{}
+	p.view.syncKey(p.imageSize)
+	drawViewedImage(dst, p.gpu, b, p.imageSize, &p.view)
+
+	crop := p.crop
+	if p.dragging {
+		crop = p.dragRect
+	}
 	if p.cropEnabled || p.dragging {
-		crop = p.crop
-		if p.dragging {
-			crop = p.dragRect
+		full := p.view.imageRect(b, p.imageSize)
+		screenCrop := imageRectToScreen(crop, p.imageSize, full)
+		if !screenCrop.Empty() {
+			dim := color.NRGBA{A: 0x90}
+			vector.FillRect(dst, float32(b.Min.X), float32(b.Min.Y), float32(screenCrop.Min.X-b.Min.X), float32(b.Dy()), dim, false)
+			vector.FillRect(dst, float32(screenCrop.Max.X), float32(b.Min.Y), float32(b.Max.X-screenCrop.Max.X), float32(b.Dy()), dim, false)
+			vector.FillRect(dst, float32(screenCrop.Min.X), float32(b.Min.Y), float32(screenCrop.Dx()), float32(screenCrop.Min.Y-b.Min.Y), dim, false)
+			vector.FillRect(dst, float32(screenCrop.Min.X), float32(screenCrop.Max.Y), float32(screenCrop.Dx()), float32(b.Max.Y-screenCrop.Max.Y), dim, false)
+			vector.StrokeRect(dst, float32(screenCrop.Min.X)+0.5, float32(screenCrop.Min.Y)+0.5, float32(screenCrop.Dx())-1, float32(screenCrop.Dy())-1, 2, color.NRGBA{R: 0x2f, G: 0x81, B: 0xff, A: 0xff}, false)
 		}
 	}
-	drawViewedImage(canvas, p.image, b, p.imageSize, crop, &p.view)
-	drawZoomBadge(canvas, b, p.view.Scale())
+	drawZoomBadge(dst, b, p.view.Scale())
 }
 
-func (p *sourcePreview) Event(ctx widget.Context, e event.Event) bool {
-	p.sync()
-	if p.image == nil || p.imageSize.X <= 0 || p.imageSize.Y <= 0 {
-		return false
+func (p *sourcePreview) HandlePointingInput(context *guigui.Context, widgetBounds *guigui.WidgetBounds) guigui.HandleInputResult {
+	if p.source == nil || p.imageSize.X <= 0 || p.imageSize.Y <= 0 {
+		return guigui.HandleInputResult{}
 	}
-	if we, ok := e.(*event.WheelEvent); ok {
-		if p.dragging || p.panning {
-			return true
-		}
-		if handlePreviewWheel(&p.view, p.Bounds(), p.imageSize, we) {
-			p.notifyView()
-			return true
-		}
-		return false
-	}
-	me, ok := e.(*event.MouseEvent)
-	if !ok {
-		return false
-	}
-	ib := toImageRect(p.Bounds())
-	fitted := p.view.imageRect(ib, p.imageSize)
+	b := widgetBounds.Bounds()
+	p.bounds = b
+	p.view.syncKey(p.imageSize)
+	fitted := p.view.imageRect(b, p.imageSize)
 	if fitted.Empty() {
-		return false
+		return guigui.HandleInputResult{}
 	}
-	pt := p.localMouse(me)
+	cx, cy := ebiten.CursorPosition()
+	pt := image.Pt(cx, cy)
 
-	switch me.MouseType {
-	case event.MouseDoubleClick:
-		p.view.Reset()
+	if _, wy := ebiten.Wheel(); wy != 0 && widgetBounds.IsHitAtCursor() {
+		p.view.zoomAt(b, p.imageSize, pt, previewZoomFactor(-wy))
 		p.notifyView()
-		return true
-	case event.MousePress:
-		if me.ClickCount >= 2 {
+		return guigui.HandleInputByWidget(p)
+	}
+
+	if inpututil.IsMouseButtonJustPressed(ebiten.MouseButtonLeft) && widgetBounds.IsHitAtCursor() {
+		now := time.Now()
+		if !p.lastClick.IsZero() && now.Sub(p.lastClick) < previewDoubleClick {
 			p.view.Reset()
+			p.lastClick = time.Time{}
 			p.notifyView()
-			return true
+			return guigui.HandleInputByWidget(p)
 		}
-		if (me.Button == event.ButtonMiddle || me.Button == event.ButtonRight) && p.Bounds().Contains(geometry.Pt(float32(pt.X), float32(pt.Y))) {
-			p.panning = true
-			p.panLast = pt
-			if cap, ok := ctx.(widget.PointerCapturer); ok {
-				cap.CapturePointer(p)
-			}
-			p.setCursor(ctx, widget.CursorMove)
-			return true
-		}
-		if me.Button == event.ButtonLeft && pt.In(fitted) {
-			p.dragging = true
-			p.dragStart = screenToImage(pt, fitted, p.imageSize)
-			p.dragRect = image.Rectangle{Min: p.dragStart, Max: p.dragStart.Add(image.Pt(1, 1))}.Canon()
-			if cap, ok := ctx.(widget.PointerCapturer); ok {
-				cap.CapturePointer(p)
-			}
-			p.setCursor(ctx, widget.CursorCrosshair)
-			p.SetNeedsRedraw(true)
-			return true
-		}
-	case event.MouseDrag, event.MouseMove:
-		if p.panning {
-			p.view.panBy(float64(pt.X-p.panLast.X), float64(pt.Y-p.panLast.Y), ib, p.imageSize)
-			p.panLast = pt
-			p.setCursor(ctx, widget.CursorMove)
-			p.notifyView()
-			return true
-		}
-		if p.dragging {
-			cur := screenToImage(pt, fitted, p.imageSize)
-			p.dragRect = normalizeCrop(image.Rectangle{Min: p.dragStart, Max: cur.Add(image.Pt(1, 1))}, p.imageSize)
-			p.setCursor(ctx, widget.CursorCrosshair)
-			p.SetNeedsRedraw(true)
-			return true
-		}
-		if pt.In(fitted) {
-			p.setCursor(ctx, widget.CursorCrosshair)
-		}
-	case event.MouseRelease:
-		if p.panning && (me.Button == event.ButtonMiddle || me.Button == event.ButtonRight) {
-			p.panning = false
-			if cap, ok := ctx.(widget.PointerCapturer); ok {
-				cap.ReleasePointer(p)
-			}
-			p.SetNeedsRedraw(true)
-			return true
-		}
-		if p.dragging && me.Button == event.ButtonLeft {
-			p.dragging = false
-			if cap, ok := ctx.(widget.PointerCapturer); ok {
-				cap.ReleasePointer(p)
-			}
-			rect := normalizeCrop(p.dragRect, p.imageSize)
-			if rect.Dx() >= 1 && rect.Dy() >= 1 && p.onCropChanged != nil {
-				p.onCropChanged(rect)
-			}
-			p.SetNeedsRedraw(true)
-			return true
-		}
+		p.lastClick = now
 	}
-	return false
+
+	if (inpututil.IsMouseButtonJustPressed(ebiten.MouseButtonMiddle) || inpututil.IsMouseButtonJustPressed(ebiten.MouseButtonRight)) && widgetBounds.IsHitAtCursor() {
+		p.panning = true
+		p.panLast = pt
+		return guigui.HandleInputByWidget(p)
+	}
+	if p.panning && (ebiten.IsMouseButtonPressed(ebiten.MouseButtonMiddle) || ebiten.IsMouseButtonPressed(ebiten.MouseButtonRight)) {
+		p.view.panBy(float64(pt.X-p.panLast.X), float64(pt.Y-p.panLast.Y), b, p.imageSize)
+		p.panLast = pt
+		p.notifyView()
+		return guigui.HandleInputByWidget(p)
+	}
+	if p.panning {
+		p.panning = false
+		return guigui.HandleInputByWidget(p)
+	}
+
+	if inpututil.IsMouseButtonJustPressed(ebiten.MouseButtonLeft) && widgetBounds.IsHitAtCursor() && pt.In(fitted) {
+		p.dragging = true
+		p.dragStart = screenToImage(pt, fitted, p.imageSize)
+		p.dragRect = image.Rectangle{Min: p.dragStart, Max: p.dragStart.Add(image.Pt(1, 1))}.Canon()
+		return guigui.HandleInputByWidget(p)
+	}
+	if p.dragging && ebiten.IsMouseButtonPressed(ebiten.MouseButtonLeft) {
+		cur := screenToImage(pt, fitted, p.imageSize)
+		p.dragRect = normalizeCrop(image.Rectangle{Min: p.dragStart, Max: cur.Add(image.Pt(1, 1))}, p.imageSize)
+		guigui.RequestRedraw(p)
+		return guigui.HandleInputByWidget(p)
+	}
+	if p.dragging && inpututil.IsMouseButtonJustReleased(ebiten.MouseButtonLeft) {
+		p.dragging = false
+		rect := normalizeCrop(p.dragRect, p.imageSize)
+		if rect.Dx() >= 1 && rect.Dy() >= 1 && p.onCropChanged != nil {
+			p.onCropChanged(rect)
+		}
+		return guigui.HandleInputByWidget(p)
+	}
+	return guigui.HandleInputResult{}
 }
 
-// localMouse maps an event into this widget's bounds space.
-// Tree dispatch translates through parents (local). After CapturePointer,
-// the window delivers the same events in window coordinates — subtracting
-// ScreenOrigin puts the crop corner back on the cursor.
-func (p *sourcePreview) localMouse(me *event.MouseEvent) image.Point {
-	pos := me.Position
-	if (p.dragging || p.panning) && p.IsScreenOriginValid() {
-		pos = pos.Sub(p.ScreenOrigin()).Add(p.Bounds().Min)
+func (p *sourcePreview) CursorShape(context *guigui.Context, widgetBounds *guigui.WidgetBounds) (ebiten.CursorShapeType, bool) {
+	if p.panning {
+		return ebiten.CursorShapeMove, true
 	}
-	return image.Pt(int(math.Round(float64(pos.X))), int(math.Round(float64(pos.Y))))
+	if p.source != nil && widgetBounds.IsHitAtCursor() {
+		return ebiten.CursorShapeCrosshair, true
+	}
+	return 0, false
 }
 
-func (p *sourcePreview) setCursor(ctx widget.Context, cur widget.CursorType) {
-	if ctx != nil {
-		ctx.SetCursor(cur)
-	}
-}
-
-func (p *sourcePreview) Children() []widget.Widget { return nil }
-
-func (p *sourcePreview) Mount(ctx widget.Context) {
-	if p.rev == nil {
-		return
-	}
-	sched := ctx.Scheduler()
-	if sched == nil {
-		return
-	}
-	p.AddBinding(state.BindToScheduler(p.rev, p, sched))
-}
-
-func (p *sourcePreview) Unmount() {}
-
-// destPreview shows a processed image fitted into its bounds.
+// destPreview shows the processed image fitted into its bounds.
 type destPreview struct {
-	widget.WidgetBase
+	guigui.DefaultWidget
 
-	rev          state.ReadonlySignal[uint64]
-	provider     func() image.Image
-	sizeProvider func() image.Point
-	source       image.Image
-	image        image.Image
-	emptyHint    func() string
-	onViewChange func()
+	source     image.Image
+	gpu        *ebiten.Image
+	logical    image.Point
+	generation uint64
 
-	view    previewView
-	panning bool
-	panLast image.Point
-}
-
-func newDestPreview(rev state.ReadonlySignal[uint64]) *destPreview {
-	p := &destPreview{rev: rev}
-	p.SetVisible(true)
-	p.SetEnabled(true)
-	return p
-}
-
-func (p *destPreview) SetProvider(f func() image.Image) {
-	p.provider = f
-	p.SetNeedsRedraw(true)
-}
-
-// SetSizeProvider sets the original image size used for zoom math.
-// The raster from SetProvider may be a downscaled preview.
-func (p *destPreview) SetSizeProvider(f func() image.Point) {
-	p.sizeProvider = f
-	p.SetNeedsRedraw(true)
+	view      previewView
+	bounds    image.Rectangle
+	panning   bool
+	panLast   image.Point
+	lastClick time.Time
 }
 
 func (p *destPreview) SetImage(img image.Image) {
-	p.image = img
-	p.source = nil
-	p.SetNeedsRedraw(true)
+	if p.source == img {
+		return
+	}
+	p.source = img
+	p.gpu = nil
+	if img == nil {
+		p.logical = image.Point{}
+	}
+	p.generation++
+}
+
+func (p *destPreview) SetLogicalSize(size image.Point) {
+	if p.logical == size {
+		return
+	}
+	p.logical = size
+	p.view.syncKey(p.viewSize())
+	p.generation++
 }
 
 func (p *destPreview) SetSource(img image.Image) {
-	p.source = img
-	p.image = nil
-	p.SetNeedsRedraw(true)
+	p.SetImage(img)
 }
 
-func (p *destPreview) SetEmptyHint(f func() string) {
-	p.emptyHint = f
-}
+func (p *destPreview) HasImage() bool { return p.source != nil }
 
-func (p *destPreview) SetOnViewChange(f func()) {
-	p.onViewChange = f
+func (p *destPreview) viewSize() image.Point {
+	if p.logical.X > 0 && p.logical.Y > 0 {
+		return p.logical
+	}
+	if p.source == nil {
+		return image.Point{}
+	}
+	return p.source.Bounds().Size()
 }
 
 func (p *destPreview) ZoomIn() {
-	img := p.resolvedImage()
-	if img == nil {
-		return
-	}
-	p.view.zoomIn(toImageRect(p.Bounds()), p.viewSize(img))
+	p.view.zoomIn(p.bounds, p.viewSize())
 	p.notifyView()
 }
 
 func (p *destPreview) ZoomOut() {
-	img := p.resolvedImage()
-	if img == nil {
-		return
-	}
-	p.view.zoomOut(toImageRect(p.Bounds()), p.viewSize(img))
+	p.view.zoomOut(p.bounds, p.viewSize())
 	p.notifyView()
 }
 
@@ -362,189 +286,143 @@ func (p *destPreview) ResetZoom() {
 }
 
 func (p *destPreview) notifyView() {
-	p.SetNeedsRedraw(true)
-	if p.onViewChange != nil {
-		p.onViewChange()
-	}
+	p.generation++
+	guigui.RequestRedraw(p)
 }
 
-func (p *destPreview) HasImage() bool {
-	if p.provider != nil {
-		return p.provider() != nil
-	}
-	return p.source != nil || p.image != nil
+func (p *destPreview) WriteStateKey(context *guigui.Context, w *guigui.StateKeyWriter) {
+	w.WriteUint64(p.generation)
+	w.WriteFloat64(p.view.Scale())
 }
 
-func (p *destPreview) resolvedImage() image.Image {
-	if p.rev != nil {
-		_ = p.rev.Get()
-	}
-	if p.provider != nil {
-		return p.provider()
-	}
-	if p.image != nil {
-		return p.image
-	}
+func (p *destPreview) Layout(context *guigui.Context, widgetBounds *guigui.WidgetBounds, layouter *guigui.ChildLayouter) {
+	p.bounds = widgetBounds.Bounds()
+}
+
+func (p *destPreview) Draw(context *guigui.Context, widgetBounds *guigui.WidgetBounds, dst *ebiten.Image) {
+	b := widgetBounds.Bounds()
+	p.bounds = b
+	drawCheckerboard(dst, b)
 	if p.source == nil {
-		return nil
-	}
-	p.image = previewImage(p.source)
-	return p.image
-}
-
-func (p *destPreview) viewSize(img image.Image) image.Point {
-	if p.sizeProvider != nil {
-		if sz := p.sizeProvider(); sz.X > 0 && sz.Y > 0 {
-			return sz
-		}
-	}
-	if img == nil {
-		return image.Point{}
-	}
-	return img.Bounds().Size()
-}
-
-func (p *destPreview) Layout(_ widget.Context, cons geometry.Constraints) geometry.Size {
-	size := cons.BiggestFinite(400, 300)
-	p.SetBounds(geometry.FromPointSize(p.Position(), size))
-	return size
-}
-
-func (p *destPreview) Draw(_ widget.Context, canvas widget.Canvas) {
-	widget.StampScreenOrigin(p, canvas)
-	b := p.Bounds()
-	if b.IsEmpty() {
 		return
 	}
-	drawCheckerboard(canvas, b)
-	img := p.resolvedImage()
-	if img != nil {
-		sz := p.viewSize(img)
-		p.view.syncKey(sz)
-		drawViewedImage(canvas, img, b, sz, image.Rectangle{}, &p.view)
-		drawZoomBadge(canvas, b, p.view.Scale())
-		return
+	if p.gpu == nil {
+		p.gpu = ebiten.NewImageFromImage(p.source)
 	}
-	if p.emptyHint == nil {
-		return
-	}
-	hint := p.emptyHint()
-	if hint == "" {
-		return
-	}
-	style := widget.TextStyle{
-		FontFamily: cjkembed.FamilyName,
-		FontSize:   13,
-		Color:      widget.RGBA8(120, 120, 120, 255),
-		Align:      widget.TextAlignCenter,
-	}
-	if sd, ok := canvas.(widget.StyledTextDrawer); ok {
-		sd.DrawStyledText(hint, b, style)
-	} else {
-		canvas.DrawText(hint, b, 13, style.Color, false, widget.TextAlignCenter)
-	}
-}
-
-func (p *destPreview) Event(ctx widget.Context, e event.Event) bool {
-	img := p.resolvedImage()
-	if img == nil {
-		return false
-	}
-	sz := p.viewSize(img)
+	sz := p.viewSize()
 	p.view.syncKey(sz)
-	if we, ok := e.(*event.WheelEvent); ok {
-		if p.panning {
-			return true
-		}
-		if handlePreviewWheel(&p.view, p.Bounds(), sz, we) {
-			p.notifyView()
-			return true
-		}
-		return false
-	}
-	me, ok := e.(*event.MouseEvent)
-	if !ok {
-		return false
-	}
-	ib := toImageRect(p.Bounds())
-	pt := p.localMouse(me)
-	inside := p.Bounds().Contains(geometry.Pt(float32(pt.X), float32(pt.Y)))
+	drawViewedImage(dst, p.gpu, b, sz, &p.view)
+	drawZoomBadge(dst, b, p.view.Scale())
+}
 
-	switch me.MouseType {
-	case event.MouseDoubleClick:
-		p.view.Reset()
+func (p *destPreview) HandlePointingInput(context *guigui.Context, widgetBounds *guigui.WidgetBounds) guigui.HandleInputResult {
+	if p.source == nil {
+		return guigui.HandleInputResult{}
+	}
+	b := widgetBounds.Bounds()
+	p.bounds = b
+	sz := p.viewSize()
+	p.view.syncKey(sz)
+	cx, cy := ebiten.CursorPosition()
+	pt := image.Pt(cx, cy)
+
+	if _, wy := ebiten.Wheel(); wy != 0 && widgetBounds.IsHitAtCursor() {
+		p.view.zoomAt(b, sz, pt, previewZoomFactor(-wy))
 		p.notifyView()
-		return true
-	case event.MousePress:
-		if me.ClickCount >= 2 {
+		return guigui.HandleInputByWidget(p)
+	}
+
+	if inpututil.IsMouseButtonJustPressed(ebiten.MouseButtonLeft) && widgetBounds.IsHitAtCursor() {
+		now := time.Now()
+		if !p.lastClick.IsZero() && now.Sub(p.lastClick) < previewDoubleClick {
 			p.view.Reset()
+			p.lastClick = time.Time{}
 			p.notifyView()
-			return true
+			return guigui.HandleInputByWidget(p)
 		}
-		if !inside {
-			return false
-		}
-		if me.Button == event.ButtonLeft || me.Button == event.ButtonMiddle || me.Button == event.ButtonRight {
-			p.panning = true
-			p.panLast = pt
-			if cap, ok := ctx.(widget.PointerCapturer); ok {
-				cap.CapturePointer(p)
-			}
-			p.setCursor(ctx, widget.CursorMove)
-			return true
-		}
-	case event.MouseDrag, event.MouseMove:
-		if p.panning {
-			p.view.panBy(float64(pt.X-p.panLast.X), float64(pt.Y-p.panLast.Y), ib, sz)
-			p.panLast = pt
-			p.setCursor(ctx, widget.CursorMove)
-			p.notifyView()
-			return true
-		}
-		if inside && previewCanPan(ib, sz, &p.view) {
-			p.setCursor(ctx, widget.CursorMove)
-		}
-	case event.MouseRelease:
-		if p.panning && (me.Button == event.ButtonLeft || me.Button == event.ButtonMiddle || me.Button == event.ButtonRight) {
-			p.panning = false
-			if cap, ok := ctx.(widget.PointerCapturer); ok {
-				cap.ReleasePointer(p)
-			}
-			p.SetNeedsRedraw(true)
-			return true
-		}
+		p.lastClick = now
+		p.panning = true
+		p.panLast = pt
+		return guigui.HandleInputByWidget(p)
 	}
-	return false
+	if p.panning && ebiten.IsMouseButtonPressed(ebiten.MouseButtonLeft) {
+		p.view.panBy(float64(pt.X-p.panLast.X), float64(pt.Y-p.panLast.Y), b, sz)
+		p.panLast = pt
+		p.notifyView()
+		return guigui.HandleInputByWidget(p)
+	}
+	if p.panning {
+		p.panning = false
+		return guigui.HandleInputByWidget(p)
+	}
+	return guigui.HandleInputResult{}
 }
 
-func (p *destPreview) localMouse(me *event.MouseEvent) image.Point {
-	pos := me.Position
-	if p.panning && p.IsScreenOriginValid() {
-		pos = pos.Sub(p.ScreenOrigin()).Add(p.Bounds().Min)
+func (p *destPreview) CursorShape(context *guigui.Context, widgetBounds *guigui.WidgetBounds) (ebiten.CursorShapeType, bool) {
+	if p.source == nil || !widgetBounds.IsHitAtCursor() {
+		return 0, false
 	}
-	return image.Pt(int(math.Round(float64(pos.X))), int(math.Round(float64(pos.Y))))
+	if p.panning || previewCanPan(widgetBounds.Bounds(), p.viewSize(), &p.view) {
+		return ebiten.CursorShapeMove, true
+	}
+	return 0, false
 }
 
-func (p *destPreview) setCursor(ctx widget.Context, cur widget.CursorType) {
-	if ctx != nil {
-		ctx.SetCursor(cur)
-	}
+type previewZoomBar struct {
+	guigui.DefaultWidget
+
+	minus basicwidget.Button
+	plus  basicwidget.Button
+	fit   basicwidget.Button
+
+	layoutItems []guigui.LinearLayoutItem
 }
 
-func (p *destPreview) Children() []widget.Widget { return nil }
-
-func (p *destPreview) Mount(ctx widget.Context) {
-	if p.rev == nil {
-		return
-	}
-	sched := ctx.Scheduler()
-	if sched == nil {
-		return
-	}
-	p.AddBinding(state.BindToScheduler(p.rev, p, sched))
+func (z *previewZoomBar) Configure(context *guigui.Context, zoomer previewZoomer, lang i18n.Lang, enabled bool) {
+	z.minus.SetText("−")
+	z.plus.SetText("+")
+	z.fit.SetText(i18n.T(lang, i18n.PreviewFit))
+	z.minus.OnDown(func(context *guigui.Context) {
+		if zoomer != nil {
+			zoomer.ZoomOut()
+		}
+	})
+	z.plus.OnDown(func(context *guigui.Context) {
+		if zoomer != nil {
+			zoomer.ZoomIn()
+		}
+	})
+	z.fit.OnDown(func(context *guigui.Context) {
+		if zoomer != nil {
+			zoomer.ResetZoom()
+		}
+	})
+	context.SetEnabled(&z.minus, enabled)
+	context.SetEnabled(&z.plus, enabled)
+	context.SetEnabled(&z.fit, enabled)
 }
 
-func (p *destPreview) Unmount() {}
+func (z *previewZoomBar) Build(context *guigui.Context, adder *guigui.ChildAdder) error {
+	adder.AddWidget(&z.minus)
+	adder.AddWidget(&z.plus)
+	adder.AddWidget(&z.fit)
+	return nil
+}
+
+func (z *previewZoomBar) Layout(context *guigui.Context, widgetBounds *guigui.WidgetBounds, layouter *guigui.ChildLayouter) {
+	u := basicwidget.UnitSize(context)
+	z.layoutItems = slices.Delete(z.layoutItems, 0, len(z.layoutItems))
+	z.layoutItems = append(z.layoutItems,
+		guigui.LinearLayoutItem{Widget: &z.minus},
+		guigui.LinearLayoutItem{Widget: &z.plus},
+		guigui.LinearLayoutItem{Widget: &z.fit},
+	)
+	(guigui.LinearLayout{
+		Direction: guigui.LayoutDirectionHorizontal,
+		Items:     z.layoutItems,
+		Gap:       u / 8,
+	}).LayoutWidgets(context, widgetBounds.Bounds(), layouter)
+}
 
 func fittedRect(bounds image.Rectangle, imgSize image.Point) image.Rectangle {
 	if imgSize.X <= 0 || imgSize.Y <= 0 || bounds.Empty() {
@@ -558,106 +436,59 @@ func fittedRect(bounds image.Rectangle, imgSize image.Point) image.Rectangle {
 	return image.Rect(x, y, x+w, y+h)
 }
 
-func drawFittedImage(canvas widget.Canvas, src image.Image, fitted image.Rectangle, imgSize image.Point, crop image.Rectangle) {
-	if src == nil || fitted.Empty() {
+func drawViewedImage(dst, src *ebiten.Image, bounds image.Rectangle, imgSize image.Point, view *previewView) {
+	if src == nil || imgSize.X <= 0 || imgSize.Y <= 0 {
 		return
 	}
-	size := src.Bounds().Size()
-	if size.X != fitted.Dx() || size.Y != fitted.Dy() {
-		src = imageproc.Resize(src, fitted.Dx(), fitted.Dy())
-	}
-	rgba := toDisplayRGBA(src)
-	if imgSize.X > 0 && imgSize.Y > 0 && !crop.Empty() {
-		rgba = cloneRGBA(rgba)
-		applyCropHighlight(rgba, imgSize, crop)
-	}
-	canvas.DrawImage(rgba, geometry.Pt(float32(fitted.Min.X), float32(fitted.Min.Y)))
-}
-
-// toDisplayRGBA copies src into an origin-aligned RGBA buffer. GPU DrawImage
-// treats Pix as tightly packed RGBA starting at (0,0); NRGBA and non-zero Min
-// would otherwise upload garbage or nothing.
-func toDisplayRGBA(src image.Image) *image.RGBA {
-	if src == nil {
-		return nil
-	}
-	if rgba, ok := src.(*image.RGBA); ok && rgba.Rect.Min == (image.Point{}) && rgba.Stride == rgba.Rect.Dx()*4 {
-		return rgba
-	}
-	b := src.Bounds()
-	dst := image.NewRGBA(image.Rect(0, 0, b.Dx(), b.Dy()))
-	draw.Draw(dst, dst.Bounds(), src, b.Min, draw.Src)
-	return dst
-}
-
-func cloneRGBA(src *image.RGBA) *image.RGBA {
-	if src == nil {
-		return nil
-	}
-	dst := image.NewRGBA(src.Rect)
-	copy(dst.Pix, src.Pix)
-	return dst
-}
-
-const cropDimMul = 112 // 112/256 ≈ remaining luminance under 0x90 black overlay
-
-var cropBorder = color.RGBA{R: 0x2f, G: 0x81, B: 0xff, A: 0xff}
-
-// applyCropHighlight darkens pixels outside crop and draws a 2px accent border.
-// Overlay is baked into the bitmap because GPU DrawImage is composited over
-// later DrawRect/StrokeRect, so a separate highlight pass is invisible.
-func applyCropHighlight(dst *image.RGBA, imgSize image.Point, crop image.Rectangle) {
-	if dst == nil || imgSize.X <= 0 || imgSize.Y <= 0 {
+	full := view.imageRect(bounds, imgSize)
+	if full.Empty() {
 		return
 	}
-	b := dst.Rect
-	screen := imageRectToScreen(crop, imgSize, b)
-	if screen.Empty() {
-		dimRGBA(dst, b)
+	visible := full.Intersect(bounds)
+	if visible.Empty() {
 		return
 	}
-	dimRGBA(dst, image.Rect(b.Min.X, b.Min.Y, screen.Min.X, b.Max.Y))
-	dimRGBA(dst, image.Rect(screen.Max.X, b.Min.Y, b.Max.X, b.Max.Y))
-	dimRGBA(dst, image.Rect(screen.Min.X, b.Min.Y, screen.Max.X, screen.Min.Y))
-	dimRGBA(dst, image.Rect(screen.Min.X, screen.Max.Y, screen.Max.X, b.Max.Y))
-	const t = 2
-	fillRGBA(dst, image.Rect(screen.Min.X, screen.Min.Y, screen.Max.X, screen.Min.Y+t), cropBorder)
-	fillRGBA(dst, image.Rect(screen.Min.X, screen.Max.Y-t, screen.Max.X, screen.Max.Y), cropBorder)
-	fillRGBA(dst, image.Rect(screen.Min.X, screen.Min.Y, screen.Min.X+t, screen.Max.Y), cropBorder)
-	fillRGBA(dst, image.Rect(screen.Max.X-t, screen.Min.Y, screen.Max.X, screen.Max.Y), cropBorder)
+	srcImg := visibleSourceRect(full, visible, imgSize)
+	if srcImg.Empty() {
+		return
+	}
+	raster := mapImageRect(src.Bounds(), imgSize, srcImg)
+	if raster.Empty() {
+		return
+	}
+	sub, ok := src.SubImage(raster).(*ebiten.Image)
+	if !ok {
+		return
+	}
+	subSize := sub.Bounds().Size()
+	if subSize.X <= 0 || subSize.Y <= 0 {
+		return
+	}
+	op := &ebiten.DrawImageOptions{}
+	op.Filter = ebiten.FilterLinear
+	op.GeoM.Translate(-float64(sub.Bounds().Min.X), -float64(sub.Bounds().Min.Y))
+	op.GeoM.Scale(float64(visible.Dx())/float64(subSize.X), float64(visible.Dy())/float64(subSize.Y))
+	op.GeoM.Translate(float64(visible.Min.X), float64(visible.Min.Y))
+	dst.DrawImage(sub, op)
 }
 
-func dimRGBA(dst *image.RGBA, r image.Rectangle) {
-	r = r.Intersect(dst.Rect)
-	if r.Empty() {
+func drawZoomBadge(dst *ebiten.Image, bounds image.Rectangle, scale float64) {
+	if bounds.Empty() || math.Abs(scale-1) < 0.001 {
 		return
 	}
-	for y := r.Min.Y; y < r.Max.Y; y++ {
-		i := dst.PixOffset(r.Min.X, y)
-		for x := r.Min.X; x < r.Max.X; x++ {
-			dst.Pix[i+0] = uint8(uint32(dst.Pix[i+0]) * cropDimMul / 256)
-			dst.Pix[i+1] = uint8(uint32(dst.Pix[i+1]) * cropDimMul / 256)
-			dst.Pix[i+2] = uint8(uint32(dst.Pix[i+2]) * cropDimMul / 256)
-			i += 4
-		}
+	label := fmt.Sprintf("%d%%", int(math.Round(scale*100)))
+	x := bounds.Max.X - 8 - 8*len(label)
+	y := bounds.Max.Y - 20
+	if x < bounds.Min.X+4 {
+		x = bounds.Min.X + 4
 	}
-}
-
-func fillRGBA(dst *image.RGBA, r image.Rectangle, c color.RGBA) {
-	r = r.Intersect(dst.Rect)
-	if r.Empty() {
-		return
+	if y < bounds.Min.Y+4 {
+		y = bounds.Min.Y + 4
 	}
-	for y := r.Min.Y; y < r.Max.Y; y++ {
-		i := dst.PixOffset(r.Min.X, y)
-		for x := r.Min.X; x < r.Max.X; x++ {
-			dst.Pix[i+0] = c.R
-			dst.Pix[i+1] = c.G
-			dst.Pix[i+2] = c.B
-			dst.Pix[i+3] = c.A
-			i += 4
-		}
-	}
+	w := 8*len(label) + 10
+	h := 16
+	vector.FillRect(dst, float32(x-4), float32(y-2), float32(w), float32(h), color.NRGBA{A: 150}, false)
+	ebitenutil.DebugPrintAt(dst, label, x, y)
 }
 
 func imageRectToScreen(rect image.Rectangle, imgSize image.Point, fitted image.Rectangle) image.Rectangle {
@@ -703,24 +534,19 @@ func normalizeCrop(rect image.Rectangle, imgSize image.Point) image.Rectangle {
 	return r.Intersect(image.Rect(0, 0, imgSize.X, imgSize.Y))
 }
 
-func drawCheckerboard(canvas widget.Canvas, b geometry.Rect) {
+func drawCheckerboard(dst *ebiten.Image, b image.Rectangle) {
 	const cell = 8
-	c0 := widget.RGBA8(0x3a, 0x3a, 0x3a, 0xff)
-	c1 := widget.RGBA8(0x2a, 0x2a, 0x2a, 0xff)
-	canvas.DrawRect(b, c0)
-	ib := toImageRect(b)
-	for y := ib.Min.Y; y < ib.Max.Y; y += cell {
-		for x := ib.Min.X; x < ib.Max.X; x += cell {
-			if ((x-ib.Min.X)/cell+(y-ib.Min.Y)/cell)%2 == 0 {
+	c0 := color.NRGBA{R: 0x3a, G: 0x3a, B: 0x3a, A: 0xff}
+	c1 := color.NRGBA{R: 0x2a, G: 0x2a, B: 0x2a, A: 0xff}
+	vector.FillRect(dst, float32(b.Min.X), float32(b.Min.Y), float32(b.Dx()), float32(b.Dy()), c0, false)
+	for y := b.Min.Y; y < b.Max.Y; y += cell {
+		for x := b.Min.X; x < b.Max.X; x += cell {
+			if ((x-b.Min.X)/cell+(y-b.Min.Y)/cell)%2 == 0 {
 				continue
 			}
-			w := min(cell, ib.Max.X-x)
-			h := min(cell, ib.Max.Y-y)
-			canvas.DrawRect(geometry.NewRect(float32(x), float32(y), float32(w), float32(h)), c1)
+			w := min(cell, b.Max.X-x)
+			h := min(cell, b.Max.Y-y)
+			vector.FillRect(dst, float32(x), float32(y), float32(w), float32(h), c1, false)
 		}
 	}
-}
-
-func toImageRect(r geometry.Rect) image.Rectangle {
-	return image.Rect(int(r.Min.X), int(r.Min.Y), int(r.Max.X), int(r.Max.Y))
 }

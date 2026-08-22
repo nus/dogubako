@@ -1,6 +1,6 @@
 # 道具箱 (dogubako)
 
-日常作業向けのデスクトップツール群です。GUI はクロスコンパイルしやすい [gogpu/ui](https://github.com/gogpu/ui) を使っています。
+日常作業向けのデスクトップツール群です。GUI はクロスコンパイルしやすい [Guigui](https://github.com/guigui-gui/guigui) を使っています。
 
 対応: **macOS** / **Ubuntu**。Windows は未対応です。
 
@@ -74,31 +74,19 @@ ADB サーバーは Android Studio や SDK Platform-Tools などが起動して�
 
 ### Ubuntu で実行する場合
 
-デスクトップ環境（GNOME など）と、X11 または Wayland が必要です。描画は Vulkan（なければソフトウェアフォールバック）を使います。実行時に次のパッケージを入れてください。
+デスクトップ環境（GNOME など）と X11、または XWayland が必要です。実行時に次のパッケージを入れてください。
 
 ```sh
-sudo apt install libvulkan1 fonts-noto-cjk zenity
+sudo apt install libgl1 libx11-6 libxcursor1 libxi6 libxinerama1 libxrandr2 libxxf86vm1 zenity
 ```
 
-Vulkan が使えないときは次でソフトウェア描画に切り替えられます。
-
-```sh
-export GOGPU_GRAPHICS_API=software
-```
-
-ファイルダイアログは `zenity`（なければ `kdialog`）を使います。macOS ではシステムのファイルパネル（osascript）を使います。
+ファイルダイアログは macOS ではシステムのファイルパネル（osascript）、Ubuntu では `zenity`（なければ `kdialog`）を使います。
 
 ```sh
 sudo apt install zenity
 ```
 
-クリップボードの PNG は `xclip`（X11）または `wl-clipboard`（Wayland）を使います。
-
-```sh
-sudo apt install xclip
-# または Wayland の場合:
-sudo apt install wl-clipboard
-```
+クリップボードの画像は X11 経由です。Wayland セッションでは XWayland 上で動かしてください。
 
 ## ビルド
 
@@ -141,7 +129,7 @@ MACOS_SIGN_IDENTITY="Developer ID Application: …" make package-macos
 
 `make package-macos` は Linux からも実行できます。その場合の `.dmg` は ISO 9660 / Joliet / Rock Ridge で、macOS の DiskImageMounter が開けます。GitHub Release の DMG は macOS runner 上の `hdiutil` で作る UDZO（HFS+）イメージで、開くと Applications へドラッグできる構成です。
 
-Ubuntu では AppImage に実行ビットを付けて起動します。Vulkan / フォント / zenity はホストのデスクトップ環境のものを使います（上記の実行時パッケージ）。
+Ubuntu では AppImage に実行ビットを付けて起動します。OpenGL / X11 はホストのデスクトップ環境のものを使います（上記の実行時パッケージ）。
 
 ```sh
 chmod +x dist/Dogubako-0.1.0-linux-amd64.AppImage
@@ -175,18 +163,17 @@ make test
 
 ## フォント
 
-日本語表示用の Noto Sans CJK は Linux ではシステムフォント（`fonts-noto-cjk`）から開きます。macOS では `/System/Library/Fonts/ヒラギノ角ゴシック W3.ttc`（無ければ W4 以降）を開きます。フォルダ／ファイル／開閉マークは絵文字フォントを使わず、ベクトルで描きます。
+日本語表示用の Noto Sans CJK は **Linux ビルドだけ** 埋め込みます。macOS では `/System/Library/Fonts/ヒラギノ角ゴシック W3.ttc`（無ければ W4 以降）を開き、Guigui のフォールバックに登録します。フォルダ／ファイルの絵文字アイコンは、macOS では Apple Color Emoji、Linux では Noto Color Emoji（入っていれば）を使います。
 
 ## ディレクトリ
 
 - `cmd/dogubako` — エントリポイント
-- `internal/cjkembed` — Linux は Noto Sans CJK、macOS はヒラギノ角ゴシックをシステムフォントから開く
+- `internal/cjkembed` — Linux は Noto Sans CJK を埋め込み、macOS はヒラギノ角ゴシックを `/System/Library/Fonts` から開く
 - `internal/app` — シェル（サイドメニューとメインパネル）、画像ツール、画面キャプチャ、Android ファイル
 - `internal/adbfs` — ADB プロトコルによるデバイス一覧・ファイル同期（pure Go）
 - `internal/appicon` — アプリ／パッケージ用アイコン
 - `internal/imageproc` — リサイズ・切り取り・エンコード
 - `internal/capture` — OS の画面キャプチャコマンド呼び出し
-- `internal/clipimg` — クリップボードの PNG 読み書き（xclip / wl-clipboard / osascript）
 - `internal/userdir` — ピクチャ / スクリーンショットフォルダの解決
 - `internal/dialog` — ファイルダイアログ（macOS は osascript、Linux は zenity / kdialog）
 - `packaging` — Ubuntu 向け `.desktop` / AppImage、macOS 向け `.app` / `.dmg`

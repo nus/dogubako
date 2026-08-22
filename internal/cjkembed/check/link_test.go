@@ -22,6 +22,15 @@ func TestDarwinCompilesHiraginoLoader(t *testing.T) {
 	if !containsFile(linux, "embed_linux.go") {
 		t.Fatalf("linux files = %q, want embed_linux.go", linux)
 	}
+	if !containsFile(darwin, "emoji_darwin.go") {
+		t.Fatalf("darwin files = %q, want emoji_darwin.go", darwin)
+	}
+	if containsFile(linux, "emoji_darwin.go") {
+		t.Fatalf("linux files unexpectedly include emoji_darwin.go: %q", linux)
+	}
+	if !containsFile(linux, "emoji_linux.go") {
+		t.Fatalf("linux files = %q, want emoji_linux.go", linux)
+	}
 }
 
 func listGoFiles(t *testing.T, root, goos, pkg string) []string {
@@ -45,25 +54,41 @@ func containsFile(files []string, name string) bool {
 	return false
 }
 
-func TestDogubakoDoesNotLinkGuigui(t *testing.T) {
+func TestDogubakoLinksCJKOnlyOnLinux(t *testing.T) {
 	root := moduleRoot(t)
-	for _, goos := range []string{"linux", "darwin", "windows"} {
-		t.Run(goos, func(t *testing.T) {
-			cmd := exec.Command("go", "list", "-deps", "-f", "{{.ImportPath}}", "./cmd/dogubako")
-			cmd.Dir = root
-			cmd.Env = append(os.Environ(), "GOOS="+goos, "CGO_ENABLED=0")
-			out, err := cmd.CombinedOutput()
-			if err != nil {
-				t.Fatalf("go list GOOS=%s: %v\n%s", goos, err, out)
-			}
-			for _, line := range strings.Split(string(out), "\n") {
-				line = strings.TrimSpace(line)
-				if line == "github.com/guigui-gui/guigui" || strings.HasPrefix(line, "github.com/guigui-gui/guigui/") {
-					t.Fatalf("guigui still linked on %s: %s", goos, line)
-				}
+	for _, tc := range []struct {
+		goos string
+		want bool
+	}{
+		{"linux", true},
+		{"darwin", false},
+		{"windows", false},
+	} {
+		t.Run(tc.goos, func(t *testing.T) {
+			linked := listsCJKFont(t, root, tc.goos)
+			if linked != tc.want {
+				t.Fatalf("cjkfont linked=%v, want %v", linked, tc.want)
 			}
 		})
 	}
+}
+
+func listsCJKFont(t *testing.T, root, goos string) bool {
+	t.Helper()
+	cmd := exec.Command("go", "list", "-deps", "-f", "{{.ImportPath}}", "./cmd/dogubako")
+	cmd.Dir = root
+	cmd.Env = append(os.Environ(), "GOOS="+goos, "CGO_ENABLED=0")
+	out, err := cmd.CombinedOutput()
+	if err != nil {
+		t.Fatalf("go list GOOS=%s: %v\n%s", goos, err, out)
+	}
+	const pkg = "github.com/guigui-gui/guigui/basicwidget/cjkfont"
+	for _, line := range strings.Split(string(out), "\n") {
+		if strings.TrimSpace(line) == pkg {
+			return true
+		}
+	}
+	return false
 }
 
 func moduleRoot(t *testing.T) string {

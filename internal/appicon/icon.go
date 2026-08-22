@@ -9,15 +9,7 @@ import (
 	"image/draw"
 	"image/png"
 	"sync"
-
-	xdraw "golang.org/x/image/draw"
 )
-
-// windowIconSize is small enough for gogpu's X11 _NET_WM_ICON property.
-// ChangeProperty encodes the request length as uint16; a 1024×1024 CARDINAL
-// buffer overflows that field and desynchronizes the X11 connection so the
-// window never maps.
-const windowIconSize = 128
 
 //go:embed icon.png
 var pngBytes []byte
@@ -44,20 +36,6 @@ func RGBA() (*image.RGBA, error) {
 		master = toRGBA(img)
 	})
 	return master, loadErr
-}
-
-// WindowRGBA returns a downscaled copy for the native window icon.
-func WindowRGBA() (*image.RGBA, error) {
-	src, err := RGBA()
-	if err != nil {
-		return nil, err
-	}
-	if src.Bounds().Dx() == windowIconSize && src.Bounds().Dy() == windowIconSize {
-		return src, nil
-	}
-	dst := image.NewRGBA(image.Rect(0, 0, windowIconSize, windowIconSize))
-	xdraw.CatmullRom.Scale(dst, dst.Bounds(), src, src.Bounds(), xdraw.Src, nil)
-	return dst, nil
 }
 
 func toRGBA(src image.Image) *image.RGBA {

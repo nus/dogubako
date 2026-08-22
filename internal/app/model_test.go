@@ -179,18 +179,6 @@ func TestModelSetLang(t *testing.T) {
 	}
 }
 
-func TestSessionLangFallsBackToEnglish(t *testing.T) {
-	if got := sessionLang(false, i18n.JA); got != i18n.EN {
-		t.Fatalf("no cjk + ja = %q", got)
-	}
-	if got := sessionLang(true, i18n.JA); got != i18n.JA {
-		t.Fatalf("cjk + ja = %q", got)
-	}
-	if got := sessionLang(true, i18n.EN); got != i18n.EN {
-		t.Fatalf("cjk + en = %q", got)
-	}
-}
-
 func TestApplyLangDoesNotPersist(t *testing.T) {
 	dir := t.TempDir()
 	restore := i18n.OverrideUserConfigDir(func() (string, error) { return dir, nil })

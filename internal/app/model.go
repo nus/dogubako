@@ -79,16 +79,6 @@ func (m *Model) applyLang(lang i18n.Lang, persist bool) {
 	}
 }
 
-// sessionLang picks the UI language for this process.
-// Without a CJK face, Japanese strings would be drawn with Inter, so
-// the session stays English. The saved preference is not overwritten.
-func sessionLang(cjkOK bool, saved i18n.Lang) i18n.Lang {
-	if !cjkOK {
-		return i18n.EN
-	}
-	return i18n.Normalize(saved)
-}
-
 func (m *Model) Mode() ToolID {
 	if m.mode == "" {
 		return ToolImage

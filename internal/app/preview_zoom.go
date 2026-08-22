@@ -1,16 +1,8 @@
 package app
 
 import (
-	"fmt"
 	"image"
 	"math"
-
-	"github.com/gogpu/ui/event"
-	"github.com/gogpu/ui/geometry"
-	"github.com/gogpu/ui/widget"
-
-	"github.com/nus/dogubako/internal/cjkembed"
-	"github.com/nus/dogubako/internal/imageproc"
 )
 
 const (
@@ -190,7 +182,7 @@ func zoomPreviewAt(bounds image.Rectangle, imgSize image.Point, scale, panX, pan
 	return newScale, newPanX, newPanY
 }
 
-func previewZoomFactor(deltaY float32) float64 {
+func previewZoomFactor(deltaY float64) float64 {
 	if deltaY == 0 {
 		return 1
 	}
@@ -228,99 +220,7 @@ func mapImageRect(raster image.Rectangle, imgSize image.Point, srcImg image.Rect
 	return image.Rect(x0, y0, x1, y1).Intersect(raster)
 }
 
-func drawViewedImage(canvas widget.Canvas, src image.Image, bounds geometry.Rect, imgSize image.Point, crop image.Rectangle, view *previewView) {
-	if src == nil {
-		return
-	}
-	ib := toImageRect(bounds)
-	full := view.imageRect(ib, imgSize)
-	if full.Empty() {
-		return
-	}
-	visible := full.Intersect(ib)
-	if visible.Empty() {
-		return
-	}
-	srcImg := visibleSourceRect(full, visible, imgSize)
-	if srcImg.Empty() {
-		return
-	}
-	raster := mapImageRect(src.Bounds(), imgSize, srcImg)
-	sub, err := imageproc.Crop(src, raster)
-	if err != nil {
-		drawFittedImage(canvas, src, visible, srcImg.Size(), image.Rectangle{})
-		return
-	}
-	if sub.Bounds().Dx() != visible.Dx() || sub.Bounds().Dy() != visible.Dy() {
-		sub = imageproc.Resize(sub, visible.Dx(), visible.Dy())
-	}
-	rgba := toDisplayRGBA(sub)
-	if imgSize.X > 0 && imgSize.Y > 0 && !crop.Empty() {
-		rgba = cloneRGBA(rgba)
-		local := crop.Intersect(srcImg)
-		if local.Empty() {
-			dimRGBA(rgba, rgba.Rect)
-		} else {
-			applyCropHighlight(rgba, srcImg.Size(), local.Sub(srcImg.Min))
-		}
-	}
-	canvas.PushClip(bounds)
-	canvas.DrawImage(rgba, geometry.Pt(float32(visible.Min.X), float32(visible.Min.Y)))
-	canvas.PopClip()
-}
-
-func drawZoomBadge(canvas widget.Canvas, bounds geometry.Rect, scale float64) {
-	if bounds.IsEmpty() || math.Abs(scale-1) < 0.001 {
-		return
-	}
-	label := fmt.Sprintf("%d%%", int(math.Round(scale*100)))
-	padX := float32(8)
-	padY := float32(4)
-	fontSize := float32(11)
-	textW := float32(len([]rune(label))) * fontSize * 0.62
-	w := textW + 2*padX
-	h := fontSize + 2*padY
-	r := geometry.NewRect(bounds.Max.X-w-8, bounds.Max.Y-h-8, w, h)
-	canvas.DrawRoundRect(r, widget.RGBA8(0, 0, 0, 150), 6)
-	style := widget.TextStyle{
-		FontFamily: cjkembed.FamilyName,
-		FontSize:   fontSize,
-		Color:      widget.RGBA8(255, 255, 255, 255),
-		Align:      widget.TextAlignCenter,
-	}
-	if sd, ok := canvas.(widget.StyledTextDrawer); ok {
-		sd.DrawStyledText(label, r, style)
-	} else {
-		canvas.DrawText(label, r, fontSize, style.Color, false, widget.TextAlignCenter)
-	}
-}
-
 func previewCanPan(bounds image.Rectangle, imgSize image.Point, view *previewView) bool {
 	r := view.imageRect(bounds, imgSize)
 	return r.Dx() > bounds.Dx() || r.Dy() > bounds.Dy()
-}
-
-func handlePreviewWheel(view *previewView, bounds geometry.Rect, imgSize image.Point, we *event.WheelEvent) bool {
-	if view == nil || imgSize.X <= 0 || imgSize.Y <= 0 {
-		return false
-	}
-	factor := previewZoomFactor(we.Delta.Y)
-	if factor == 1 {
-		return false
-	}
-	ib := toImageRect(bounds)
-	if ib.Empty() {
-		return false
-	}
-	cursor := image.Pt(int(math.Round(float64(we.Position.X))), int(math.Round(float64(we.Position.Y))))
-	if !cursor.In(ib) {
-		shifted := cursor.Add(ib.Min)
-		if shifted.In(ib) {
-			cursor = shifted
-		} else {
-			cursor = previewCenter(ib)
-		}
-	}
-	view.zoomAt(ib, imgSize, cursor, factor)
-	return true
 }

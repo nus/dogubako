@@ -3,6 +3,13 @@ package app
 import "image"
 
 const (
+	androidFolderIcon = "\U0001F5C2" // 🗂 without VS16 (U+FE0F), which otherwise renders as tofu
+	androidFileIcon   = "\U0001F4C4" // 📄
+	// Regular geometric triangles (same block as the sort marks ▲/▼).
+	// The small variants ▸/▾ (U+25B8/U+25BE) are missing from Inter and Hiragino.
+	androidExpandClosed = "▶"
+	androidExpandOpen   = "▼"
+
 	androidColDragSize = 1
 	androidColDragMod  = 2
 )
