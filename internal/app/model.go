@@ -17,9 +17,10 @@ import (
 type ToolID string
 
 const (
-	ToolImage      ToolID = "image"
-	ToolScreenshot ToolID = "screenshot"
-	ToolAndroid    ToolID = "android"
+	ToolImage       ToolID = "image"
+	ToolScreenshot  ToolID = "screenshot"
+	ToolAndroid     ToolID = "android"
+	ToolAndroidShot ToolID = "android-shot"
 )
 
 // Tool is a sidebar entry.
@@ -32,6 +33,7 @@ var Tools = []Tool{
 	{ID: ToolImage},
 	{ID: ToolScreenshot},
 	{ID: ToolAndroid},
+	{ID: ToolAndroidShot},
 }
 
 // Title returns the localized sidebar label for this tool.
@@ -43,6 +45,8 @@ func (t Tool) Title(lang i18n.Lang) string {
 		return i18n.T(lang, i18n.ToolScreenshot)
 	case ToolAndroid:
 		return i18n.T(lang, i18n.ToolAndroid)
+	case ToolAndroidShot:
+		return i18n.T(lang, i18n.ToolAndroidShot)
 	default:
 		return string(t.ID)
 	}
@@ -50,11 +54,12 @@ func (t Tool) Title(lang i18n.Lang) string {
 
 // Model is the application-wide state provided to widgets via Env.
 type Model struct {
-	lang       i18n.Lang
-	mode       ToolID
-	image      ImageModel
-	screenshot ScreenshotModel
-	android    AndroidModel
+	lang        i18n.Lang
+	mode        ToolID
+	image       ImageModel
+	screenshot  ScreenshotModel
+	android     AndroidModel
+	androidShot AndroidShotModel
 }
 
 func (m *Model) Lang() i18n.Lang {
@@ -100,6 +105,10 @@ func (m *Model) Screenshot() *ScreenshotModel {
 
 func (m *Model) Android() *AndroidModel {
 	return &m.android
+}
+
+func (m *Model) AndroidShot() *AndroidShotModel {
+	return &m.androidShot
 }
 
 // ImageModel holds the first tool: resize, crop, rotate, and JPEG/PNG conversion.

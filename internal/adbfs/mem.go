@@ -12,11 +12,13 @@ import (
 
 // Mem is an in-memory Client for tests.
 type Mem struct {
-	mu     sync.Mutex
-	Devs   []Device
-	DevErr error
-	nodes  map[string]*memNode
-	Fail   map[string]error // path -> error for Stat/List/Pull/Push/Mkdir
+	mu      sync.Mutex
+	Devs    []Device
+	DevErr  error
+	nodes   map[string]*memNode
+	Fail    map[string]error // path -> error for Stat/List/Pull/Push/Mkdir
+	Shot    map[string][]byte
+	ShotErr error
 }
 
 type memNode struct {
@@ -257,6 +259,23 @@ func (m *Mem) PutFile(path string, data []byte, mod, crt time.Time) {
 		data:  append([]byte(nil), data...),
 		perm:  0o644,
 	}
+}
+
+func (m *Mem) Screencap(ctx context.Context, serial string) ([]byte, error) {
+	if err := ctx.Err(); err != nil {
+		return nil, err
+	}
+	m.mu.Lock()
+	defer m.mu.Unlock()
+	if m.ShotErr != nil {
+		return nil, m.ShotErr
+	}
+	if m.Shot != nil {
+		if data, ok := m.Shot[serial]; ok {
+			return append([]byte(nil), data...), nil
+		}
+	}
+	return nil, fmt.Errorf("no screenshot")
 }
 
 // FileData returns the stored bytes for path.

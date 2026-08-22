@@ -182,6 +182,13 @@ func TestToolTitle(t *testing.T) {
 	if got := android.Title(i18n.EN); got != "Android Files" {
 		t.Fatalf("en android = %q", got)
 	}
+	androidShot := Tool{ID: ToolAndroidShot}
+	if got := androidShot.Title(i18n.JA); got != "Android 画面" {
+		t.Fatalf("ja android shot = %q", got)
+	}
+	if got := androidShot.Title(i18n.EN); got != "Android Screen" {
+		t.Fatalf("en android shot = %q", got)
+	}
 }
 
 func TestModelSetLang(t *testing.T) {

@@ -132,6 +132,25 @@ func TestDarwinPictures(t *testing.T) {
 	}
 }
 
+func TestEnsureAndroidScreenshotsCreates(t *testing.T) {
+	home := t.TempDir()
+	restore := Override("darwin", home, nil)
+	t.Cleanup(restore)
+
+	dir, err := EnsureAndroidScreenshots()
+	if err != nil {
+		t.Fatal(err)
+	}
+	want := filepath.Join(home, "Pictures", "Screenshots", "Android")
+	if dir != want {
+		t.Fatalf("dir = %q, want %q", dir, want)
+	}
+	fi, err := os.Stat(dir)
+	if err != nil || !fi.IsDir() {
+		t.Fatalf("stat = %v err=%v", dir, err)
+	}
+}
+
 func TestEnsureScreenshotsCreates(t *testing.T) {
 	home := t.TempDir()
 	restore := Override("darwin", home, nil)
