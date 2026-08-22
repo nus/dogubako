@@ -3,6 +3,7 @@ package app
 import (
 	"fmt"
 	"image"
+	"io"
 	"os"
 	"path/filepath"
 	"slices"
@@ -16,16 +17,19 @@ import (
 )
 
 const (
-	maxCaptureDelaySec = 10
-	thumbMaxEdge       = 128
+	maxCaptureDelaySec     = 10
+	thumbMaxEdge           = 128
+	screenshotPollInterval = time.Second
 )
 
 // ScreenshotModel holds the screen-capture tool state.
 type ScreenshotModel struct {
 	generation uint64
 
-	image   image.Image
-	preview image.Image
+	image      image.Image
+	preview    image.Image
+	imageSize  image.Point
+	sourcePath string
 
 	mode      capture.Mode
 	delaySec  int
@@ -42,6 +46,8 @@ type ScreenshotModel struct {
 	files          []ScreenshotFile
 	thumbs         map[string]thumbEntry
 	jumpToSelected bool
+	listed         bool
+	lastList       time.Time
 
 	status statusMsg
 }
@@ -80,19 +86,47 @@ func (m *ScreenshotModel) SetStatus(key i18n.Key, args ...any) {
 	m.generation++
 }
 
-func (m *ScreenshotModel) HasImage() bool     { return m.image != nil }
-func (m *ScreenshotModel) Image() image.Image { return m.image }
+func (m *ScreenshotModel) HasImage() bool {
+	return m.image != nil || m.preview != nil || (m.imageSize.X > 0 && m.imageSize.Y > 0)
+}
+
+func (m *ScreenshotModel) Image() image.Image {
+	if m.image != nil {
+		return m.image
+	}
+	if m.sourcePath == "" {
+		return nil
+	}
+	img, err := decodeImageFile(m.sourcePath)
+	if err != nil {
+		return nil
+	}
+	return img
+}
 
 func (m *ScreenshotModel) Size() image.Point {
-	if m.image == nil {
-		return image.Point{}
+	if m.imageSize.X > 0 && m.imageSize.Y > 0 {
+		return m.imageSize
 	}
-	return m.image.Bounds().Size()
+	if m.image != nil {
+		return m.image.Bounds().Size()
+	}
+	return image.Point{}
 }
 
 func (m *ScreenshotModel) Preview() image.Image {
-	if m.preview == nil && m.image != nil {
+	if m.preview != nil {
+		return m.preview
+	}
+	if m.image != nil {
 		m.preview = previewImage(m.image)
+		return m.preview
+	}
+	if m.sourcePath != "" {
+		if img, err := decodeImageFile(m.sourcePath); err == nil {
+			m.imageSize = img.Bounds().Size()
+			m.preview = previewImage(img)
+		}
 	}
 	return m.preview
 }
@@ -100,10 +134,41 @@ func (m *ScreenshotModel) Preview() image.Image {
 func (m *ScreenshotModel) SetImage(img image.Image) {
 	m.image = img
 	m.preview = nil
-	m.generation++
+	m.sourcePath = ""
 	if img != nil {
+		m.imageSize = img.Bounds().Size()
 		m.SetStatus(i18n.StatusCaptured, img.Bounds().Dx(), img.Bounds().Dy())
+		return
 	}
+	m.imageSize = image.Point{}
+	m.generation++
+}
+
+func (m *ScreenshotModel) releaseRaster() {
+	m.image = nil
+}
+
+func (m *ScreenshotModel) adoptFile(path string, captured bool) error {
+	img, err := decodeImageFile(path)
+	if err != nil {
+		m.SetStatus(i18n.StatusLoadFailed, err)
+		return err
+	}
+	m.sourcePath = path
+	m.selected = path
+	m.lastSaved = path
+	m.imageSize = img.Bounds().Size()
+	m.preview = previewImage(img)
+	m.rememberThumb(path, img)
+	m.releaseRaster()
+	if captured {
+		m.jumpToSelected = true
+		m.SetStatus(i18n.StatusSaved, path)
+	} else {
+		m.SetStatus(i18n.StatusLoaded, filepath.Base(path), m.imageSize.X, m.imageSize.Y)
+	}
+	m.RefreshFiles()
+	return nil
 }
 
 // ApplyCapture stores img and writes it into the default screenshot folder.
@@ -112,9 +177,31 @@ func (m *ScreenshotModel) ApplyCapture(img image.Image) error {
 		return fmt.Errorf("no image")
 	}
 	m.image = img
-	m.preview = nil
+	m.preview = previewImage(img)
+	m.imageSize = img.Bounds().Size()
+	m.sourcePath = ""
 	m.generation++
 	return m.SaveDefault()
+}
+
+// ApplyCaptureFile moves a helper-written PNG into the screenshot folder
+// and keeps only a preview in memory.
+func (m *ScreenshotModel) ApplyCaptureFile(path string) error {
+	if path == "" {
+		return fmt.Errorf("no image")
+	}
+	dest, err := userdir.SuggestedPath(time.Now())
+	if err != nil {
+		m.SetStatus(i18n.StatusDestFailed, err)
+		_ = os.Remove(path)
+		return err
+	}
+	if err := moveFile(path, dest); err != nil {
+		m.SetStatus(i18n.StatusSaveFailed, err)
+		_ = os.Remove(path)
+		return err
+	}
+	return m.adoptFile(dest, true)
 }
 
 func (m *ScreenshotModel) Files() []ScreenshotFile {
@@ -145,8 +232,26 @@ func (m *ScreenshotModel) TakeJumpToSelected() bool {
 }
 
 func (m *ScreenshotModel) RefreshFiles() {
+	m.refreshFiles(true)
+}
+
+// PollFiles refreshes the folder at most once per second and decodes at most
+// one thumbnail so a folder of large PNGs cannot spike RSS by gigabytes.
+func (m *ScreenshotModel) PollFiles() {
+	m.refreshFiles(false)
+}
+
+func (m *ScreenshotModel) refreshFiles(force bool) {
+	if !force && m.listed && time.Since(m.lastList) < screenshotPollInterval {
+		if m.ensureOneThumb() {
+			m.generation++
+		}
+		return
+	}
 	dir := m.DestDir()
 	if dir == "" {
+		m.listed = true
+		m.lastList = time.Now()
 		if len(m.files) == 0 {
 			return
 		}
@@ -159,13 +264,19 @@ func (m *ScreenshotModel) RefreshFiles() {
 	if err != nil {
 		next = nil
 	}
-	if screenshotFilesEqual(m.files, next) {
-		m.ensureThumbs()
-		return
+	m.listed = true
+	m.lastList = time.Now()
+	changed := !screenshotFilesEqual(m.files, next)
+	if changed {
+		m.files = next
+		m.dropStaleThumbs()
 	}
-	m.files = next
-	m.ensureThumbs()
-	m.generation++
+	if m.ensureOneThumb() {
+		changed = true
+	}
+	if changed {
+		m.generation++
+	}
 }
 
 func (m *ScreenshotModel) Thumbnail(path string) image.Image {
@@ -179,23 +290,33 @@ func (m *ScreenshotModel) Thumbnail(path string) image.Image {
 	return e.img
 }
 
-func (m *ScreenshotModel) ensureThumbs() {
+func (m *ScreenshotModel) dropStaleThumbs() {
 	if m.thumbs == nil {
-		m.thumbs = make(map[string]thumbEntry)
+		return
 	}
 	live := make(map[string]struct{}, len(m.files))
 	for _, f := range m.files {
 		live[f.Path] = struct{}{}
-		if e, ok := m.thumbs[f.Path]; ok && e.img != nil && e.mod.Equal(f.ModTime) {
-			continue
-		}
-		m.thumbs[f.Path] = thumbEntry{mod: f.ModTime, img: loadThumb(f.Path)}
 	}
 	for p := range m.thumbs {
 		if _, ok := live[p]; !ok {
 			delete(m.thumbs, p)
 		}
 	}
+}
+
+func (m *ScreenshotModel) ensureOneThumb() bool {
+	if m.thumbs == nil {
+		m.thumbs = make(map[string]thumbEntry)
+	}
+	for _, f := range m.files {
+		if e, ok := m.thumbs[f.Path]; ok && e.img != nil && e.mod.Equal(f.ModTime) {
+			continue
+		}
+		m.thumbs[f.Path] = thumbEntry{mod: f.ModTime, img: loadThumb(f.Path)}
+		return true
+	}
+	return false
 }
 
 func (m *ScreenshotModel) rememberThumb(path string, img image.Image) {
@@ -216,26 +337,10 @@ func (m *ScreenshotModel) LoadPath(path string) error {
 	if path == "" {
 		return fmt.Errorf("no path")
 	}
-	if m.selected == path && m.image != nil {
+	if m.selected == path && m.HasImage() && m.preview != nil {
 		return nil
 	}
-	f, err := os.Open(path)
-	if err != nil {
-		m.SetStatus(i18n.StatusLoadFailed, err)
-		return err
-	}
-	defer f.Close()
-	img, _, err := imageproc.Decode(f)
-	if err != nil {
-		m.SetStatus(i18n.StatusLoadFailed, err)
-		return err
-	}
-	m.image = img
-	m.preview = nil
-	m.selected = path
-	m.lastSaved = path
-	m.SetStatus(i18n.StatusLoaded, filepath.Base(path), img.Bounds().Dx(), img.Bounds().Dy())
-	return nil
+	return m.adoptFile(path, false)
 }
 
 func (m *ScreenshotModel) Mode() capture.Mode {
@@ -344,29 +449,59 @@ func (m *ScreenshotModel) SaveDefault() error {
 }
 
 func (m *ScreenshotModel) SavePath(path string) error {
-	if m.image == nil {
+	if !m.HasImage() {
 		m.SetStatus(i18n.StatusNoCaptureToSave)
 		return fmt.Errorf("no capture")
 	}
-	data, err := imageproc.EncodePNG(m.image)
-	if err != nil {
-		m.SetStatus(i18n.StatusEncodeFailed, err)
-		return err
+	switch {
+	case m.sourcePath != "" && m.sourcePath != path:
+		if err := copyFile(m.sourcePath, path); err != nil {
+			m.SetStatus(i18n.StatusSaveFailed, err)
+			return err
+		}
+	case m.image != nil:
+		data, err := imageproc.EncodePNG(m.image)
+		if err != nil {
+			m.SetStatus(i18n.StatusEncodeFailed, err)
+			return err
+		}
+		if err := os.WriteFile(path, data, 0o644); err != nil {
+			m.SetStatus(i18n.StatusSaveFailed, err)
+			return err
+		}
+	case m.sourcePath == path:
+		// already on disk
+	default:
+		m.SetStatus(i18n.StatusNoCaptureToSave)
+		return fmt.Errorf("no capture")
 	}
-	if err := os.WriteFile(path, data, 0o644); err != nil {
-		m.SetStatus(i18n.StatusSaveFailed, err)
-		return err
+	if m.preview == nil && m.image != nil {
+		m.preview = previewImage(m.image)
 	}
+	if m.image != nil {
+		m.rememberThumb(path, m.image)
+	}
+	m.releaseRaster()
+	m.sourcePath = path
 	m.lastSaved = path
 	m.selected = path
 	m.jumpToSelected = true
-	m.rememberThumb(path, m.image)
 	m.SetStatus(i18n.StatusSaved, path)
 	m.RefreshFiles()
 	return nil
 }
 
 func (m *ScreenshotModel) ExportPNG() ([]byte, error) {
+	if m.sourcePath != "" {
+		data, err := os.ReadFile(m.sourcePath)
+		if err != nil {
+			m.SetStatus(i18n.StatusEncodeFailed, err)
+			return nil, err
+		}
+		if len(data) > 0 {
+			return data, nil
+		}
+	}
 	if m.image == nil {
 		m.SetStatus(i18n.StatusNoCaptureToCopy)
 		return nil, fmt.Errorf("no capture")
@@ -423,6 +558,56 @@ func screenshotFilesEqual(a, b []ScreenshotFile) bool {
 		}
 	}
 	return true
+}
+
+func decodeImageFile(path string) (image.Image, error) {
+	f, err := os.Open(path)
+	if err != nil {
+		return nil, err
+	}
+	defer f.Close()
+	img, _, err := imageproc.Decode(f)
+	return img, err
+}
+
+func moveFile(src, dst string) error {
+	if src == dst {
+		return nil
+	}
+	if err := os.MkdirAll(filepath.Dir(dst), 0o755); err != nil {
+		return err
+	}
+	if err := os.Rename(src, dst); err == nil {
+		return nil
+	}
+	if err := copyFile(src, dst); err != nil {
+		return err
+	}
+	return os.Remove(src)
+}
+
+func copyFile(src, dst string) error {
+	if src == dst {
+		return nil
+	}
+	in, err := os.Open(src)
+	if err != nil {
+		return err
+	}
+	defer in.Close()
+	if err := os.MkdirAll(filepath.Dir(dst), 0o755); err != nil {
+		return err
+	}
+	out, err := os.Create(dst)
+	if err != nil {
+		return err
+	}
+	_, copyErr := io.Copy(out, in)
+	closeErr := out.Close()
+	if copyErr != nil {
+		return copyErr
+	}
+	return closeErr
 }
 
 func loadThumb(path string) *image.NRGBA {

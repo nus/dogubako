@@ -47,12 +47,13 @@ type Params struct {
 }
 
 // Decode reads an image and reports its source format when known.
+// The pixel type is whatever image.Decode returns (JPEG stays YCbCr).
 func Decode(r io.Reader) (image.Image, Format, error) {
 	img, format, err := image.Decode(r)
 	if err != nil {
 		return nil, "", fmt.Errorf("decode image: %w", err)
 	}
-	return asNRGBA(img), NormalizeFormat(format), nil
+	return img, NormalizeFormat(format), nil
 }
 
 // DecodeBytes decodes an image from an in-memory buffer.
@@ -87,7 +88,10 @@ func Apply(src image.Image, p Params) (image.Image, error) {
 	if src == nil {
 		return nil, fmt.Errorf("no image")
 	}
-	img := asNRGBA(src)
+	if err := validateSize(p.Width, p.Height); err != nil {
+		return nil, err
+	}
+	img := src
 	if p.CropEnabled {
 		cropped, err := Crop(img, p.Crop)
 		if err != nil {
@@ -102,16 +106,75 @@ func Apply(src image.Image, p Params) (image.Image, error) {
 		}
 		img = rotated
 	}
-	if p.Width <= 0 || p.Height <= 0 {
-		return nil, fmt.Errorf("invalid size %d×%d", p.Width, p.Height)
-	}
-	if p.Width > MaxDimension || p.Height > MaxDimension {
-		return nil, fmt.Errorf("size %d×%d exceeds the %dpx limit", p.Width, p.Height, MaxDimension)
-	}
 	if img.Bounds().Dx() == p.Width && img.Bounds().Dy() == p.Height {
 		return img, nil
 	}
 	return Resize(img, p.Width, p.Height), nil
+}
+
+// ValidateParams reports whether Apply would reject p before touching pixels.
+func ValidateParams(p Params) error {
+	return validateSize(p.Width, p.Height)
+}
+
+func validateSize(width, height int) error {
+	if width <= 0 || height <= 0 {
+		return fmt.Errorf("invalid size %d×%d", width, height)
+	}
+	if width > MaxDimension || height > MaxDimension {
+		return fmt.Errorf("size %d×%d exceeds the %dpx limit", width, height, MaxDimension)
+	}
+	return nil
+}
+
+// ApplyPreview is Apply with the output (and any rotate working copy) capped
+// to maxEdge so the UI never allocates a full-resolution result.
+func ApplyPreview(src image.Image, p Params, maxEdge int) (image.Image, error) {
+	if src == nil {
+		return nil, fmt.Errorf("no image")
+	}
+	if err := validateSize(p.Width, p.Height); err != nil {
+		return nil, err
+	}
+	if maxEdge < 1 {
+		maxEdge = 1
+	}
+	s := 1.0
+	if m := max(p.Width, p.Height); m > maxEdge {
+		s = float64(maxEdge) / float64(m)
+	}
+	if NormalizeDegrees(p.RotateDegrees) != 0 {
+		base := src.Bounds().Size()
+		if p.CropEnabled {
+			c := p.Crop.Intersect(src.Bounds())
+			if !c.Empty() {
+				base = c.Size()
+			}
+		}
+		if m := max(base.X, base.Y); m > maxEdge {
+			if s2 := float64(maxEdge) / float64(m); s2 < s {
+				s = s2
+			}
+		}
+	}
+	work := src
+	p2 := p
+	p2.Width = max(1, int(math.Round(float64(p.Width)*s)))
+	p2.Height = max(1, int(math.Round(float64(p.Height)*s)))
+	if s < 1 {
+		b := src.Bounds().Size()
+		work = Resize(src, max(1, int(math.Round(float64(b.X)*s))), max(1, int(math.Round(float64(b.Y)*s))))
+		if p.CropEnabled {
+			c := p.Crop
+			p2.Crop = image.Rect(
+				int(math.Round(float64(c.Min.X)*s)),
+				int(math.Round(float64(c.Min.Y)*s)),
+				int(math.Round(float64(c.Max.X)*s)),
+				int(math.Round(float64(c.Max.Y)*s)),
+			)
+		}
+	}
+	return Apply(work, p2)
 }
 
 // Crop returns the intersection of src and rect as a new image origin at (0,0).

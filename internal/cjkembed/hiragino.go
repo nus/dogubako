@@ -1,26 +1,33 @@
 package cjkembed
 
 import (
+	"bytes"
 	"fmt"
 	"os"
+	"path/filepath"
 	"strings"
 
-	"github.com/gogpu/gg/text"
-	"github.com/gogpu/ui/plugin"
+	"github.com/hajimehoshi/ebiten/v2/text/v2"
 	"golang.org/x/text/unicode/norm"
 )
 
-const maxCollectionFaces = 32
+const hiraginoFontDir = "/System/Library/Fonts"
 
-func logFontErr(kind string, err error) {
-	fmt.Fprintf(os.Stderr, "dogubako: %s: %v\n", kind, err)
-}
-
-func loadFamily(name string, data []byte) error {
-	if len(data) == 0 {
-		return fmt.Errorf("empty font")
+// defaultHiraginoPaths is the usual macOS location of Hiragino Sans, preferred
+// weight first. Each weight is a separate .ttc.
+func defaultHiraginoPaths() []string {
+	names := []string{
+		"ヒラギノ角ゴシック W3.ttc",
+		"ヒラギノ角ゴシック W4.ttc",
+		"ヒラギノ角ゴシック W5.ttc",
+		"ヒラギノ角ゴシック W6.ttc",
+		"ヒラギノ角ゴシック W2.ttc",
 	}
-	return plugin.NewDefaultPluginContext().Assets.LoadFont(name, data)
+	out := make([]string, len(names))
+	for i, name := range names {
+		out[i] = filepath.Join(hiraginoFontDir, name)
+	}
+	return out
 }
 
 func expandPathNorms(paths []string) []string {
@@ -44,26 +51,22 @@ func expandPathNorms(paths []string) []string {
 	return out
 }
 
-func loadFaceSources(path string) ([]*text.FontSource, error) {
+func loadFaceSources(path string) ([]*text.GoTextFaceSource, error) {
 	data, err := os.ReadFile(path)
 	if err != nil {
 		return nil, err
 	}
-	var sources []*text.FontSource
-	for i := 0; i < maxCollectionFaces; i++ {
-		src, err := text.NewFontSource(data, text.WithCollectionIndex(i))
+	r := bytes.NewReader(data)
+	switch strings.ToLower(filepath.Ext(path)) {
+	case ".ttc", ".otc":
+		return text.NewGoTextFaceSourcesFromCollection(r)
+	default:
+		src, err := text.NewGoTextFaceSource(r)
 		if err != nil {
-			if i == 0 {
-				return nil, err
-			}
-			break
+			return nil, err
 		}
-		sources = append(sources, src)
+		return []*text.GoTextFaceSource{src}, nil
 	}
-	if len(sources) == 0 {
-		return nil, fmt.Errorf("no faces in %s", path)
-	}
-	return sources, nil
 }
 
 func skipHiraginoFamily(family string) bool {
@@ -85,13 +88,13 @@ func preferHiraginoFamily(family string) bool {
 	return strings.Contains(fam, "sans") || strings.Contains(fam, "角ゴ")
 }
 
-func pickHiraginoFace(sources []*text.FontSource) *text.FontSource {
-	var fallback *text.FontSource
+func pickHiraginoFace(sources []*text.GoTextFaceSource) *text.GoTextFaceSource {
+	var fallback *text.GoTextFaceSource
 	for _, src := range sources {
 		if src == nil {
 			continue
 		}
-		fam := src.Name()
+		fam := src.Metadata().Family
 		if skipHiraginoFamily(fam) {
 			continue
 		}
@@ -111,7 +114,7 @@ func pickHiraginoFace(sources []*text.FontSource) *text.FontSource {
 	return nil
 }
 
-func openCJKFont(paths []string) (*text.FontSource, string, error) {
+func openHiragino(paths []string) (*text.GoTextFaceSource, string, error) {
 	var firstErr error
 	for _, path := range expandPathNorms(paths) {
 		sources, err := loadFaceSources(path)
@@ -133,17 +136,5 @@ func openCJKFont(paths []string) (*text.FontSource, string, error) {
 	if firstErr != nil {
 		return nil, "", firstErr
 	}
-	return nil, "", fmt.Errorf("cjk font not found")
-}
-
-func openHiragino(paths []string) (*text.FontSource, string, error) {
-	return openCJKFont(paths)
-}
-
-func registerLoaded(_ string, family, path string) error {
-	data, err := os.ReadFile(path)
-	if err != nil {
-		return err
-	}
-	return loadFamily(family, data)
+	return nil, "", fmt.Errorf("hiragino font not found")
 }

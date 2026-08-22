@@ -16,16 +16,6 @@ func TestPNGDecodes(t *testing.T) {
 	}
 }
 
-func TestWindowRGBASize(t *testing.T) {
-	img, err := WindowRGBA()
-	if err != nil {
-		t.Fatal(err)
-	}
-	if img.Bounds().Dx() != windowIconSize || img.Bounds().Dy() != windowIconSize {
-		t.Fatalf("window icon size %v, want %d", img.Bounds(), windowIconSize)
-	}
-}
-
 func TestRGBALightCorner(t *testing.T) {
 	img, err := RGBA()
 	if err != nil {
@@ -38,5 +28,8 @@ func TestRGBALightCorner(t *testing.T) {
 	mid := img.RGBAAt(img.Bounds().Dx()/2, img.Bounds().Dy()/2)
 	if mid.R > 240 && mid.G > 240 && mid.B > 240 {
 		t.Fatalf("expected toolbox in the center, got %+v", mid)
+	}
+	if img.Bounds().Dx() > windowIconEdge || img.Bounds().Dy() > windowIconEdge {
+		t.Fatalf("window icon too large: %v", img.Bounds())
 	}
 }

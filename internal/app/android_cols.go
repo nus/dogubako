@@ -3,6 +3,11 @@ package app
 import "image"
 
 const (
+	// Regular geometric triangles (same block as the sort marks ▲/▼).
+	// The small variants ▸/▾ (U+25B8/U+25BE) are missing from Inter and Hiragino.
+	androidExpandClosed = "▶"
+	androidExpandOpen   = "▼"
+
 	androidColDragSize = 1
 	androidColDragMod  = 2
 )

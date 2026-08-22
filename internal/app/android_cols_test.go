@@ -2,6 +2,7 @@ package app
 
 import (
 	"image"
+	"strings"
 	"testing"
 )
 
@@ -95,5 +96,27 @@ func TestAndroidSortMark(t *testing.T) {
 	}
 	if got := androidSortMark(androidSortMod, androidSortMod, true); got != " ▼" {
 		t.Fatalf("desc = %q", got)
+	}
+}
+
+func TestAndroidExpandMarksUseAvailableGlyphs(t *testing.T) {
+	if androidExpandClosed != "▶" || androidExpandOpen != "▼" {
+		t.Fatalf("expand marks = %q %q", androidExpandClosed, androidExpandOpen)
+	}
+	for _, s := range []string{androidExpandClosed, androidExpandOpen} {
+		if strings.ContainsRune(s, '\u25B8') || strings.ContainsRune(s, '\u25BE') {
+			t.Fatalf("small triangle missing on macOS: %q", s)
+		}
+	}
+}
+
+func TestFileKindIconDefaultsToFile(t *testing.T) {
+	var k fileKindIcon
+	if k.folder {
+		t.Fatal("empty icon should be a file")
+	}
+	k.SetFolder(true)
+	if !k.folder {
+		t.Fatal("expected folder")
 	}
 }

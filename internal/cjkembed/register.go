@@ -1,54 +1,48 @@
 package cjkembed
 
 import (
-	"fmt"
-	"path/filepath"
+	"slices"
 
+	"github.com/hajimehoshi/ebiten/v2/text/v2"
 	"golang.org/x/text/language"
-)
 
-const (
-	cjkFamily       = "CJK"
-	hiraginoFontDir = "/System/Library/Fonts"
+	"github.com/guigui-gui/guigui"
+	"github.com/guigui-gui/guigui/basicwidget"
 )
-
-// FamilyName is the gogpu/ui font family for Japanese text.
-// Empty when Register did not find a CJK face; widgets then use the default font.
-var FamilyName string
 
 var (
-	cjkLoaded   bool
-	cjkPathList = defaultCJKPaths
-	jaBase      = language.MustParseBase("ja")
+	theHiraginoFace *text.GoTextFaceSource
+	theLocales      []language.Tag
 )
 
-// Available reports whether a CJK face was registered for this process.
-func Available() bool { return cjkLoaded }
+var jaBase = language.MustParseBase("ja")
 
-// Register loads a system CJK face into the gogpu/ui font registry.
-// Call once before creating the widget tree.
-// It returns whether a CJK face was loaded.
-func Register() bool {
-	cjkLoaded = false
-	FamilyName = ""
-	return registerCJK()
+func registerHiragino(src *text.GoTextFaceSource) {
+	theHiraginoFace = src
+	basicwidget.RegisterFaceSourceEntries(appendHiraginoEntries)
 }
 
-func registerCJK() bool {
-	src, path, err := openCJKFont(cjkPathList())
-	if err != nil || src == nil || path == "" {
-		if err != nil {
-			logFontErr("cjk", fmt.Errorf("%w (using English UI)", err))
-		}
-		return false
+func appendHiraginoEntries(context *guigui.Context, adder *basicwidget.FaceSourceEntryAdder) {
+	if theHiraginoFace == nil {
+		return
 	}
-	if err := registerLoaded("cjk", cjkFamily, path); err != nil {
-		logFontErr("cjk", fmt.Errorf("%w (using English UI)", err))
-		return false
+	theLocales = slices.Delete(theLocales, 0, len(theLocales))
+	theLocales = context.AppendLocales(theLocales)
+	jaPrimary := japanesePrimary(theLocales)
+	theLocales = slices.Delete(theLocales, 0, len(theLocales))
+
+	if jaPrimary {
+		// Prefer Hiragino for glyphs that differ between CJK and Western fonts.
+		// See https://www.unicode.org/L2/L2014/14006-sv-western-vs-cjk.pdf
+		adder.Add(basicwidget.FaceSourceEntry{
+			FaceSource:    basicwidget.DefaultFaceSourceEntry().FaceSource,
+			UnicodeRanges: westernSafeRanges,
+		})
+		adder.Add(basicwidget.FaceSourceEntry{FaceSource: theHiraginoFace})
+		return
 	}
-	FamilyName = cjkFamily
-	cjkLoaded = true
-	return true
+	adder.Add(basicwidget.DefaultFaceSourceEntry())
+	adder.Add(basicwidget.FaceSourceEntry{FaceSource: theHiraginoFace})
 }
 
 func japanesePrimary(locales []language.Tag) bool {
@@ -59,19 +53,13 @@ func japanesePrimary(locales []language.Tag) bool {
 	return conf != language.No && base == jaBase
 }
 
-// defaultHiraginoPaths is the usual macOS location of Hiragino Sans, preferred
-// weight first. Each weight is a separate .ttc.
-func defaultHiraginoPaths() []string {
-	names := []string{
-		"ヒラギノ角ゴシック W3.ttc",
-		"ヒラギノ角ゴシック W4.ttc",
-		"ヒラギノ角ゴシック W5.ttc",
-		"ヒラギノ角ゴシック W6.ttc",
-		"ヒラギノ角ゴシック W2.ttc",
-	}
-	out := make([]string, len(names))
-	for i, name := range names {
-		out[i] = filepath.Join(hiraginoFontDir, name)
-	}
-	return out
+// westernSafeRanges is Inter coverage that should win over CJK when Japanese
+// is the primary locale, matching guigui/basicwidget/cjkfont.
+var westernSafeRanges = []basicwidget.UnicodeRange{
+	{Min: 0x0000, Max: 0x2013},
+	{Min: 0x2016, Max: 0x2017},
+	{Min: 0x201a, Max: 0x201b},
+	{Min: 0x201e, Max: 0x2025},
+	{Min: 0x2027, Max: 0x2e39},
+	{Min: 0x2e3c, Max: 0x7fffffff},
 }

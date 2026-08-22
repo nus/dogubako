@@ -289,6 +289,35 @@ func TestEncodeDecodeRoundTrip(t *testing.T) {
 	}
 }
 
+func TestApplyPreviewCapsEdge(t *testing.T) {
+	src := solidNRGBA(200, 100, color.NRGBA{R: 255, A: 255})
+	got, err := ApplyPreview(src, Params{Width: 200, Height: 100, Format: FormatPNG}, 50)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if max(got.Bounds().Dx(), got.Bounds().Dy()) > 50 {
+		t.Fatalf("preview = %v", got.Bounds())
+	}
+}
+
+func TestDecodeKeepsJPEGYCbCr(t *testing.T) {
+	src := solidNRGBA(8, 8, color.NRGBA{R: 10, G: 20, B: 30, A: 255})
+	data, err := Encode(src, FormatJPEG, 95)
+	if err != nil {
+		t.Fatal(err)
+	}
+	img, format, err := DecodeBytes(data)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if format != FormatJPEG {
+		t.Fatalf("format = %s", format)
+	}
+	if _, ok := img.(*image.YCbCr); !ok {
+		t.Fatalf("type %T, want YCbCr", img)
+	}
+}
+
 func TestEncodePNGClipboardHelper(t *testing.T) {
 	src := solidNRGBA(2, 2, color.NRGBA{A: 255})
 	data, err := EncodePNG(src)
