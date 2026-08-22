@@ -58,7 +58,7 @@ macOS ではシステムの `screencapture` を使います。初回は「画面
 
 ### Android 画面
 
-USB デバッグ（または無線デバッグ）が有効な Android 端末の画面を、ADB プロトコルで撮影します。`adb exec-out screencap` などの **adb コマンドは呼び出しません**。pure Go の [go-adbkit](https://github.com/codeskyblue/go-adbkit) が、起動済みの ADB サーバー（`127.0.0.1:5037`）と通信します。
+USB デバッグ（または無線デバッグ）が有効な Android 端末の画面を、ADB プロトコルで撮影します。pure Go の [go-adbkit](https://github.com/codeskyblue/go-adbkit) が、起動済みの ADB サーバー（`127.0.0.1:5037`）と通信します。
 
 - 接続中のデバイス一覧から選択
 - 遅延（秒）のあと、端末の画面全体を PNG で取得
@@ -83,7 +83,7 @@ ADB サーバーは Android Studio や SDK Platform-Tools などが起動して�
 
 ### Android ファイル
 
-USB デバッグ（または無線デバッグ）が有効な Android 端末のファイルを、ADB プロトコルで閲覧・コピーします。`adb pull` / `adb push` などの **adb コマンドは呼び出しません**。pure Go の [go-adbkit](https://github.com/codeskyblue/go-adbkit) が、起動済みの ADB サーバー（`127.0.0.1:5037`）と通信します。
+USB デバッグ（または無線デバッグ）が有効な Android 端末のファイルを、ADB プロトコルで閲覧・コピーします。pure Go の [go-adbkit](https://github.com/codeskyblue/go-adbkit) が、起動済みの ADB サーバー（`127.0.0.1:5037`）と通信します。
 
 - 接続中のデバイス一覧から選択
 - ファイル / フォルダのツリー表示
