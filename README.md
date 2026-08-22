@@ -56,6 +56,31 @@ sudo apt install gnome-screenshot scrot
 
 macOS ではシステムの `screencapture` を使います。初回は「画面収録」の許可が必要です（システム設定 → プライバシーとセキュリティ）。
 
+### Android 画面
+
+USB デバッグ（または無線デバッグ）が有効な Android 端末の画面を、ADB プロトコルで撮影します。`adb exec-out screencap` などの **adb コマンドは呼び出しません**。pure Go の [go-adbkit](https://github.com/codeskyblue/go-adbkit) が、起動済みの ADB サーバー（`127.0.0.1:5037`）と通信します。
+
+- 接続中のデバイス一覧から選択
+- 遅延（秒）のあと、端末の画面全体を PNG で取得
+- 撮影した画像は保存先へ自動保存
+- 保存先フォルダの画像をサムネイル付きリストで表示し、クリックでプレビュー
+- プレビューはホイールまたは − / + で拡大縮小、ドラッグで移動、ダブルクリックまたは「全体」でフィット
+- クリップボードへコピー、名前を付けて保存、画像ツールへ送る
+
+既定の保存先は画面キャプチャと同じピクチャ配下で、その中の `Android` フォルダです。
+
+| 環境 | 場所 |
+| --- | --- |
+| macOS | `~/Pictures/Screenshots/Android` |
+| Ubuntu | 画面キャプチャと同じ `Screenshots` の下の `Android` |
+
+ADB サーバーは Android Studio や SDK Platform-Tools などが起動している必要があります。端末側で USB デバッグを許可してください。
+
+ショートカット（macOS は ⌘、Ubuntu は Ctrl）:
+
+- S: 保存先へもう一度保存（別ファイル名）
+- C: クリップボードにコピー
+
 ### Android ファイル
 
 USB デバッグ（または無線デバッグ）が有効な Android 端末のファイルを、ADB プロトコルで閲覧・コピーします。`adb pull` / `adb push` などの **adb コマンドは呼び出しません**。pure Go の [go-adbkit](https://github.com/codeskyblue/go-adbkit) が、起動済みの ADB サーバー（`127.0.0.1:5037`）と通信します。
@@ -169,8 +194,8 @@ make test
 
 - `cmd/dogubako` — エントリポイント
 - `internal/cjkembed` — Linux は Noto Sans CJK を埋め込み、macOS はヒラギノ角ゴシックを `/System/Library/Fonts` から開く
-- `internal/app` — シェル（サイドメニューとメインパネル）、画像ツール、画面キャプチャ、Android ファイル
-- `internal/adbfs` — ADB プロトコルによるデバイス一覧・ファイル同期（pure Go）
+- `internal/app` — シェル（サイドメニューとメインパネル）、画像ツール、画面キャプチャ、Android 画面、Android ファイル
+- `internal/adbfs` — ADB プロトコルによるデバイス一覧・画面撮影・ファイル同期（pure Go）
 - `internal/appicon` — アプリ／パッケージ用アイコン
 - `internal/imageproc` — リサイズ・切り取り・エンコード
 - `internal/capture` — OS の画面キャプチャコマンド呼び出し
