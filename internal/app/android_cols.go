@@ -16,7 +16,9 @@ func androidColGap(u int) int { return u / 4 }
 
 func androidExpandColWidth(u int) int { return u }
 
-func androidIconColWidth(u int) int { return 2 * u }
+// androidIconColWidth is one unit so a one-line file-tree row stays UnitSize
+// tall. Color-emoji icons needed ~2em; the vector glyphs fit in a square.
+func androidIconColWidth(u int) int { return u }
 
 func androidDefaultSizeCol(u int) int { return 6 * u }
 

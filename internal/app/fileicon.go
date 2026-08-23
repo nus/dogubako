@@ -27,6 +27,20 @@ func (k *fileKindIcon) WriteStateKey(context *guigui.Context, w *guigui.StateKey
 	w.WriteBool(k.folder)
 }
 
+// Measure reports a standard list-item square. DefaultWidget is 144px, which
+// would stretch every Android file-tree row far above UnitSize.
+func (k *fileKindIcon) Measure(context *guigui.Context, constraints guigui.Constraints) image.Point {
+	u := basicwidget.UnitSize(context)
+	s := image.Pt(u, u)
+	if w, ok := constraints.FixedWidth(); ok {
+		s.X = w
+	}
+	if h, ok := constraints.FixedHeight(); ok {
+		s.Y = h
+	}
+	return s
+}
+
 func (k *fileKindIcon) Draw(context *guigui.Context, widgetBounds *guigui.WidgetBounds, dst *ebiten.Image) {
 	b := widgetBounds.Bounds()
 	if b.Empty() {
@@ -48,8 +62,14 @@ func (k *fileKindIcon) Draw(context *guigui.Context, widgetBounds *guigui.Widget
 }
 
 func iconInner(b image.Rectangle) image.Rectangle {
-	pad := max(1, min(b.Dx(), b.Dy())/6)
-	return image.Rect(b.Min.X+pad, b.Min.Y+pad, b.Max.X-pad, b.Max.Y-pad)
+	side := min(b.Dx(), b.Dy())
+	if side < 4 {
+		return image.Rectangle{}
+	}
+	x := b.Min.X + (b.Dx()-side)/2
+	y := b.Min.Y + (b.Dy()-side)/2
+	pad := max(1, side/6)
+	return image.Rect(x+pad, y+pad, x+side-pad, y+side-pad)
 }
 
 func drawFolderGlyph(dst *ebiten.Image, bounds image.Rectangle, fg color.Color) {
