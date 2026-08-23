@@ -110,6 +110,13 @@ func TestAndroidExpandMarksUseAvailableGlyphs(t *testing.T) {
 	}
 }
 
+func TestAndroidIconColMatchesUnitSize(t *testing.T) {
+	u := 24
+	if got := androidIconColWidth(u); got != u {
+		t.Fatalf("icon col = %d, want standard unit %d", got, u)
+	}
+}
+
 func TestFileKindIconDefaultsToFile(t *testing.T) {
 	var k fileKindIcon
 	if k.folder {

@@ -648,6 +648,8 @@ func (r *androidFileRow) Layout(context *guigui.Context, widgetBounds *guigui.Wi
 func (r *androidFileRow) Measure(context *guigui.Context, constraints guigui.Constraints) image.Point {
 	u := basicwidget.UnitSize(context)
 	s := r.layoutRow(context).Measure(context, constraints)
+	// One-line names match the standard list-item height (sidebar SetItemHeight).
+	// Wrapped names can grow taller.
 	if s.Y < u {
 		s.Y = u
 	}
