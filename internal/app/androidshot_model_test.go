@@ -134,6 +134,221 @@ func TestAndroidShotCaptureFailure(t *testing.T) {
 	}
 }
 
+func waitAndroidLive(t *testing.T, m *AndroidShotModel) {
+	t.Helper()
+	deadline := time.Now().Add(2 * time.Second)
+	for time.Now().Before(deadline) {
+		m.Drain()
+		if m.HasImage() {
+			return
+		}
+		time.Sleep(5 * time.Millisecond)
+	}
+	t.Fatal("timed out waiting for live frame")
+}
+
+func TestAndroidShotLivePreview(t *testing.T) {
+	home := t.TempDir()
+	restore := userdir.Override("linux", home, nil)
+	t.Cleanup(restore)
+
+	png := solidPNG(t, 6, 4)
+	fs := adbfs.NewMem(adbfs.Device{Serial: "pixel", State: "device", Model: "Pixel 7"})
+	fs.Shot = map[string][]byte{"pixel": png}
+
+	var m AndroidShotModel
+	m.SetClient(fs)
+	m.EnsureLoaded()
+	waitAndroidShot(t, &m)
+	m.StartLive()
+	t.Cleanup(m.StopLive)
+	waitAndroidLive(t, &m)
+
+	if !m.Live() {
+		t.Fatal("expected live")
+	}
+	if m.Busy() {
+		t.Fatal("live should not count as busy")
+	}
+	if m.Size() != (image.Point{X: 6, Y: 4}) {
+		t.Fatalf("size = %v", m.Size())
+	}
+	if got := m.StatusText(i18n.EN); got != i18n.T(i18n.EN, i18n.StatusAdbLive, 6, 4) {
+		t.Fatalf("status = %q", got)
+	}
+
+	m.StartCapture()
+	saved := m.LastSaved()
+	if saved == "" {
+		t.Fatal("live capture should save the current frame")
+	}
+	if _, err := os.Stat(saved); err != nil {
+		t.Fatal(err)
+	}
+	if !m.Live() {
+		t.Fatal("live should keep running after saving a frame")
+	}
+
+	m.SetLive(false)
+	if m.Live() {
+		t.Fatal("expected stopped")
+	}
+	if got := m.StatusText(i18n.EN); got != i18n.T(i18n.EN, i18n.StatusAdbLiveStopped) {
+		t.Fatalf("status = %q", got)
+	}
+	m.EnsureLive()
+	if m.Live() {
+		t.Fatal("EnsureLive should respect an explicit stop")
+	}
+}
+
+func TestAndroidShotLoadPathStopsLive(t *testing.T) {
+	home := t.TempDir()
+	restore := userdir.Override("linux", home, nil)
+	t.Cleanup(restore)
+
+	png := solidPNG(t, 6, 4)
+	fs := adbfs.NewMem(adbfs.Device{Serial: "pixel", State: "device", Model: "Pixel"})
+	fs.Shot = map[string][]byte{"pixel": png}
+
+	var m AndroidShotModel
+	m.SetClient(fs)
+	m.EnsureLoaded()
+	waitAndroidShot(t, &m)
+	m.StartCapture()
+	waitAndroidShot(t, &m)
+	saved := m.LastSaved()
+	if saved == "" {
+		t.Fatal("expected saved capture")
+	}
+
+	m.StartLive()
+	t.Cleanup(m.StopLive)
+	waitAndroidLive(t, &m)
+	if err := m.LoadPath(saved); err != nil {
+		t.Fatal(err)
+	}
+	if m.Live() {
+		t.Fatal("selecting a saved file should stop live")
+	}
+	m.EnsureLive()
+	if m.Live() {
+		t.Fatal("EnsureLive should not restart after selecting a file")
+	}
+}
+
+func TestAndroidShotLiveOfflineAndErrors(t *testing.T) {
+	home := t.TempDir()
+	restore := userdir.Override("linux", home, nil)
+	t.Cleanup(restore)
+
+	fs := adbfs.NewMem(adbfs.Device{Serial: "x", State: "unauthorized"})
+	var m AndroidShotModel
+	m.SetClient(fs)
+	m.EnsureLoaded()
+	waitAndroidShot(t, &m)
+	m.StartLive()
+	if m.Live() {
+		t.Fatal("offline device should not start live")
+	}
+
+	fs2 := adbfs.NewMem(adbfs.Device{Serial: "pixel", State: "device", Model: "Pixel"})
+	fs2.ShotErr = context.DeadlineExceeded
+	var m2 AndroidShotModel
+	m2.SetClient(fs2)
+	m2.EnsureLoaded()
+	waitAndroidShot(t, &m2)
+	m2.StartLive()
+	t.Cleanup(m2.StopLive)
+	deadline := time.Now().Add(2 * time.Second)
+	for time.Now().Before(deadline) {
+		m2.Drain()
+		if !m2.Live() {
+			break
+		}
+		time.Sleep(5 * time.Millisecond)
+	}
+	if m2.Live() {
+		t.Fatal("expected live to stop after repeated errors")
+	}
+	if got := m2.StatusText(i18n.EN); !strings.Contains(got, "Live preview failed") {
+		t.Fatalf("status = %q", got)
+	}
+}
+
+func TestAndroidShotEnsureLiveAndSetMode(t *testing.T) {
+	home := t.TempDir()
+	restore := userdir.Override("linux", home, nil)
+	t.Cleanup(restore)
+
+	png := solidPNG(t, 3, 3)
+	fs := adbfs.NewMem(adbfs.Device{Serial: "pixel", State: "device", Model: "Pixel"})
+	fs.Shot = map[string][]byte{"pixel": png}
+
+	var app Model
+	app.AndroidShot().SetClient(fs)
+	app.SetMode(ToolAndroidShot)
+	app.AndroidShot().EnsureLoaded()
+	waitAndroidShot(t, app.AndroidShot())
+	app.AndroidShot().EnsureLive()
+	t.Cleanup(app.AndroidShot().StopLive)
+	waitAndroidLive(t, app.AndroidShot())
+	if !app.AndroidShot().Live() {
+		t.Fatal("EnsureLive should start preview")
+	}
+
+	app.SetMode(ToolImage)
+	if app.AndroidShot().Live() {
+		t.Fatal("leaving the tool should stop live")
+	}
+	app.SetMode(ToolAndroidShot)
+	app.AndroidShot().EnsureLive()
+	waitAndroidLive(t, app.AndroidShot())
+	if !app.AndroidShot().Live() {
+		t.Fatal("returning to the tool should resume live")
+	}
+}
+
+func TestAndroidShotDownloadProgressStatus(t *testing.T) {
+	var m AndroidShotModel
+	ch := make(chan androidLiveResult, 1)
+	m.live = true
+	m.pendingLive = ch
+	ch <- androidLiveResult{download: true, percent: 42}
+	m.Drain()
+	if m.DownloadPercent() != 42 {
+		t.Fatalf("percent = %d", m.DownloadPercent())
+	}
+	if got := m.StatusText(i18n.EN); got != i18n.T(i18n.EN, i18n.StatusAdbOpenH264Download, 42) {
+		t.Fatalf("status = %q", got)
+	}
+	if got := m.StatusText(i18n.JA); got != i18n.T(i18n.JA, i18n.StatusAdbOpenH264Download, 42) {
+		t.Fatalf("ja status = %q", got)
+	}
+}
+
+func TestAndroidShotLiveFallsBackFromH264(t *testing.T) {
+	home := t.TempDir()
+	restore := userdir.Override("linux", home, nil)
+	t.Cleanup(restore)
+
+	png := solidPNG(t, 6, 4)
+	fs := adbfs.NewMem(adbfs.Device{Serial: "pixel", State: "device", Model: "Pixel"})
+	fs.Shot = map[string][]byte{"pixel": png}
+	fs.H264 = map[string][]byte{"pixel": {0, 0, 0, 1, 0x67}}
+
+	var m AndroidShotModel
+	m.SetClient(fs)
+	m.EnsureLoaded()
+	waitAndroidShot(t, &m)
+	m.StartLive()
+	t.Cleanup(m.StopLive)
+	waitAndroidLive(t, &m)
+	if got := m.StatusText(i18n.EN); got != i18n.T(i18n.EN, i18n.StatusAdbLive, 6, 4) {
+		t.Fatalf("fallback status = %q", got)
+	}
+}
+
 func TestAndroidShotSelectsFirstOnlineDevice(t *testing.T) {
 	home := t.TempDir()
 	restore := userdir.Override("linux", home, nil)

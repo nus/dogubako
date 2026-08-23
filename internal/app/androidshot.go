@@ -31,6 +31,8 @@ type AndroidShotTool struct {
 	refreshBtn  basicwidget.Button
 	delayText   basicwidget.Text
 	delayInput  guigui.WidgetWithSize[*basicwidget.NumberInput]
+	liveText    basicwidget.Text
+	liveToggle  basicwidget.Toggle
 	hint        basicwidget.Text
 	captureBtn  basicwidget.Button
 
@@ -79,7 +81,9 @@ func (t *AndroidShotTool) WriteStateKey(context *guigui.Context, w *guigui.State
 	w.WriteUint64(shot.Generation())
 	w.WriteBool(shot.HasImage())
 	w.WriteBool(shot.Busy())
+	w.WriteBool(shot.Live())
 	w.WriteString(shot.Serial())
+	w.WriteInt(shot.DownloadPercent())
 }
 
 func (t *AndroidShotTool) OnCapture(f func(context *guigui.Context)) {
@@ -107,6 +111,8 @@ func (t *AndroidShotTool) Build(context *guigui.Context, adder *guigui.ChildAdde
 	adder.AddWidget(&t.refreshBtn)
 	adder.AddWidget(&t.delayText)
 	adder.AddWidget(&t.delayInput)
+	adder.AddWidget(&t.liveText)
+	adder.AddWidget(&t.liveToggle)
 	adder.AddWidget(&t.hint)
 	adder.AddWidget(&t.captureBtn)
 	adder.AddWidget(&t.listLabel)
@@ -132,6 +138,7 @@ func (t *AndroidShotTool) Build(context *guigui.Context, adder *guigui.ChildAdde
 	busy := model.Busy()
 	capturing := model.Capturing()
 	online := model.Online()
+	live := model.Live()
 
 	model.EnsureLoaded()
 	model.RefreshFiles()
@@ -176,7 +183,15 @@ func (t *AndroidShotTool) Build(context *guigui.Context, adder *guigui.ChildAdde
 		}
 	})
 	t.delayInput.SetFixedWidth(3 * u)
-	context.SetEnabled(&t.delayInput, !busy)
+	context.SetEnabled(&t.delayInput, !busy && !live)
+
+	t.liveText.SetValue(i18n.T(lang, i18n.AndroidShotLive))
+	t.liveText.SetVerticalAlign(basicwidget.VerticalAlignMiddle)
+	t.liveToggle.SetValue(live)
+	t.liveToggle.OnValueChanged(func(context *guigui.Context, value bool) {
+		model.SetLive(value)
+	})
+	context.SetEnabled(&t.liveToggle, (online || live) && !capturing)
 
 	t.hint.SetValue(i18n.T(lang, i18n.AndroidShotHint))
 	t.hint.SetVerticalAlign(basicwidget.VerticalAlignMiddle)
@@ -255,6 +270,10 @@ func (t *AndroidShotTool) Build(context *guigui.Context, adder *guigui.ChildAdde
 		t.previewEmpty.SetVerticalAlign(basicwidget.VerticalAlignMiddle)
 		if len(devs) == 0 {
 			t.previewEmpty.SetValue(i18n.T(lang, i18n.AndroidNoDevices))
+		} else if pct := model.DownloadPercent(); live && pct >= 0 {
+			t.previewEmpty.SetValue(i18n.T(lang, i18n.AndroidShotLiveDownload, pct))
+		} else if live {
+			t.previewEmpty.SetValue(i18n.T(lang, i18n.AndroidShotLiveWait))
 		} else {
 			t.previewEmpty.SetValue(i18n.T(lang, i18n.AndroidShotEmpty))
 		}
@@ -305,6 +324,8 @@ func (t *AndroidShotTool) Layout(context *guigui.Context, widgetBounds *guigui.W
 		guigui.LinearLayoutItem{Widget: &t.refreshBtn},
 		guigui.LinearLayoutItem{Widget: &t.delayText},
 		guigui.LinearLayoutItem{Widget: &t.delayInput},
+		guigui.LinearLayoutItem{Widget: &t.liveText},
+		guigui.LinearLayoutItem{Widget: &t.liveToggle},
 		guigui.LinearLayoutItem{Widget: &t.hint, Size: guigui.FlexibleSize(1)},
 		guigui.LinearLayoutItem{Widget: &t.captureBtn},
 	)

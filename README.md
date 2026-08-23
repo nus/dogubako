@@ -61,11 +61,15 @@ macOS ではシステムの `screencapture` を使います。初回は「画面
 USB デバッグ（または無線デバッグ）が有効な Android 端末の画面を、ADB プロトコルで撮影します。pure Go の [go-adbkit](https://github.com/codeskyblue/go-adbkit) が、起動済みの ADB サーバー（`127.0.0.1:5037`）と通信します。
 
 - 接続中のデバイス一覧から選択
-- 遅延（秒）のあと、端末の画面全体を PNG で取得
+- 端末の画面をライブプレビュー（ツールを開くと自動開始。トグルで停止 / 再開）
+- ライブはまず `screenrecord` の H.264 を [OpenH264](https://www.openh264.org/)（Cisco の事前ビルド、`ebitengine/purego` で実行時ロード）で復号します。ライブラリが無い、または High プロファイルなどで復号できないときは `screencap` の連写に戻します
+- OpenH264 Video Codec provided by Cisco Systems, Inc. 初回だけ Cisco の CDN から共有ライブラリをユーザキャッシュへ取得します。使いたくないときは環境変数 `DOGUBAKO_OPENH264=0`、またはキャッシュファイルの削除で無効にできます
+- 遅延（秒）のあと、端末の画面全体を PNG で取得（ライブ中は表示中のフレームを保存）
 - 撮影した画像は保存先へ自動保存
 - 保存先フォルダの画像をサムネイル付きリストで表示し、クリックでプレビュー
 - プレビューはホイールまたは − / + で拡大縮小、ドラッグで移動、ダブルクリックまたは「全体」でフィット
 - クリップボードへコピー、名前を付けて保存、画像ツールへ送る
+- 保存済みリストの画像をクリックするとライブを止めてその画像を表示します
 
 既定の保存先は画面キャプチャと同じピクチャ配下で、その中の `Android` フォルダです。
 
@@ -196,6 +200,7 @@ make test
 - `internal/cjkembed` — Linux は Noto Sans CJK を埋め込み、macOS はヒラギノ角ゴシックを `/System/Library/Fonts` から開く
 - `internal/app` — シェル（サイドメニューとメインパネル）、画像ツール、画面キャプチャ、Android 画面、Android ファイル
 - `internal/adbfs` — ADB プロトコルによるデバイス一覧・画面撮影・ファイル同期（pure Go）
+- `internal/openh264` — Cisco OpenH264 共有ライブラリの実行時ロードと H.264 復号（`ebitengine/purego`、CGO なし）
 - `internal/appicon` — アプリ／パッケージ用アイコン
 - `internal/imageproc` — リサイズ・切り取り・エンコード
 - `internal/capture` — OS の画面キャプチャコマンド呼び出し

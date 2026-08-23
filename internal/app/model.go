@@ -92,6 +92,9 @@ func (m *Model) Mode() ToolID {
 }
 
 func (m *Model) SetMode(mode ToolID) {
+	if m.Mode() == ToolAndroidShot && mode != ToolAndroidShot {
+		m.androidShot.StopLive()
+	}
 	m.mode = mode
 }
 

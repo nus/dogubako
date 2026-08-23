@@ -69,6 +69,7 @@ func (r *Root) WriteStateKey(context *guigui.Context, w *guigui.StateKeyWriter) 
 	w.WriteBool(r.pendingCapture != nil)
 	w.WriteBool(r.model.Android().Busy())
 	w.WriteBool(r.model.AndroidShot().Busy())
+	w.WriteBool(r.model.AndroidShot().Live())
 }
 
 func (r *Root) contentWidget() guigui.Widget {
@@ -186,6 +187,9 @@ func (r *Root) Tick(context *guigui.Context, widgetBounds *guigui.WidgetBounds) 
 	}
 	if r.model.Mode() == ToolAndroidShot {
 		r.model.AndroidShot().PollFiles()
+		r.model.AndroidShot().EnsureLive()
+	} else {
+		r.model.AndroidShot().StopLive()
 	}
 	if files := ebiten.DroppedFiles(); files != nil && r.model.Mode() == ToolImage {
 		_ = r.model.Image().LoadDropped(files)

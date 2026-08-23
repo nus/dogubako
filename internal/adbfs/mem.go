@@ -1,8 +1,12 @@
 package adbfs
 
 import (
+	"bytes"
 	"context"
 	"fmt"
+	"image"
+	_ "image/png"
+	"io"
 	"os"
 	"path/filepath"
 	"strings"
@@ -19,6 +23,8 @@ type Mem struct {
 	Fail    map[string]error // path -> error for Stat/List/Pull/Push/Mkdir
 	Shot    map[string][]byte
 	ShotErr error
+	H264    map[string][]byte
+	H264Err error
 }
 
 type memNode struct {
@@ -276,6 +282,35 @@ func (m *Mem) Screencap(ctx context.Context, serial string) ([]byte, error) {
 		}
 	}
 	return nil, fmt.Errorf("no screenshot")
+}
+
+func (m *Mem) ScreencapImage(ctx context.Context, serial string) (image.Image, error) {
+	data, err := m.Screencap(ctx, serial)
+	if err != nil {
+		return nil, err
+	}
+	if img, err := decodeScreencapBytes(data); err == nil {
+		return img, nil
+	}
+	img, _, err := image.Decode(bytes.NewReader(data))
+	return img, err
+}
+
+func (m *Mem) ScreenrecordH264(ctx context.Context, serial string) (io.ReadCloser, error) {
+	if err := ctx.Err(); err != nil {
+		return nil, err
+	}
+	m.mu.Lock()
+	defer m.mu.Unlock()
+	if m.H264Err != nil {
+		return nil, m.H264Err
+	}
+	if m.H264 != nil {
+		if data, ok := m.H264[serial]; ok {
+			return io.NopCloser(bytes.NewReader(append([]byte(nil), data...))), nil
+		}
+	}
+	return nil, fmt.Errorf("no h264 stream")
 }
 
 // FileData returns the stored bytes for path.
