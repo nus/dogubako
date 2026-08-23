@@ -63,28 +63,29 @@ const (
 	ScreenshotSendImage    Key = "screenshot.send_image"
 	ScreenshotShowFolder   Key = "screenshot.show_folder"
 
-	AndroidDevices      Key = "android.devices"
-	AndroidFiles        Key = "android.files"
-	AndroidRefresh      Key = "android.refresh"
-	AndroidUp           Key = "android.up"
-	AndroidPull         Key = "android.pull"
-	AndroidPushFile     Key = "android.push_file"
-	AndroidPushFolder   Key = "android.push_folder"
-	AndroidEmpty        Key = "android.empty"
-	AndroidColName      Key = "android.col_name"
-	AndroidColSize      Key = "android.col_size"
-	AndroidColModified  Key = "android.col_modified"
-	AndroidNoDevices    Key = "android.no_devices"
-	AndroidHint         Key = "android.hint"
-	AndroidShotCapture  Key = "android_shot.capture"
-	AndroidShotHint     Key = "android_shot.hint"
-	AndroidShotEmpty    Key = "android_shot.empty"
-	AndroidShotLive     Key = "android_shot.live"
-	AndroidShotLiveWait Key = "android_shot.live_wait"
-	DialogOpenDir       Key = "dialog.open_dir"
-	DialogSaveAny       Key = "dialog.save_any"
-	DialogOpenAny       Key = "dialog.open_any"
-	DialogOpenFolder    Key = "dialog.open_folder"
+	AndroidDevices          Key = "android.devices"
+	AndroidFiles            Key = "android.files"
+	AndroidRefresh          Key = "android.refresh"
+	AndroidUp               Key = "android.up"
+	AndroidPull             Key = "android.pull"
+	AndroidPushFile         Key = "android.push_file"
+	AndroidPushFolder       Key = "android.push_folder"
+	AndroidEmpty            Key = "android.empty"
+	AndroidColName          Key = "android.col_name"
+	AndroidColSize          Key = "android.col_size"
+	AndroidColModified      Key = "android.col_modified"
+	AndroidNoDevices        Key = "android.no_devices"
+	AndroidHint             Key = "android.hint"
+	AndroidShotCapture      Key = "android_shot.capture"
+	AndroidShotHint         Key = "android_shot.hint"
+	AndroidShotEmpty        Key = "android_shot.empty"
+	AndroidShotLive         Key = "android_shot.live"
+	AndroidShotLiveWait     Key = "android_shot.live_wait"
+	AndroidShotLiveDownload Key = "android_shot.live_download"
+	DialogOpenDir           Key = "dialog.open_dir"
+	DialogSaveAny           Key = "dialog.save_any"
+	DialogOpenAny           Key = "dialog.open_any"
+	DialogOpenFolder        Key = "dialog.open_folder"
 
 	DialogOpen   Key = "dialog.open"
 	DialogSave   Key = "dialog.save"
@@ -133,6 +134,7 @@ const (
 	StatusAdbCapturing             Key = "status.adb_capturing"
 	StatusAdbCaptureFailed         Key = "status.adb_capture_failed"
 	StatusAdbLiveStarting          Key = "status.adb_live_starting"
+	StatusAdbOpenH264Download      Key = "status.adb_openh264_download"
 	StatusAdbLive                  Key = "status.adb_live"
 	StatusAdbLiveH264              Key = "status.adb_live_h264"
 	StatusAdbLiveFailed            Key = "status.adb_live_failed"
@@ -213,6 +215,7 @@ var catalogs = map[Lang]map[Key]string{
 		AndroidShotEmpty:               "ライブを開始するか、キャプチャするか、左のリストから画像を選んでください。",
 		AndroidShotLive:                "ライブ",
 		AndroidShotLiveWait:            "端末の画面を取得しています…",
+		AndroidShotLiveDownload:        "OpenH264 をダウンロードしています… %d%%",
 		DialogOpenDir:                  "保存先フォルダ",
 		DialogSaveAny:                  "ファイルを保存",
 		DialogOpenAny:                  "ファイルを選ぶ",
@@ -263,6 +266,7 @@ var catalogs = map[Lang]map[Key]string{
 		StatusAdbCapturing:             "端末の画面を撮影しています…",
 		StatusAdbCaptureFailed:         "画面の撮影に失敗しました: %v",
 		StatusAdbLiveStarting:          "ライブプレビューを開始しています…",
+		StatusAdbOpenH264Download:      "OpenH264 をダウンロードしています… %d%%",
 		StatusAdbLive:                  "ライブプレビュー中（%d×%d）",
 		StatusAdbLiveH264:              "ライブプレビュー中（%d×%d、H.264）",
 		StatusAdbLiveFailed:            "ライブプレビューに失敗しました: %v",
@@ -341,6 +345,7 @@ var catalogs = map[Lang]map[Key]string{
 		AndroidShotEmpty:               "Start live preview, capture a screenshot, or choose one from the list.",
 		AndroidShotLive:                "Live",
 		AndroidShotLiveWait:            "Fetching the device screen…",
+		AndroidShotLiveDownload:        "Downloading OpenH264… %d%%",
 		DialogOpenDir:                  "Destination Folder",
 		DialogSaveAny:                  "Save File",
 		DialogOpenAny:                  "Choose File",
@@ -391,6 +396,7 @@ var catalogs = map[Lang]map[Key]string{
 		StatusAdbCapturing:             "Capturing the device screen…",
 		StatusAdbCaptureFailed:         "Screen capture failed: %v",
 		StatusAdbLiveStarting:          "Starting live preview…",
+		StatusAdbOpenH264Download:      "Downloading OpenH264… %d%%",
 		StatusAdbLive:                  "Live preview (%d×%d)",
 		StatusAdbLiveH264:              "Live preview (%d×%d, H.264)",
 		StatusAdbLiveFailed:            "Live preview failed: %v",

@@ -62,6 +62,11 @@ func cachePath() (string, error) {
 // EnsureLibrary returns a local path to the Cisco shared library, downloading
 // it into the user cache when needed.
 func EnsureLibrary(ctx context.Context) (string, error) {
+	return EnsureLibraryProgress(ctx, nil)
+}
+
+// EnsureLibraryProgress is EnsureLibrary with optional download progress.
+func EnsureLibraryProgress(ctx context.Context, progress ProgressFunc) (string, error) {
 	if err := ctx.Err(); err != nil {
 		return "", err
 	}
@@ -82,13 +87,13 @@ func EnsureLibrary(ctx context.Context) (string, error) {
 	if err != nil {
 		return "", err
 	}
-	if err := downloadLibrary(ctx, url, path); err != nil {
+	if err := downloadLibrary(ctx, url, path, progress); err != nil {
 		return "", err
 	}
 	return path, nil
 }
 
-func downloadLibrary(ctx context.Context, url, dest string) error {
+func downloadLibrary(ctx context.Context, url, dest string, progress ProgressFunc) error {
 	if err := os.MkdirAll(filepath.Dir(dest), 0o755); err != nil {
 		return err
 	}
@@ -111,11 +116,21 @@ func downloadLibrary(ctx context.Context, url, dest string) error {
 		return fmt.Errorf("openh264: download: HTTP %s", res.Status)
 	}
 
+	total := res.ContentLength
+	if total < 0 {
+		total = 0
+	}
+	body := io.Reader(res.Body)
+	if progress != nil {
+		progress(0, total)
+		body = &countingReader{r: res.Body, total: total, lastPct: -1, report: progress}
+	}
+
 	f, err := os.OpenFile(tmp, os.O_CREATE|os.O_WRONLY|os.O_TRUNC, 0o755)
 	if err != nil {
 		return err
 	}
-	n, copyErr := io.Copy(f, io.LimitReader(bzip2.NewReader(res.Body), maxLibraryBytes+1))
+	n, copyErr := io.Copy(f, io.LimitReader(bzip2.NewReader(body), maxLibraryBytes+1))
 	closeErr := f.Close()
 	if copyErr != nil {
 		return fmt.Errorf("openh264: decompress: %w", copyErr)
@@ -129,5 +144,40 @@ func downloadLibrary(ctx context.Context, url, dest string) error {
 	if n == 0 {
 		return fmt.Errorf("openh264: empty library")
 	}
+	if progress != nil && total > 0 {
+		progress(total, total)
+	}
 	return os.Rename(tmp, dest)
+}
+
+type countingReader struct {
+	r       io.Reader
+	n       int64
+	total   int64
+	lastPct int
+	report  ProgressFunc
+}
+
+func (c *countingReader) Read(p []byte) (int, error) {
+	n, err := c.r.Read(p)
+	if n > 0 {
+		c.n += int64(n)
+		c.emit(false)
+	}
+	if err == io.EOF {
+		c.emit(true)
+	}
+	return n, err
+}
+
+func (c *countingReader) emit(force bool) {
+	if c.report == nil {
+		return
+	}
+	pct := Percent(c.n, c.total)
+	if !force && pct == c.lastPct {
+		return
+	}
+	c.lastPct = pct
+	c.report(c.n, c.total)
 }

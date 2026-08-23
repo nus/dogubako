@@ -29,6 +29,20 @@ const (
 	cdnBase = "https://ciscobinary.openh264.org"
 )
 
+// ProgressFunc reports a download. total is 0 when the size is unknown.
+type ProgressFunc func(downloaded, total int64)
+
+// Percent is downloaded/total as 0–100. It is 0 when total is unknown.
+func Percent(downloaded, total int64) int {
+	if total <= 0 || downloaded <= 0 {
+		return 0
+	}
+	if downloaded >= total {
+		return 100
+	}
+	return int(downloaded * 100 / total)
+}
+
 // Enabled reports whether H.264 preview may try OpenH264.
 func Enabled() bool {
 	switch strings.ToLower(strings.TrimSpace(os.Getenv(EnvName))) {

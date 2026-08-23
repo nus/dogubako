@@ -34,9 +34,11 @@ type androidShotResult struct {
 }
 
 type androidLiveResult struct {
-	img  image.Image
-	err  error
-	h264 bool
+	img      image.Image
+	err      error
+	h264     bool
+	download bool
+	percent  int
 }
 
 // AndroidShotModel captures the screen of a connected Android device over ADB.
@@ -59,6 +61,7 @@ type AndroidShotModel struct {
 	liveFails   int
 	pendingLive <-chan androidLiveResult
 	liveCancel  context.CancelFunc
+	downloadPct int // -1 when not downloading
 }
 
 func (m *AndroidShotModel) SetClient(c adbfs.Client) {
@@ -118,6 +121,14 @@ func (m *AndroidShotModel) ensureDest() {
 }
 
 func (m *AndroidShotModel) Live() bool { return m.live }
+
+// DownloadPercent is 0–100 while the OpenH264 binary is being fetched, or -1.
+func (m *AndroidShotModel) DownloadPercent() int {
+	if m.status.key != i18n.StatusAdbOpenH264Download {
+		return -1
+	}
+	return m.downloadPct
+}
 
 func (m *AndroidShotModel) Drain() {
 	m.drainDevices()
@@ -185,6 +196,11 @@ func (m *AndroidShotModel) drainLive() {
 		if !m.live {
 			return
 		}
+		if res.download {
+			m.applyDownloadProgress(res.percent)
+			guigui.RequestRebuild()
+			return
+		}
 		if res.err != nil {
 			if errors.Is(res.err, context.Canceled) {
 				return
@@ -199,9 +215,25 @@ func (m *AndroidShotModel) drainLive() {
 			return
 		}
 		m.liveFails = 0
+		m.downloadPct = -1
 		m.applyLiveFrame(res.img, res.h264)
 		guigui.RequestRebuild()
 	default:
+	}
+}
+
+func (m *AndroidShotModel) applyDownloadProgress(percent int) {
+	if percent < 0 {
+		percent = 0
+	}
+	if percent > 100 {
+		percent = 100
+	}
+	m.downloadPct = percent
+	switch m.status.key {
+	case i18n.StatusSaved, i18n.StatusClipboardCopied:
+	default:
+		m.SetStatus(i18n.StatusAdbOpenH264Download, percent)
 	}
 }
 
@@ -430,6 +462,7 @@ func (m *AndroidShotModel) StartLive() {
 	}
 	m.liveStopped = false
 	m.liveFails = 0
+	m.downloadPct = -1
 	ctx, cancel := context.WithCancel(context.Background())
 	m.liveCancel = cancel
 	ch := make(chan androidLiveResult, 1)
@@ -456,7 +489,15 @@ func liveLoop(ctx context.Context, client adbfs.Client, serial string, ch chan a
 }
 
 func liveH264(ctx context.Context, client adbfs.Client, serial string, ch chan androidLiveResult) error {
-	dec, err := openh264.NewDecoder(ctx)
+	lastPct := -1
+	dec, err := openh264.NewDecoderProgress(ctx, func(done, total int64) {
+		pct := openh264.Percent(done, total)
+		if pct == lastPct {
+			return
+		}
+		lastPct = pct
+		sendLiveResult(ctx, ch, androidLiveResult{download: true, percent: pct})
+	})
 	if err != nil {
 		return err
 	}
@@ -589,6 +630,7 @@ func (m *AndroidShotModel) StopLive() {
 	}
 	m.live = false
 	m.pendingLive = nil
+	m.downloadPct = -1
 	m.generation++
 }
 

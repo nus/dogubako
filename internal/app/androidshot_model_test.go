@@ -309,6 +309,24 @@ func TestAndroidShotEnsureLiveAndSetMode(t *testing.T) {
 	}
 }
 
+func TestAndroidShotDownloadProgressStatus(t *testing.T) {
+	var m AndroidShotModel
+	ch := make(chan androidLiveResult, 1)
+	m.live = true
+	m.pendingLive = ch
+	ch <- androidLiveResult{download: true, percent: 42}
+	m.Drain()
+	if m.DownloadPercent() != 42 {
+		t.Fatalf("percent = %d", m.DownloadPercent())
+	}
+	if got := m.StatusText(i18n.EN); got != i18n.T(i18n.EN, i18n.StatusAdbOpenH264Download, 42) {
+		t.Fatalf("status = %q", got)
+	}
+	if got := m.StatusText(i18n.JA); got != i18n.T(i18n.JA, i18n.StatusAdbOpenH264Download, 42) {
+		t.Fatalf("ja status = %q", got)
+	}
+}
+
 func TestAndroidShotLiveFallsBackFromH264(t *testing.T) {
 	home := t.TempDir()
 	restore := userdir.Override("linux", home, nil)

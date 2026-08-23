@@ -83,6 +83,7 @@ func (t *AndroidShotTool) WriteStateKey(context *guigui.Context, w *guigui.State
 	w.WriteBool(shot.Busy())
 	w.WriteBool(shot.Live())
 	w.WriteString(shot.Serial())
+	w.WriteInt(shot.DownloadPercent())
 }
 
 func (t *AndroidShotTool) OnCapture(f func(context *guigui.Context)) {
@@ -269,6 +270,8 @@ func (t *AndroidShotTool) Build(context *guigui.Context, adder *guigui.ChildAdde
 		t.previewEmpty.SetVerticalAlign(basicwidget.VerticalAlignMiddle)
 		if len(devs) == 0 {
 			t.previewEmpty.SetValue(i18n.T(lang, i18n.AndroidNoDevices))
+		} else if pct := model.DownloadPercent(); live && pct >= 0 {
+			t.previewEmpty.SetValue(i18n.T(lang, i18n.AndroidShotLiveDownload, pct))
 		} else if live {
 			t.previewEmpty.SetValue(i18n.T(lang, i18n.AndroidShotLiveWait))
 		} else {

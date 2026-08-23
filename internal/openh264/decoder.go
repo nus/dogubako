@@ -27,13 +27,18 @@ type Decoder struct {
 
 // NewDecoder downloads (if needed) and initializes an OpenH264 decoder.
 func NewDecoder(ctx context.Context) (*Decoder, error) {
+	return NewDecoderProgress(ctx, nil)
+}
+
+// NewDecoderProgress is NewDecoder with optional download progress.
+func NewDecoderProgress(ctx context.Context, progress ProgressFunc) (*Decoder, error) {
 	if err := ctx.Err(); err != nil {
 		return nil, err
 	}
 	if !Enabled() {
 		return nil, fmt.Errorf("openh264: disabled")
 	}
-	if err := loadLibrary(ctx); err != nil {
+	if err := loadLibrary(ctx, progress); err != nil {
 		return nil, err
 	}
 	var dec *isvcDecoder
@@ -126,13 +131,13 @@ func resetLibraryForTest() {
 	libErr = nil
 }
 
-func loadLibrary(ctx context.Context) error {
+func loadLibrary(ctx context.Context, progress ProgressFunc) error {
 	libMu.Lock()
 	defer libMu.Unlock()
 	if libReady {
 		return libErr
 	}
-	path, err := EnsureLibrary(ctx)
+	path, err := EnsureLibraryProgress(ctx, progress)
 	if err != nil {
 		if ctx.Err() != nil {
 			return err
