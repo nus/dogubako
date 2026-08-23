@@ -52,6 +52,8 @@ type Client interface {
 	PullFile(ctx context.Context, serial, remote, local string) error
 	PushFile(ctx context.Context, serial, local, remote string, perm os.FileMode, mtime time.Time) error
 	MkdirAll(ctx context.Context, serial, path string) error
+	// Screencap returns a PNG of the device display (screencap -p).
+	Screencap(ctx context.Context, serial string) ([]byte, error)
 }
 
 // DefaultRoots are tried in order when a device is first opened.

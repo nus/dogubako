@@ -6,10 +6,11 @@ import "fmt"
 type Key string
 
 const (
-	AppTitle       Key = "app.title"
-	ToolImage      Key = "tool.image"
-	ToolScreenshot Key = "tool.screenshot"
-	ToolAndroid    Key = "tool.android"
+	AppTitle        Key = "app.title"
+	ToolImage       Key = "tool.image"
+	ToolScreenshot  Key = "tool.screenshot"
+	ToolAndroid     Key = "tool.android"
+	ToolAndroidShot Key = "tool.android_shot"
 
 	OpenFile       Key = "image.open_file"
 	PasteClipboard Key = "image.paste_clipboard"
@@ -75,6 +76,9 @@ const (
 	AndroidColModified Key = "android.col_modified"
 	AndroidNoDevices   Key = "android.no_devices"
 	AndroidHint        Key = "android.hint"
+	AndroidShotCapture Key = "android_shot.capture"
+	AndroidShotHint    Key = "android_shot.hint"
+	AndroidShotEmpty   Key = "android_shot.empty"
 	DialogOpenDir      Key = "dialog.open_dir"
 	DialogSaveAny      Key = "dialog.save_any"
 	DialogOpenAny      Key = "dialog.open_any"
@@ -123,6 +127,9 @@ const (
 	StatusAdbCopyFailed            Key = "status.adb_copy_failed"
 	StatusAdbNoSelection           Key = "status.adb_no_selection"
 	StatusAdbSelectOnline          Key = "status.adb_select_online"
+	StatusAdbDeviceReady           Key = "status.adb_device_ready"
+	StatusAdbCapturing             Key = "status.adb_capturing"
+	StatusAdbCaptureFailed         Key = "status.adb_capture_failed"
 )
 
 var catalogs = map[Lang]map[Key]string{
@@ -131,6 +138,7 @@ var catalogs = map[Lang]map[Key]string{
 		ToolImage:                      "画像",
 		ToolScreenshot:                 "画面キャプチャ",
 		ToolAndroid:                    "Android ファイル",
+		ToolAndroidShot:                "Android 画面",
 		OpenFile:                       "ファイルを開く",
 		PasteClipboard:                 "クリップボードから貼り付け",
 		InputHint:                      "ファイル指定・ドロップ・%s で入力",
@@ -192,7 +200,10 @@ var catalogs = map[Lang]map[Key]string{
 		AndroidColSize:                 "サイズ",
 		AndroidColModified:             "更新日時",
 		AndroidNoDevices:               "接続中のデバイスはありません",
-		AndroidHint:                    "ADB プロトコルで端末のファイルを閲覧・コピーします（adb コマンドは使いません）。",
+		AndroidHint:                    "ADB プロトコルで端末のファイルを閲覧・コピーします。",
+		AndroidShotCapture:             "キャプチャ",
+		AndroidShotHint:                "ADB プロトコルで端末の画面を撮影します。",
+		AndroidShotEmpty:               "キャプチャするか、左のリストから画像を選んでください。",
 		DialogOpenDir:                  "保存先フォルダ",
 		DialogSaveAny:                  "ファイルを保存",
 		DialogOpenAny:                  "ファイルを選ぶ",
@@ -239,12 +250,16 @@ var catalogs = map[Lang]map[Key]string{
 		StatusAdbCopyFailed:            "コピーに失敗しました: %v",
 		StatusAdbNoSelection:           "コピーするファイルまたはフォルダを選んでください",
 		StatusAdbSelectOnline:          "オンラインのデバイスを選んでください",
+		StatusAdbDeviceReady:           "%s を使います",
+		StatusAdbCapturing:             "端末の画面を撮影しています…",
+		StatusAdbCaptureFailed:         "画面の撮影に失敗しました: %v",
 	},
 	EN: {
 		AppTitle:                       "Dogubako",
 		ToolImage:                      "Image",
 		ToolScreenshot:                 "Screenshot",
 		ToolAndroid:                    "Android Files",
+		ToolAndroidShot:                "Android Screen",
 		OpenFile:                       "Open File",
 		PasteClipboard:                 "Paste from Clipboard",
 		InputHint:                      "Open, drop, or paste with %s",
@@ -306,7 +321,10 @@ var catalogs = map[Lang]map[Key]string{
 		AndroidColSize:                 "Size",
 		AndroidColModified:             "Modified",
 		AndroidNoDevices:               "No devices connected",
-		AndroidHint:                    "Browse and copy device files over the ADB protocol (the adb command is not used).",
+		AndroidHint:                    "Browse and copy device files over the ADB protocol.",
+		AndroidShotCapture:             "Capture",
+		AndroidShotHint:                "Capture the device screen over the ADB protocol.",
+		AndroidShotEmpty:               "Capture a screenshot, or choose one from the list.",
 		DialogOpenDir:                  "Destination Folder",
 		DialogSaveAny:                  "Save File",
 		DialogOpenAny:                  "Choose File",
@@ -353,6 +371,9 @@ var catalogs = map[Lang]map[Key]string{
 		StatusAdbCopyFailed:            "Copy failed: %v",
 		StatusAdbNoSelection:           "Select a file or folder to copy",
 		StatusAdbSelectOnline:          "Select an online device",
+		StatusAdbDeviceReady:           "Using %s",
+		StatusAdbCapturing:             "Capturing the device screen…",
+		StatusAdbCaptureFailed:         "Screen capture failed: %v",
 	},
 }
 

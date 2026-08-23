@@ -42,6 +42,7 @@ type ScreenshotModel struct {
 	destErr   error
 	lastSaved string
 	selected  string
+	prefix    string
 
 	files          []ScreenshotFile
 	thumbs         map[string]thumbEntry
@@ -190,7 +191,7 @@ func (m *ScreenshotModel) ApplyCaptureFile(path string) error {
 	if path == "" {
 		return fmt.Errorf("no image")
 	}
-	dest, err := userdir.SuggestedPath(time.Now())
+	dest, err := m.suggestedPath(time.Now())
 	if err != nil {
 		m.SetStatus(i18n.StatusDestFailed, err)
 		_ = os.Remove(path)
@@ -426,8 +427,31 @@ func (m *ScreenshotModel) resolveDest() {
 	m.destDir = dir
 }
 
+func (m *ScreenshotModel) filename(t time.Time) string {
+	prefix := m.prefix
+	if prefix == "" {
+		prefix = "Screenshot"
+	}
+	if t.IsZero() {
+		t = time.Now()
+	}
+	return t.Format(prefix + "-2006-01-02-150405.png")
+}
+
+func (m *ScreenshotModel) suggestedPath(t time.Time) (string, error) {
+	dir := m.DestDir()
+	if dir == "" {
+		err := m.destErr
+		if err == nil {
+			err = fmt.Errorf("no dest")
+		}
+		return "", err
+	}
+	return userdir.UniquePath(dir, m.filename(t)), nil
+}
+
 func (m *ScreenshotModel) SuggestedFilename() string {
-	return userdir.Filename(time.Now())
+	return m.filename(time.Now())
 }
 
 func (m *ScreenshotModel) SuggestedSavePath() string {
@@ -440,7 +464,7 @@ func (m *ScreenshotModel) SuggestedSavePath() string {
 }
 
 func (m *ScreenshotModel) SaveDefault() error {
-	path, err := userdir.SuggestedPath(time.Now())
+	path, err := m.suggestedPath(time.Now())
 	if err != nil {
 		m.SetStatus(i18n.StatusDestFailed, err)
 		return err

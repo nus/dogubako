@@ -26,7 +26,10 @@ import (
 // Hidden app dirs (~/.config, ~/Library/Application Support) are for settings,
 // not for images the user expects to find in a file manager.
 
-const screenshotsSubdir = "Screenshots"
+const (
+	screenshotsSubdir = "Screenshots"
+	androidSubdir     = "Android"
+)
 
 var (
 	currentOS   = runtime.GOOS
@@ -96,6 +99,28 @@ func EnsureScreenshots() (string, error) {
 	}
 	if err := mkdirAll(dir, 0o755); err != nil {
 		return "", fmt.Errorf("create screenshot directory: %w", err)
+	}
+	return dir, nil
+}
+
+// AndroidScreenshots is Screenshots/Android. Device captures go here so they
+// stay next to desktop screenshots without mixing the two lists.
+func AndroidScreenshots() (string, error) {
+	dir, err := Screenshots()
+	if err != nil {
+		return "", err
+	}
+	return filepath.Join(dir, androidSubdir), nil
+}
+
+// EnsureAndroidScreenshots returns AndroidScreenshots after creating it if needed.
+func EnsureAndroidScreenshots() (string, error) {
+	dir, err := AndroidScreenshots()
+	if err != nil {
+		return "", err
+	}
+	if err := mkdirAll(dir, 0o755); err != nil {
+		return "", fmt.Errorf("create android screenshot directory: %w", err)
 	}
 	return dir, nil
 }

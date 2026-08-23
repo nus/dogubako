@@ -32,17 +32,19 @@ type Root struct {
 	imageTool      ImageTool
 	screenshotTool ScreenshotTool
 	androidTool    AndroidTool
+	androidShot    AndroidShotTool
 
 	model Model
 
-	pendingOpen           <-chan dialog.FileResult
-	pendingSave           <-chan dialog.FileResult
-	pendingScreenshotSave <-chan dialog.FileResult
-	pendingAndroidPull    <-chan dialog.FileResult
-	pendingAndroidPush    <-chan dialog.FileResult
-	pendingCapture        <-chan capture.Result
-	captureCancel         context.CancelFunc
-	captureHidden         bool
+	pendingOpen            <-chan dialog.FileResult
+	pendingSave            <-chan dialog.FileResult
+	pendingScreenshotSave  <-chan dialog.FileResult
+	pendingAndroidPull     <-chan dialog.FileResult
+	pendingAndroidPush     <-chan dialog.FileResult
+	pendingAndroidShotSave <-chan dialog.FileResult
+	pendingCapture         <-chan capture.Result
+	captureCancel          context.CancelFunc
+	captureHidden          bool
 
 	layoutItems []guigui.LinearLayoutItem
 }
@@ -62,9 +64,11 @@ func (r *Root) WriteStateKey(context *guigui.Context, w *guigui.StateKeyWriter) 
 	w.WriteUint64(r.model.Image().Generation())
 	w.WriteUint64(r.model.Screenshot().Generation())
 	w.WriteUint64(r.model.Android().Generation())
+	w.WriteUint64(r.model.AndroidShot().Generation())
 	w.WriteBool(r.model.Screenshot().HasImage())
 	w.WriteBool(r.pendingCapture != nil)
 	w.WriteBool(r.model.Android().Busy())
+	w.WriteBool(r.model.AndroidShot().Busy())
 }
 
 func (r *Root) contentWidget() guigui.Widget {
@@ -73,6 +77,8 @@ func (r *Root) contentWidget() guigui.Widget {
 		return &r.screenshotTool
 	case ToolAndroid:
 		return &r.androidTool
+	case ToolAndroidShot:
+		return &r.androidShot
 	default:
 		return &r.imageTool
 	}
@@ -129,6 +135,24 @@ func (r *Root) Build(context *guigui.Context, adder *guigui.ChildAdder) error {
 	r.androidTool.OnPushFolder(func(context *guigui.Context) {
 		r.startAndroidPush(true)
 	})
+	r.androidShot.OnRefresh(func(context *guigui.Context) {
+		r.model.AndroidShot().RefreshDevices()
+	})
+	r.androidShot.OnCapture(func(context *guigui.Context) {
+		r.model.AndroidShot().StartCapture()
+	})
+	r.androidShot.OnSaveAs(func(context *guigui.Context) {
+		r.startAndroidShotSave()
+	})
+	r.androidShot.OnCopy(func(context *guigui.Context) {
+		r.copyAndroidShot()
+	})
+	r.androidShot.OnSendToImage(func(context *guigui.Context) {
+		r.sendAndroidShotToImage()
+	})
+	r.androidShot.OnShowFolder(func(context *guigui.Context) {
+		r.showAndroidShotFolder()
+	})
 	return nil
 }
 
@@ -156,8 +180,12 @@ func (r *Root) Tick(context *guigui.Context, widgetBounds *guigui.WidgetBounds) 
 	r.drainDialogs()
 	r.drainCapture()
 	r.model.Android().Drain()
+	r.model.AndroidShot().Drain()
 	if r.model.Mode() == ToolScreenshot {
 		r.model.Screenshot().PollFiles()
+	}
+	if r.model.Mode() == ToolAndroidShot {
+		r.model.AndroidShot().PollFiles()
 	}
 	if files := ebiten.DroppedFiles(); files != nil && r.model.Mode() == ToolImage {
 		_ = r.model.Image().LoadDropped(files)
@@ -181,6 +209,15 @@ func (r *Root) HandleButtonInput(context *guigui.Context, widgetBounds *guigui.W
 		}
 	case ToolAndroid:
 		return guigui.HandleInputResult{}
+	case ToolAndroidShot:
+		switch {
+		case inpututil.IsKeyJustPressed(ebiten.KeyS):
+			_ = r.model.AndroidShot().SaveDefault()
+			return guigui.HandleInputByWidget(r)
+		case inpututil.IsKeyJustPressed(ebiten.KeyC):
+			r.copyAndroidShot()
+			return guigui.HandleInputByWidget(r)
+		}
 	default:
 		switch {
 		case inpututil.IsKeyJustPressed(ebiten.KeyO):
@@ -322,6 +359,20 @@ func (r *Root) drainDialogs() {
 		default:
 		}
 	}
+	if r.pendingAndroidShotSave != nil {
+		select {
+		case res := <-r.pendingAndroidShotSave:
+			r.pendingAndroidShotSave = nil
+			if res.Cancelled || res.Err != nil {
+				if res.Err != nil {
+					r.setAndroidShotDialogStatus(res.Err)
+				}
+				break
+			}
+			_ = r.model.AndroidShot().SavePath(res.Path)
+		default:
+		}
+	}
 }
 
 func (r *Root) startCapture() {
@@ -443,6 +494,56 @@ func (r *Root) showScreenshotFolder() {
 	}
 }
 
+func (r *Root) startAndroidShotSave() {
+	if r.pendingAndroidShotSave != nil || !r.model.AndroidShot().HasImage() {
+		return
+	}
+	lang := r.model.Lang()
+	r.pendingAndroidShotSave = dialog.SaveFileAsync(i18n.T(lang, i18n.DialogSave), r.model.AndroidShot().SuggestedSavePath(), &dialog.FileFilter{
+		Description: i18n.T(lang, i18n.FilterImage),
+		Extensions:  []string{"png"},
+	})
+}
+
+func (r *Root) copyAndroidShot() {
+	data, err := r.model.AndroidShot().ExportPNG()
+	if err != nil {
+		return
+	}
+	if err := clipboard.Write(clipboard.Contents{PNG: data}); err != nil {
+		r.model.AndroidShot().SetStatus(i18n.StatusClipboardCopyFailed)
+		return
+	}
+	r.model.AndroidShot().SetStatus(i18n.StatusClipboardCopied)
+}
+
+func (r *Root) sendAndroidShotToImage() {
+	shot := r.model.AndroidShot()
+	img := shot.Image()
+	if img == nil {
+		shot.SetStatus(i18n.StatusNoCaptureToSave)
+		return
+	}
+	name := filepath.Base(shot.SelectedPath())
+	if name == "" || name == "." {
+		name = shot.SuggestedFilename()
+	}
+	_ = r.model.Image().LoadImage(img, name)
+	r.model.SetMode(ToolImage)
+}
+
+func (r *Root) showAndroidShotFolder() {
+	shot := r.model.AndroidShot()
+	path := shot.RevealPath()
+	if path == "" {
+		shot.SetStatus(i18n.StatusDestFailed, shot.DestErr())
+		return
+	}
+	if err := userdir.OpenInFileManager(path); err != nil {
+		shot.SetStatus(i18n.StatusFolderOpenFailed, err)
+	}
+}
+
 func (r *Root) startAndroidPull() {
 	if r.pendingAndroidPull != nil || r.model.Android().Busy() {
 		return
@@ -486,6 +587,14 @@ func (r *Root) setScreenshotDialogStatus(err error) {
 		return
 	}
 	r.model.Screenshot().SetStatus(i18n.StatusSaveDialogFailed, err)
+}
+
+func (r *Root) setAndroidShotDialogStatus(err error) {
+	if errors.Is(err, dialog.ErrNoFileDialog) {
+		r.model.AndroidShot().SetStatus(i18n.StatusNoFileDialog)
+		return
+	}
+	r.model.AndroidShot().SetStatus(i18n.StatusSaveDialogFailed, err)
 }
 
 func (r *Root) setDialogStatus(open bool, err error) {
