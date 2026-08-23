@@ -134,6 +134,7 @@ const (
 	StatusAdbCaptureFailed         Key = "status.adb_capture_failed"
 	StatusAdbLiveStarting          Key = "status.adb_live_starting"
 	StatusAdbLive                  Key = "status.adb_live"
+	StatusAdbLiveH264              Key = "status.adb_live_h264"
 	StatusAdbLiveFailed            Key = "status.adb_live_failed"
 	StatusAdbLiveStopped           Key = "status.adb_live_stopped"
 )
@@ -208,7 +209,7 @@ var catalogs = map[Lang]map[Key]string{
 		AndroidNoDevices:               "接続中のデバイスはありません",
 		AndroidHint:                    "ADB プロトコルで端末のファイルを閲覧・コピーします。",
 		AndroidShotCapture:             "キャプチャ",
-		AndroidShotHint:                "ADB プロトコルで端末の画面をライブ表示・撮影します。",
+		AndroidShotHint:                "ADB でライブ表示・撮影します。OpenH264 Video Codec provided by Cisco Systems, Inc.",
 		AndroidShotEmpty:               "ライブを開始するか、キャプチャするか、左のリストから画像を選んでください。",
 		AndroidShotLive:                "ライブ",
 		AndroidShotLiveWait:            "端末の画面を取得しています…",
@@ -263,6 +264,7 @@ var catalogs = map[Lang]map[Key]string{
 		StatusAdbCaptureFailed:         "画面の撮影に失敗しました: %v",
 		StatusAdbLiveStarting:          "ライブプレビューを開始しています…",
 		StatusAdbLive:                  "ライブプレビュー中（%d×%d）",
+		StatusAdbLiveH264:              "ライブプレビュー中（%d×%d、H.264）",
 		StatusAdbLiveFailed:            "ライブプレビューに失敗しました: %v",
 		StatusAdbLiveStopped:           "ライブプレビューを停止しました",
 	},
@@ -335,7 +337,7 @@ var catalogs = map[Lang]map[Key]string{
 		AndroidNoDevices:               "No devices connected",
 		AndroidHint:                    "Browse and copy device files over the ADB protocol.",
 		AndroidShotCapture:             "Capture",
-		AndroidShotHint:                "Show a live preview and capture the device screen over the ADB protocol.",
+		AndroidShotHint:                "Live preview and capture over ADB. OpenH264 Video Codec provided by Cisco Systems, Inc.",
 		AndroidShotEmpty:               "Start live preview, capture a screenshot, or choose one from the list.",
 		AndroidShotLive:                "Live",
 		AndroidShotLiveWait:            "Fetching the device screen…",
@@ -390,6 +392,7 @@ var catalogs = map[Lang]map[Key]string{
 		StatusAdbCaptureFailed:         "Screen capture failed: %v",
 		StatusAdbLiveStarting:          "Starting live preview…",
 		StatusAdbLive:                  "Live preview (%d×%d)",
+		StatusAdbLiveH264:              "Live preview (%d×%d, H.264)",
 		StatusAdbLiveFailed:            "Live preview failed: %v",
 		StatusAdbLiveStopped:           "Live preview stopped",
 	},

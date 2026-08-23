@@ -3,14 +3,18 @@ package app
 import (
 	"context"
 	"errors"
+	"fmt"
 	"image"
+	"io"
 	"os"
+	"sync/atomic"
 	"time"
 
 	"github.com/guigui-gui/guigui"
 
 	"github.com/nus/dogubako/internal/adbfs"
 	"github.com/nus/dogubako/internal/i18n"
+	"github.com/nus/dogubako/internal/openh264"
 	"github.com/nus/dogubako/internal/userdir"
 )
 
@@ -19,6 +23,8 @@ const (
 	adbLiveTimeout      = 15 * time.Second
 	adbLiveMinInterval  = 80 * time.Millisecond
 	adbLiveFailLimit    = 3
+	adbH264FirstFrame   = 8 * time.Second
+	adbH264DecodeLimit  = 24
 )
 
 type androidShotResult struct {
@@ -28,8 +34,9 @@ type androidShotResult struct {
 }
 
 type androidLiveResult struct {
-	img image.Image
-	err error
+	img  image.Image
+	err  error
+	h264 bool
 }
 
 // AndroidShotModel captures the screen of a connected Android device over ADB.
@@ -192,13 +199,13 @@ func (m *AndroidShotModel) drainLive() {
 			return
 		}
 		m.liveFails = 0
-		m.applyLiveFrame(res.img)
+		m.applyLiveFrame(res.img, res.h264)
 		guigui.RequestRebuild()
 	default:
 	}
 }
 
-func (m *AndroidShotModel) applyLiveFrame(img image.Image) {
+func (m *AndroidShotModel) applyLiveFrame(img image.Image, h264 bool) {
 	if img == nil {
 		return
 	}
@@ -210,7 +217,11 @@ func (m *AndroidShotModel) applyLiveFrame(img image.Image) {
 	switch m.status.key {
 	case i18n.StatusSaved, i18n.StatusClipboardCopied:
 	default:
-		m.SetStatus(i18n.StatusAdbLive, m.imageSize.X, m.imageSize.Y)
+		if h264 {
+			m.SetStatus(i18n.StatusAdbLiveH264, m.imageSize.X, m.imageSize.Y)
+		} else {
+			m.SetStatus(i18n.StatusAdbLive, m.imageSize.X, m.imageSize.Y)
+		}
 	}
 }
 
@@ -434,6 +445,92 @@ func (m *AndroidShotModel) StartLive() {
 }
 
 func liveLoop(ctx context.Context, client adbfs.Client, serial string, ch chan androidLiveResult) {
+	if openh264.Enabled() {
+		if err := liveH264(ctx, client, serial, ch); ctx.Err() != nil {
+			return
+		} else if err == nil {
+			return
+		}
+	}
+	liveScreencap(ctx, client, serial, ch)
+}
+
+func liveH264(ctx context.Context, client adbfs.Client, serial string, ch chan androidLiveResult) error {
+	dec, err := openh264.NewDecoder(ctx)
+	if err != nil {
+		return err
+	}
+	defer dec.Close()
+
+	var gotFrame atomic.Bool
+	for {
+		if err := ctx.Err(); err != nil {
+			return err
+		}
+		stream, err := client.ScreenrecordH264(ctx, serial)
+		if err != nil {
+			if !gotFrame.Load() {
+				return err
+			}
+			if !sleepCtx(ctx, time.Second) {
+				return ctx.Err()
+			}
+			continue
+		}
+		err = pumpH264(ctx, dec, stream, ch, &gotFrame)
+		_ = stream.Close()
+		if ctx.Err() != nil {
+			return ctx.Err()
+		}
+		if err != nil && !gotFrame.Load() {
+			return err
+		}
+	}
+}
+
+func pumpH264(ctx context.Context, dec *openh264.Decoder, stream io.ReadCloser, ch chan androidLiveResult, gotFrame *atomic.Bool) error {
+	timer := time.AfterFunc(adbH264FirstFrame, func() {
+		if !gotFrame.Load() {
+			_ = stream.Close()
+		}
+	})
+	defer timer.Stop()
+
+	decodeFails := 0
+	err := openh264.SplitAnnexB(stream, func(nal []byte) error {
+		if err := ctx.Err(); err != nil {
+			return err
+		}
+		img, err := dec.Decode(nal)
+		if err != nil {
+			if gotFrame.Load() {
+				return nil
+			}
+			decodeFails++
+			if decodeFails >= adbH264DecodeLimit {
+				return err
+			}
+			return nil
+		}
+		if img == nil {
+			return nil
+		}
+		gotFrame.Store(true)
+		decodeFails = 0
+		timer.Stop()
+		sendLiveResult(ctx, ch, androidLiveResult{img: img, h264: true})
+		return nil
+	})
+	if err != nil && !gotFrame.Load() {
+		return err
+	}
+	if !gotFrame.Load() {
+		return fmt.Errorf("h264: no frame")
+	}
+	return err
+}
+
+func liveScreencap(ctx context.Context, client adbfs.Client, serial string, ch chan androidLiveResult) {
 	for {
 		if err := ctx.Err(); err != nil {
 			return
@@ -448,14 +545,21 @@ func liveLoop(ctx context.Context, client adbfs.Client, serial string, ch chan a
 		}
 		sendLiveResult(ctx, ch, res)
 		if wait := adbLiveMinInterval - time.Since(started); wait > 0 {
-			timer := time.NewTimer(wait)
-			select {
-			case <-ctx.Done():
-				timer.Stop()
+			if !sleepCtx(ctx, wait) {
 				return
-			case <-timer.C:
 			}
 		}
+	}
+}
+
+func sleepCtx(ctx context.Context, d time.Duration) bool {
+	timer := time.NewTimer(d)
+	defer timer.Stop()
+	select {
+	case <-ctx.Done():
+		return false
+	case <-timer.C:
+		return true
 	}
 }
 

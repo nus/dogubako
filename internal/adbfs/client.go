@@ -3,6 +3,7 @@ package adbfs
 import (
 	"context"
 	"image"
+	"io"
 	"os"
 	"time"
 )
@@ -63,6 +64,9 @@ type Client interface {
 	// ScreencapImage returns a decoded device display image. The live client
 	// prefers the raw framebuffer (screencap without -p) and falls back to PNG.
 	ScreencapImage(ctx context.Context, serial string) (image.Image, error)
+	// ScreenrecordH264 starts a raw H.264 Annex-B stream of the device display.
+	// The caller must Close the reader to stop recording.
+	ScreenrecordH264(ctx context.Context, serial string) (io.ReadCloser, error)
 }
 
 // DefaultRoots are tried in order when a device is first opened.

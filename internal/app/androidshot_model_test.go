@@ -309,6 +309,28 @@ func TestAndroidShotEnsureLiveAndSetMode(t *testing.T) {
 	}
 }
 
+func TestAndroidShotLiveFallsBackFromH264(t *testing.T) {
+	home := t.TempDir()
+	restore := userdir.Override("linux", home, nil)
+	t.Cleanup(restore)
+
+	png := solidPNG(t, 6, 4)
+	fs := adbfs.NewMem(adbfs.Device{Serial: "pixel", State: "device", Model: "Pixel"})
+	fs.Shot = map[string][]byte{"pixel": png}
+	fs.H264 = map[string][]byte{"pixel": {0, 0, 0, 1, 0x67}}
+
+	var m AndroidShotModel
+	m.SetClient(fs)
+	m.EnsureLoaded()
+	waitAndroidShot(t, &m)
+	m.StartLive()
+	t.Cleanup(m.StopLive)
+	waitAndroidLive(t, &m)
+	if got := m.StatusText(i18n.EN); got != i18n.T(i18n.EN, i18n.StatusAdbLive, 6, 4) {
+		t.Fatalf("fallback status = %q", got)
+	}
+}
+
 func TestAndroidShotSelectsFirstOnlineDevice(t *testing.T) {
 	home := t.TempDir()
 	restore := userdir.Override("linux", home, nil)
