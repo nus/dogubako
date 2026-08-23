@@ -1,8 +1,11 @@
 package adbfs
 
 import (
+	"bytes"
 	"context"
 	"fmt"
+	"image"
+	_ "image/png"
 	"os"
 	"path/filepath"
 	"strings"
@@ -276,6 +279,18 @@ func (m *Mem) Screencap(ctx context.Context, serial string) ([]byte, error) {
 		}
 	}
 	return nil, fmt.Errorf("no screenshot")
+}
+
+func (m *Mem) ScreencapImage(ctx context.Context, serial string) (image.Image, error) {
+	data, err := m.Screencap(ctx, serial)
+	if err != nil {
+		return nil, err
+	}
+	if img, err := decodeScreencapBytes(data); err == nil {
+		return img, nil
+	}
+	img, _, err := image.Decode(bytes.NewReader(data))
+	return img, err
 }
 
 // FileData returns the stored bytes for path.

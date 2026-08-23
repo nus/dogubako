@@ -2,6 +2,7 @@ package adbfs
 
 import (
 	"context"
+	"image"
 	"os"
 	"time"
 )
@@ -44,6 +45,11 @@ type Entry struct {
 	CrtTime time.Time // zero when the filesystem does not expose birth time
 }
 
+var (
+	_ Client = (*live)(nil)
+	_ Client = (*Mem)(nil)
+)
+
 // Client talks to Android devices over the ADB protocol (not the adb CLI).
 type Client interface {
 	Devices(ctx context.Context) ([]Device, error)
@@ -54,6 +60,9 @@ type Client interface {
 	MkdirAll(ctx context.Context, serial, path string) error
 	// Screencap returns a PNG of the device display (screencap -p).
 	Screencap(ctx context.Context, serial string) ([]byte, error)
+	// ScreencapImage returns a decoded device display image. The live client
+	// prefers the raw framebuffer (screencap without -p) and falls back to PNG.
+	ScreencapImage(ctx context.Context, serial string) (image.Image, error)
 }
 
 // DefaultRoots are tried in order when a device is first opened.

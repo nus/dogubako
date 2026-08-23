@@ -63,26 +63,28 @@ const (
 	ScreenshotSendImage    Key = "screenshot.send_image"
 	ScreenshotShowFolder   Key = "screenshot.show_folder"
 
-	AndroidDevices     Key = "android.devices"
-	AndroidFiles       Key = "android.files"
-	AndroidRefresh     Key = "android.refresh"
-	AndroidUp          Key = "android.up"
-	AndroidPull        Key = "android.pull"
-	AndroidPushFile    Key = "android.push_file"
-	AndroidPushFolder  Key = "android.push_folder"
-	AndroidEmpty       Key = "android.empty"
-	AndroidColName     Key = "android.col_name"
-	AndroidColSize     Key = "android.col_size"
-	AndroidColModified Key = "android.col_modified"
-	AndroidNoDevices   Key = "android.no_devices"
-	AndroidHint        Key = "android.hint"
-	AndroidShotCapture Key = "android_shot.capture"
-	AndroidShotHint    Key = "android_shot.hint"
-	AndroidShotEmpty   Key = "android_shot.empty"
-	DialogOpenDir      Key = "dialog.open_dir"
-	DialogSaveAny      Key = "dialog.save_any"
-	DialogOpenAny      Key = "dialog.open_any"
-	DialogOpenFolder   Key = "dialog.open_folder"
+	AndroidDevices      Key = "android.devices"
+	AndroidFiles        Key = "android.files"
+	AndroidRefresh      Key = "android.refresh"
+	AndroidUp           Key = "android.up"
+	AndroidPull         Key = "android.pull"
+	AndroidPushFile     Key = "android.push_file"
+	AndroidPushFolder   Key = "android.push_folder"
+	AndroidEmpty        Key = "android.empty"
+	AndroidColName      Key = "android.col_name"
+	AndroidColSize      Key = "android.col_size"
+	AndroidColModified  Key = "android.col_modified"
+	AndroidNoDevices    Key = "android.no_devices"
+	AndroidHint         Key = "android.hint"
+	AndroidShotCapture  Key = "android_shot.capture"
+	AndroidShotHint     Key = "android_shot.hint"
+	AndroidShotEmpty    Key = "android_shot.empty"
+	AndroidShotLive     Key = "android_shot.live"
+	AndroidShotLiveWait Key = "android_shot.live_wait"
+	DialogOpenDir       Key = "dialog.open_dir"
+	DialogSaveAny       Key = "dialog.save_any"
+	DialogOpenAny       Key = "dialog.open_any"
+	DialogOpenFolder    Key = "dialog.open_folder"
 
 	DialogOpen   Key = "dialog.open"
 	DialogSave   Key = "dialog.save"
@@ -130,6 +132,10 @@ const (
 	StatusAdbDeviceReady           Key = "status.adb_device_ready"
 	StatusAdbCapturing             Key = "status.adb_capturing"
 	StatusAdbCaptureFailed         Key = "status.adb_capture_failed"
+	StatusAdbLiveStarting          Key = "status.adb_live_starting"
+	StatusAdbLive                  Key = "status.adb_live"
+	StatusAdbLiveFailed            Key = "status.adb_live_failed"
+	StatusAdbLiveStopped           Key = "status.adb_live_stopped"
 )
 
 var catalogs = map[Lang]map[Key]string{
@@ -202,8 +208,10 @@ var catalogs = map[Lang]map[Key]string{
 		AndroidNoDevices:               "接続中のデバイスはありません",
 		AndroidHint:                    "ADB プロトコルで端末のファイルを閲覧・コピーします。",
 		AndroidShotCapture:             "キャプチャ",
-		AndroidShotHint:                "ADB プロトコルで端末の画面を撮影します。",
-		AndroidShotEmpty:               "キャプチャするか、左のリストから画像を選んでください。",
+		AndroidShotHint:                "ADB プロトコルで端末の画面をライブ表示・撮影します。",
+		AndroidShotEmpty:               "ライブを開始するか、キャプチャするか、左のリストから画像を選んでください。",
+		AndroidShotLive:                "ライブ",
+		AndroidShotLiveWait:            "端末の画面を取得しています…",
 		DialogOpenDir:                  "保存先フォルダ",
 		DialogSaveAny:                  "ファイルを保存",
 		DialogOpenAny:                  "ファイルを選ぶ",
@@ -253,6 +261,10 @@ var catalogs = map[Lang]map[Key]string{
 		StatusAdbDeviceReady:           "%s を使います",
 		StatusAdbCapturing:             "端末の画面を撮影しています…",
 		StatusAdbCaptureFailed:         "画面の撮影に失敗しました: %v",
+		StatusAdbLiveStarting:          "ライブプレビューを開始しています…",
+		StatusAdbLive:                  "ライブプレビュー中（%d×%d）",
+		StatusAdbLiveFailed:            "ライブプレビューに失敗しました: %v",
+		StatusAdbLiveStopped:           "ライブプレビューを停止しました",
 	},
 	EN: {
 		AppTitle:                       "Dogubako",
@@ -323,8 +335,10 @@ var catalogs = map[Lang]map[Key]string{
 		AndroidNoDevices:               "No devices connected",
 		AndroidHint:                    "Browse and copy device files over the ADB protocol.",
 		AndroidShotCapture:             "Capture",
-		AndroidShotHint:                "Capture the device screen over the ADB protocol.",
-		AndroidShotEmpty:               "Capture a screenshot, or choose one from the list.",
+		AndroidShotHint:                "Show a live preview and capture the device screen over the ADB protocol.",
+		AndroidShotEmpty:               "Start live preview, capture a screenshot, or choose one from the list.",
+		AndroidShotLive:                "Live",
+		AndroidShotLiveWait:            "Fetching the device screen…",
 		DialogOpenDir:                  "Destination Folder",
 		DialogSaveAny:                  "Save File",
 		DialogOpenAny:                  "Choose File",
@@ -374,6 +388,10 @@ var catalogs = map[Lang]map[Key]string{
 		StatusAdbDeviceReady:           "Using %s",
 		StatusAdbCapturing:             "Capturing the device screen…",
 		StatusAdbCaptureFailed:         "Screen capture failed: %v",
+		StatusAdbLiveStarting:          "Starting live preview…",
+		StatusAdbLive:                  "Live preview (%d×%d)",
+		StatusAdbLiveFailed:            "Live preview failed: %v",
+		StatusAdbLiveStopped:           "Live preview stopped",
 	},
 }
 
