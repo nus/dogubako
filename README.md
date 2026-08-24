@@ -62,8 +62,8 @@ USB デバッグ（または無線デバッグ）が有効な Android 端末の�
 
 - 接続中のデバイス一覧から選択
 - 端末の画面をライブプレビュー（ツールを開くと自動開始。トグルで停止 / 再開）
-- ライブはまず `screenrecord` の H.264 を [OpenH264](https://www.openh264.org/)（Cisco の事前ビルド、`ebitengine/purego` で実行時ロード）で復号します。ライブラリが無い、または High プロファイルなどで復号できないときは `screencap` の連写に戻します
-- OpenH264 Video Codec provided by Cisco Systems, Inc. 初回だけ Cisco の CDN から共有ライブラリをユーザキャッシュへ取得します。使いたくないときは環境変数 `DOGUBAKO_OPENH264=0`、またはキャッシュファイルの削除で無効にできます
+- ライブはまず `screenrecord` の H.264 を復号します。**macOS は VideoToolbox**、Ubuntu は [OpenH264](https://www.openh264.org/)（Cisco の事前ビルド、`ebitengine/purego` で実行時ロード）です。復号できないときは `screencap` の連写に戻します
+- Ubuntu では OpenH264 Video Codec provided by Cisco Systems, Inc. 初回だけ Cisco の CDN から共有ライブラリをユーザキャッシュへ取得します。使いたくないときは環境変数 `DOGUBAKO_OPENH264=0`、またはキャッシュファイルの削除で無効にできます。macOS のバイナリに OpenH264 は含まれません
 - 遅延（秒）のあと、端末の画面全体を PNG で取得（ライブ中は表示中のフレームを保存）
 - 撮影した画像は保存先へ自動保存
 - 保存先フォルダの画像をサムネイル付きリストで表示し、クリックでプレビュー
@@ -222,7 +222,8 @@ make test
 - `internal/adbfs` — ADB プロトコルによるデバイス一覧・画面撮影・ファイル同期（pure Go）
 - `internal/mtpfs` — MTP プロトコルによるデバイス一覧・ファイル同期（pure Go）
 - `internal/usbhost` — macOS の IOUSBHost による USB bulk 転送（purego、Linux では未対応）
-- `internal/openh264` — Cisco OpenH264 共有ライブラリの実行時ロードと H.264 復号（`ebitengine/purego`、CGO なし）
+- `internal/h264` — Annex-B 分割と H.264 復号（macOS は VideoToolbox、それ以外は OpenH264）
+- `internal/openh264` — Cisco OpenH264 共有ライブラリの実行時ロードと復号（Linux のみ、`ebitengine/purego`、CGO なし）
 - `internal/appicon` — アプリ／パッケージ用アイコン
 - `internal/imageproc` — リサイズ・切り取り・エンコード
 - `internal/capture` — OS の画面キャプチャコマンド呼び出し

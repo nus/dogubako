@@ -1,3 +1,5 @@
+//go:build !darwin
+
 package openh264
 
 // C ABI types for OpenH264 2.6 decoder (64-bit). Layout follows Cisco's

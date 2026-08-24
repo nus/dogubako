@@ -10,6 +10,7 @@ import (
 	"github.com/guigui-gui/guigui"
 	"github.com/guigui-gui/guigui/basicwidget"
 
+	"github.com/nus/dogubako/internal/h264"
 	"github.com/nus/dogubako/internal/i18n"
 )
 
@@ -193,7 +194,11 @@ func (t *AndroidShotTool) Build(context *guigui.Context, adder *guigui.ChildAdde
 	})
 	context.SetEnabled(&t.liveToggle, (online || live) && !capturing)
 
-	t.hint.SetValue(i18n.T(lang, i18n.AndroidShotHint))
+	hint := i18n.T(lang, i18n.AndroidShotHint)
+	if a := h264.Attribution(); a != "" {
+		hint += " " + a
+	}
+	t.hint.SetValue(hint)
 	t.hint.SetVerticalAlign(basicwidget.VerticalAlignMiddle)
 
 	if capturing {
