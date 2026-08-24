@@ -1,5 +1,9 @@
+//go:build !darwin
+
 // Package openh264 loads Cisco's prebuilt OpenH264 shared library via
 // ebitengine/purego (CGO_ENABLED=0) and decodes Annex-B H.264.
+//
+// macOS builds do not include this package; they decode with VideoToolbox.
 //
 // The binary is downloaded at runtime from Cisco so MPEG-LA fees stay on
 // Cisco's license. The library is never compiled from source or statically

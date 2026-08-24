@@ -1,3 +1,5 @@
+//go:build !darwin
+
 package openh264
 
 import (
@@ -23,13 +25,6 @@ func BinaryFileName() (string, error) {
 			return "libopenh264-" + version + "-linux64.8.so", nil
 		case "arm64":
 			return "libopenh264-" + version + "-linux-arm64.8.so", nil
-		}
-	case "darwin":
-		switch runtime.GOARCH {
-		case "amd64":
-			return "libopenh264-" + version + "-mac-x64.dylib", nil
-		case "arm64":
-			return "libopenh264-" + version + "-mac-arm64.dylib", nil
 		}
 	}
 	return "", fmt.Errorf("openh264: no Cisco binary for %s/%s", runtime.GOOS, runtime.GOARCH)

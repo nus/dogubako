@@ -13,8 +13,8 @@ import (
 	"github.com/guigui-gui/guigui"
 
 	"github.com/nus/dogubako/internal/adbfs"
+	"github.com/nus/dogubako/internal/h264"
 	"github.com/nus/dogubako/internal/i18n"
-	"github.com/nus/dogubako/internal/openh264"
 	"github.com/nus/dogubako/internal/userdir"
 )
 
@@ -122,7 +122,7 @@ func (m *AndroidShotModel) ensureDest() {
 
 func (m *AndroidShotModel) Live() bool { return m.live }
 
-// DownloadPercent is 0–100 while the OpenH264 binary is being fetched, or -1.
+// DownloadPercent is 0–100 while a codec library is being fetched, or -1.
 func (m *AndroidShotModel) DownloadPercent() int {
 	if m.status.key != i18n.StatusAdbOpenH264Download {
 		return -1
@@ -478,7 +478,7 @@ func (m *AndroidShotModel) StartLive() {
 }
 
 func liveLoop(ctx context.Context, client adbfs.Client, serial string, ch chan androidLiveResult) {
-	if openh264.Enabled() {
+	if h264.Enabled() {
 		if err := liveH264(ctx, client, serial, ch); ctx.Err() != nil {
 			return
 		} else if err == nil {
@@ -490,8 +490,8 @@ func liveLoop(ctx context.Context, client adbfs.Client, serial string, ch chan a
 
 func liveH264(ctx context.Context, client adbfs.Client, serial string, ch chan androidLiveResult) error {
 	lastPct := -1
-	dec, err := openh264.NewDecoderProgress(ctx, func(done, total int64) {
-		pct := openh264.Percent(done, total)
+	dec, err := h264.NewDecoderProgress(ctx, func(done, total int64) {
+		pct := h264.Percent(done, total)
 		if pct == lastPct {
 			return
 		}
@@ -529,7 +529,7 @@ func liveH264(ctx context.Context, client adbfs.Client, serial string, ch chan a
 	}
 }
 
-func pumpH264(ctx context.Context, dec *openh264.Decoder, stream io.ReadCloser, ch chan androidLiveResult, gotFrame *atomic.Bool) error {
+func pumpH264(ctx context.Context, dec h264.Decoder, stream io.ReadCloser, ch chan androidLiveResult, gotFrame *atomic.Bool) error {
 	timer := time.AfterFunc(adbH264FirstFrame, func() {
 		if !gotFrame.Load() {
 			_ = stream.Close()
@@ -538,7 +538,7 @@ func pumpH264(ctx context.Context, dec *openh264.Decoder, stream io.ReadCloser, 
 	defer timer.Stop()
 
 	decodeFails := 0
-	err := openh264.SplitAnnexB(stream, func(nal []byte) error {
+	err := h264.SplitAnnexB(stream, func(nal []byte) error {
 		if err := ctx.Err(); err != nil {
 			return err
 		}

@@ -1,4 +1,4 @@
-package openh264
+package h264
 
 import "io"
 

@@ -6,7 +6,7 @@ import (
 	"io"
 	"testing"
 
-	"github.com/nus/dogubako/internal/openh264"
+	"github.com/nus/dogubako/internal/h264"
 )
 
 func TestMemScreenrecordH264(t *testing.T) {
@@ -57,7 +57,7 @@ func TestSplitAnnexBFromMemStream(t *testing.T) {
 	}
 	defer r.Close()
 	var n int
-	if err := openh264.SplitAnnexB(r, func([]byte) error {
+	if err := h264.SplitAnnexB(r, func([]byte) error {
 		n++
 		return nil
 	}); err != nil {

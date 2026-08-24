@@ -1,3 +1,5 @@
+//go:build !darwin
+
 package openh264
 
 import (
@@ -18,7 +20,7 @@ import (
 func TestBinaryFileName(t *testing.T) {
 	name, err := BinaryFileName()
 	if err != nil {
-		if runtime.GOOS != "linux" && runtime.GOOS != "darwin" {
+		if runtime.GOOS != "linux" {
 			return
 		}
 		t.Fatal(err)

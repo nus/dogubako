@@ -1,4 +1,4 @@
-package openh264
+package h264
 
 import (
 	"bytes"
@@ -54,6 +54,45 @@ func TestIndexStartCode(t *testing.T) {
 	}
 	if got := indexStartCode([]byte{0, 0}, 0); got != -1 {
 		t.Fatalf("short = %d", got)
+	}
+}
+
+func TestNALPayloadAndAVCC(t *testing.T) {
+	nal := []byte{0, 0, 0, 1, 0x67, 0x42}
+	if got := nalType(nal); got != nalSPS {
+		t.Fatalf("type = %d", got)
+	}
+	if !bytes.Equal(nalPayload(nal), []byte{0x67, 0x42}) {
+		t.Fatalf("payload = %x", nalPayload(nal))
+	}
+	avcc := toAVCC(nal)
+	if len(avcc) != 6 || avcc[3] != 2 || avcc[4] != 0x67 {
+		t.Fatalf("avcc = %x", avcc)
+	}
+	short := []byte{0, 0, 1, 0x65, 1}
+	if got := nalType(short); got != nalIDR {
+		t.Fatalf("idr type = %d", got)
+	}
+	if !isVCL(nalIDR) || isVCL(nalSPS) {
+		t.Fatal("vcl classification")
+	}
+}
+
+func TestPercent(t *testing.T) {
+	if got := Percent(0, 100); got != 0 {
+		t.Fatalf("0/100 = %d", got)
+	}
+	if got := Percent(50, 100); got != 50 {
+		t.Fatalf("50/100 = %d", got)
+	}
+	if got := Percent(100, 100); got != 100 {
+		t.Fatalf("100/100 = %d", got)
+	}
+	if got := Percent(9, 0); got != 0 {
+		t.Fatalf("unknown total = %d", got)
+	}
+	if got := Percent(200, 100); got != 100 {
+		t.Fatalf("over = %d", got)
 	}
 }
 

@@ -1,3 +1,5 @@
+//go:build !darwin
+
 package openh264
 
 import (
@@ -58,7 +60,7 @@ func TestDecoderRoundTrip(t *testing.T) {
 	}
 	t.Logf("annex-b %d bytes %x", len(stream), stream[:min(32, len(stream))])
 	var frames int
-	if err := SplitAnnexB(bytes.NewReader(stream), func(nal []byte) error {
+	if err := splitAnnexBForTest(stream, func(nal []byte) error {
 		img, err := dec.Decode(nal)
 		if err != nil {
 			t.Logf("decode: %v", err)
@@ -91,6 +93,30 @@ func TestDecoderRoundTrip(t *testing.T) {
 	if frames == 0 {
 		t.Fatal("no decoded frame")
 	}
+}
+
+func splitAnnexBForTest(src []byte, emit func([]byte) error) error {
+	start := -1
+	for i := 0; i+2 < len(src); i++ {
+		if src[i] != 0 || src[i+1] != 0 || src[i+2] != 1 {
+			continue
+		}
+		at := i
+		if i > 0 && src[i-1] == 0 {
+			at = i - 1
+		}
+		if start >= 0 && at-start >= 4 {
+			if err := emit(src[start:at]); err != nil {
+				return err
+			}
+		}
+		start = at
+		i += 2
+	}
+	if start >= 0 && start < len(src) {
+		return emit(src[start:])
+	}
+	return nil
 }
 
 func encodeSolidI420(libPath string, w, h int, yVal, uVal, vVal byte) ([]byte, error) {
