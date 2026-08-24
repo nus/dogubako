@@ -87,6 +87,7 @@ const (
 	StopwatchStart   Key = "stopwatch.start"
 	StopwatchPause   Key = "stopwatch.pause"
 	StopwatchReset   Key = "stopwatch.reset"
+	StopwatchCopy    Key = "stopwatch.copy"
 	StopwatchHint    Key = "stopwatch.hint"
 	StopwatchStopped Key = "stopwatch.stopped"
 	StopwatchRunning Key = "stopwatch.running"
@@ -230,7 +231,8 @@ var catalogs = map[Lang]map[Key]string{
 		StopwatchStart:                 "スタート",
 		StopwatchPause:                 "一時停止",
 		StopwatchReset:                 "リセット",
-		StopwatchHint:                  "スペースでスタート / 一時停止",
+		StopwatchCopy:                  "コピー",
+		StopwatchHint:                  "スペースでスタート / 一時停止。一時停止中は %s でコピー",
 		StopwatchStopped:               "停止中",
 		StopwatchRunning:               "計測中",
 		StopwatchPaused:                "一時停止",
@@ -368,7 +370,8 @@ var catalogs = map[Lang]map[Key]string{
 		StopwatchStart:                 "Start",
 		StopwatchPause:                 "Pause",
 		StopwatchReset:                 "Reset",
-		StopwatchHint:                  "Space to start / pause",
+		StopwatchCopy:                  "Copy",
+		StopwatchHint:                  "Space to start / pause. When paused, copy with %s",
 		StopwatchStopped:               "Stopped",
 		StopwatchRunning:               "Running",
 		StopwatchPaused:                "Paused",

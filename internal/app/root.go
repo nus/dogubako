@@ -162,6 +162,9 @@ func (r *Root) Build(context *guigui.Context, adder *guigui.ChildAdder) error {
 	r.androidShot.OnShowFolder(func(context *guigui.Context) {
 		r.showAndroidShotFolder()
 	})
+	r.stopwatchTool.OnCopy(func(context *guigui.Context) {
+		r.copyStopwatch()
+	})
 	return nil
 }
 
@@ -235,6 +238,10 @@ func (r *Root) HandleButtonInput(context *guigui.Context, widgetBounds *guigui.W
 			return guigui.HandleInputByWidget(r)
 		}
 	case ToolStopwatch:
+		if inpututil.IsKeyJustPressed(ebiten.KeyC) {
+			r.copyStopwatch()
+			return guigui.HandleInputByWidget(r)
+		}
 		return guigui.HandleInputResult{}
 	default:
 		switch {
@@ -533,6 +540,18 @@ func (r *Root) copyAndroidShot() {
 		return
 	}
 	r.model.AndroidShot().SetStatus(i18n.StatusClipboardCopied)
+}
+
+func (r *Root) copyStopwatch() {
+	sw := r.model.Stopwatch()
+	if !sw.CanCopy() {
+		return
+	}
+	if err := clipboard.Write(clipboard.Contents{Text: []byte(sw.Display())}); err != nil {
+		sw.SetStatus(i18n.StatusClipboardCopyFailed)
+		return
+	}
+	sw.SetStatus(i18n.StatusClipboardCopied)
 }
 
 func (r *Root) sendAndroidShotToImage() {
