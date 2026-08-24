@@ -33,6 +33,7 @@ type Root struct {
 	screenshotTool ScreenshotTool
 	androidTool    AndroidTool
 	androidShot    AndroidShotTool
+	stopwatchTool  StopwatchTool
 
 	model Model
 
@@ -65,11 +66,16 @@ func (r *Root) WriteStateKey(context *guigui.Context, w *guigui.StateKeyWriter) 
 	w.WriteUint64(r.model.Screenshot().Generation())
 	w.WriteUint64(r.model.Android().Generation())
 	w.WriteUint64(r.model.AndroidShot().Generation())
+	w.WriteUint64(r.model.Stopwatch().Generation())
 	w.WriteBool(r.model.Screenshot().HasImage())
 	w.WriteBool(r.pendingCapture != nil)
 	w.WriteBool(r.model.Android().Busy())
 	w.WriteBool(r.model.AndroidShot().Busy())
 	w.WriteBool(r.model.AndroidShot().Live())
+	w.WriteBool(r.model.Stopwatch().Running())
+	if r.model.Mode() == ToolStopwatch {
+		w.WriteInt64(r.model.Stopwatch().DisplayTicks())
+	}
 }
 
 func (r *Root) contentWidget() guigui.Widget {
@@ -80,6 +86,8 @@ func (r *Root) contentWidget() guigui.Widget {
 		return &r.androidTool
 	case ToolAndroidShot:
 		return &r.androidShot
+	case ToolStopwatch:
+		return &r.stopwatchTool
 	default:
 		return &r.imageTool
 	}
@@ -154,6 +162,9 @@ func (r *Root) Build(context *guigui.Context, adder *guigui.ChildAdder) error {
 	r.androidShot.OnShowFolder(func(context *guigui.Context) {
 		r.showAndroidShotFolder()
 	})
+	r.stopwatchTool.OnCopy(func(context *guigui.Context) {
+		r.copyStopwatch()
+	})
 	return nil
 }
 
@@ -198,6 +209,10 @@ func (r *Root) Tick(context *guigui.Context, widgetBounds *guigui.WidgetBounds) 
 }
 
 func (r *Root) HandleButtonInput(context *guigui.Context, widgetBounds *guigui.WidgetBounds) guigui.HandleInputResult {
+	if r.model.Mode() == ToolStopwatch && !shortcutModifierPressed(context) && inpututil.IsKeyJustPressed(ebiten.KeySpace) {
+		r.model.Stopwatch().Toggle()
+		return guigui.HandleInputByWidget(r)
+	}
 	if !shortcutModifierPressed(context) {
 		return guigui.HandleInputResult{}
 	}
@@ -222,6 +237,12 @@ func (r *Root) HandleButtonInput(context *guigui.Context, widgetBounds *guigui.W
 			r.copyAndroidShot()
 			return guigui.HandleInputByWidget(r)
 		}
+	case ToolStopwatch:
+		if inpututil.IsKeyJustPressed(ebiten.KeyC) {
+			r.copyStopwatch()
+			return guigui.HandleInputByWidget(r)
+		}
+		return guigui.HandleInputResult{}
 	default:
 		switch {
 		case inpututil.IsKeyJustPressed(ebiten.KeyO):
@@ -519,6 +540,18 @@ func (r *Root) copyAndroidShot() {
 		return
 	}
 	r.model.AndroidShot().SetStatus(i18n.StatusClipboardCopied)
+}
+
+func (r *Root) copyStopwatch() {
+	sw := r.model.Stopwatch()
+	if !sw.CanCopy() {
+		return
+	}
+	if err := clipboard.Write(clipboard.Contents{Text: []byte(sw.Display())}); err != nil {
+		sw.SetStatus(i18n.StatusClipboardCopyFailed)
+		return
+	}
+	sw.SetStatus(i18n.StatusClipboardCopied)
 }
 
 func (r *Root) sendAndroidShotToImage() {

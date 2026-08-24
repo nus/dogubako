@@ -96,6 +96,15 @@ USB デバッグ（または無線デバッグ）が有効な Android 端末の�
 
 ADB サーバーは Android Studio や SDK Platform-Tools などが起動している必要があります。端末側で USB デバッグを許可してください。
 
+### ストップウォッチ
+
+- 経過時間を 1/100 秒まで表示（時:分:秒.1/100）。文字サイズは画面の約 1/3
+- スタート / 一時停止、リセット、コピー
+- スペースキーでスタートと一時停止
+- 一時停止中は経過時間をコピーできる（コピーボタン、または macOS は ⌘C、Ubuntu は Ctrl+C。表示のドラッグ選択も可）
+
+他のツールに切り替えても計測は続きます。
+
 ## 必要環境
 
 - Go 1.25 以降（ソースからビルドする場合）
@@ -198,7 +207,7 @@ make test
 
 - `cmd/dogubako` — エントリポイント
 - `internal/cjkembed` — Linux は Noto Sans CJK を埋め込み、macOS はヒラギノ角ゴシックを `/System/Library/Fonts` から開く
-- `internal/app` — シェル（サイドメニューとメインパネル）、画像ツール、画面キャプチャ、Android 画面、Android ファイル
+- `internal/app` — シェル（サイドメニューとメインパネル）、画像ツール、画面キャプチャ、Android 画面、Android ファイル、ストップウォッチ
 - `internal/adbfs` — ADB プロトコルによるデバイス一覧・画面撮影・ファイル同期（pure Go）
 - `internal/openh264` — Cisco OpenH264 共有ライブラリの実行時ロードと H.264 復号（`ebitengine/purego`、CGO なし）
 - `internal/appicon` — アプリ／パッケージ用アイコン
