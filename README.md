@@ -105,6 +105,17 @@ ADB サーバーは Android Studio や SDK Platform-Tools などが起動して�
 
 他のツールに切り替えても計測は続きます。
 
+### MTP ファイル（macOS のみ）
+
+USB でつながった MTP 機器（Android のファイル転送モードなど）のファイルを閲覧・コピーします。`libmtp` や `libusb` は使いません。macOS の IOUSBHost を直接呼び出します。USB デバッグは不要です。Ubuntu 版にはこのツールは出ません。
+
+- 接続中のデバイス一覧から選択
+- ストレージ / ファイル / フォルダのツリー表示
+- サイズ、更新日時（列ヘッダーのクリックで昇順 / 降順を切り替え、境界のドラッグで列幅を変更できます）
+- デバイス → PC、PC → デバイスのファイル / フォルダコピー
+
+端末側で USB の用途を「ファイル転送」または MTP にしてください。イメージキャプチャや Android File Transfer がデバイスを掴んでいるときは、それらを終了して「再読み込み」してください。iPhone の写真面（PTP）は対象外です。
+
 ## 必要環境
 
 - Go 1.25 以降（ソースからビルドする場合）
@@ -207,8 +218,10 @@ make test
 
 - `cmd/dogubako` — エントリポイント
 - `internal/cjkembed` — Linux は Noto Sans CJK を埋め込み、macOS はヒラギノ角ゴシックを `/System/Library/Fonts` から開く
-- `internal/app` — シェル（サイドメニューとメインパネル）、画像ツール、画面キャプチャ、Android 画面、Android ファイル、ストップウォッチ
+- `internal/app` — シェル（サイドメニューとメインパネル）、画像ツール、画面キャプチャ、Android 画面、Android ファイル、MTP ファイル（macOS）、ストップウォッチ
 - `internal/adbfs` — ADB プロトコルによるデバイス一覧・画面撮影・ファイル同期（pure Go）
+- `internal/mtpfs` — MTP プロトコルによるデバイス一覧・ファイル同期（pure Go）
+- `internal/usbhost` — macOS の IOUSBHost による USB bulk 転送（purego、Linux では未対応）
 - `internal/openh264` — Cisco OpenH264 共有ライブラリの実行時ロードと H.264 復号（`ebitengine/purego`、CGO なし）
 - `internal/appicon` — アプリ／パッケージ用アイコン
 - `internal/imageproc` — リサイズ・切り取り・エンコード
