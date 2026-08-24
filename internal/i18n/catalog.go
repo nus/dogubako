@@ -11,6 +11,7 @@ const (
 	ToolScreenshot  Key = "tool.screenshot"
 	ToolAndroid     Key = "tool.android"
 	ToolAndroidShot Key = "tool.android_shot"
+	ToolStopwatch   Key = "tool.stopwatch"
 
 	OpenFile       Key = "image.open_file"
 	PasteClipboard Key = "image.paste_clipboard"
@@ -82,10 +83,19 @@ const (
 	AndroidShotLive         Key = "android_shot.live"
 	AndroidShotLiveWait     Key = "android_shot.live_wait"
 	AndroidShotLiveDownload Key = "android_shot.live_download"
-	DialogOpenDir           Key = "dialog.open_dir"
-	DialogSaveAny           Key = "dialog.save_any"
-	DialogOpenAny           Key = "dialog.open_any"
-	DialogOpenFolder        Key = "dialog.open_folder"
+
+	StopwatchStart   Key = "stopwatch.start"
+	StopwatchPause   Key = "stopwatch.pause"
+	StopwatchReset   Key = "stopwatch.reset"
+	StopwatchHint    Key = "stopwatch.hint"
+	StopwatchStopped Key = "stopwatch.stopped"
+	StopwatchRunning Key = "stopwatch.running"
+	StopwatchPaused  Key = "stopwatch.paused"
+
+	DialogOpenDir    Key = "dialog.open_dir"
+	DialogSaveAny    Key = "dialog.save_any"
+	DialogOpenAny    Key = "dialog.open_any"
+	DialogOpenFolder Key = "dialog.open_folder"
 
 	DialogOpen   Key = "dialog.open"
 	DialogSave   Key = "dialog.save"
@@ -148,6 +158,7 @@ var catalogs = map[Lang]map[Key]string{
 		ToolScreenshot:                 "画面キャプチャ",
 		ToolAndroid:                    "Android ファイル",
 		ToolAndroidShot:                "Android 画面",
+		ToolStopwatch:                  "ストップウォッチ",
 		OpenFile:                       "ファイルを開く",
 		PasteClipboard:                 "クリップボードから貼り付け",
 		InputHint:                      "ファイル指定・ドロップ・%s で入力",
@@ -216,6 +227,13 @@ var catalogs = map[Lang]map[Key]string{
 		AndroidShotLive:                "ライブ",
 		AndroidShotLiveWait:            "端末の画面を取得しています…",
 		AndroidShotLiveDownload:        "OpenH264 をダウンロードしています… %d%%",
+		StopwatchStart:                 "スタート",
+		StopwatchPause:                 "一時停止",
+		StopwatchReset:                 "リセット",
+		StopwatchHint:                  "スペースでスタート / 一時停止",
+		StopwatchStopped:               "停止中",
+		StopwatchRunning:               "計測中",
+		StopwatchPaused:                "一時停止",
 		DialogOpenDir:                  "保存先フォルダ",
 		DialogSaveAny:                  "ファイルを保存",
 		DialogOpenAny:                  "ファイルを選ぶ",
@@ -278,6 +296,7 @@ var catalogs = map[Lang]map[Key]string{
 		ToolScreenshot:                 "Screenshot",
 		ToolAndroid:                    "Android Files",
 		ToolAndroidShot:                "Android Screen",
+		ToolStopwatch:                  "Stopwatch",
 		OpenFile:                       "Open File",
 		PasteClipboard:                 "Paste from Clipboard",
 		InputHint:                      "Open, drop, or paste with %s",
@@ -346,6 +365,13 @@ var catalogs = map[Lang]map[Key]string{
 		AndroidShotLive:                "Live",
 		AndroidShotLiveWait:            "Fetching the device screen…",
 		AndroidShotLiveDownload:        "Downloading OpenH264… %d%%",
+		StopwatchStart:                 "Start",
+		StopwatchPause:                 "Pause",
+		StopwatchReset:                 "Reset",
+		StopwatchHint:                  "Space to start / pause",
+		StopwatchStopped:               "Stopped",
+		StopwatchRunning:               "Running",
+		StopwatchPaused:                "Paused",
 		DialogOpenDir:                  "Destination Folder",
 		DialogSaveAny:                  "Save File",
 		DialogOpenAny:                  "Choose File",

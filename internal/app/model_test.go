@@ -189,6 +189,13 @@ func TestToolTitle(t *testing.T) {
 	if got := androidShot.Title(i18n.EN); got != "Android Screen" {
 		t.Fatalf("en android shot = %q", got)
 	}
+	stopwatch := Tool{ID: ToolStopwatch}
+	if got := stopwatch.Title(i18n.JA); got != "ストップウォッチ" {
+		t.Fatalf("ja stopwatch = %q", got)
+	}
+	if got := stopwatch.Title(i18n.EN); got != "Stopwatch" {
+		t.Fatalf("en stopwatch = %q", got)
+	}
 }
 
 func TestModelSetLang(t *testing.T) {
