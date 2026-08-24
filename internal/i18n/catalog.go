@@ -12,6 +12,7 @@ const (
 	ToolAndroid     Key = "tool.android"
 	ToolAndroidShot Key = "tool.android_shot"
 	ToolStopwatch   Key = "tool.stopwatch"
+	ToolMTP         Key = "tool.mtp"
 
 	OpenFile       Key = "image.open_file"
 	PasteClipboard Key = "image.paste_clipboard"
@@ -93,6 +94,18 @@ const (
 	StopwatchRunning Key = "stopwatch.running"
 	StopwatchPaused  Key = "stopwatch.paused"
 
+	MTPDevices       Key = "mtp.devices"
+	MTPRefresh       Key = "mtp.refresh"
+	MTPUp            Key = "mtp.up"
+	MTPPull          Key = "mtp.pull"
+	MTPPushFile      Key = "mtp.push_file"
+	MTPPushFolder    Key = "mtp.push_folder"
+	MTPEmpty         Key = "mtp.empty"
+	MTPColName       Key = "mtp.col_name"
+	MTPColSize       Key = "mtp.col_size"
+	MTPColModified   Key = "mtp.col_modified"
+	MTPNoDevices     Key = "mtp.no_devices"
+	MTPHint          Key = "mtp.hint"
 	DialogOpenDir    Key = "dialog.open_dir"
 	DialogSaveAny    Key = "dialog.save_any"
 	DialogOpenAny    Key = "dialog.open_any"
@@ -150,6 +163,18 @@ const (
 	StatusAdbLiveH264              Key = "status.adb_live_h264"
 	StatusAdbLiveFailed            Key = "status.adb_live_failed"
 	StatusAdbLiveStopped           Key = "status.adb_live_stopped"
+	StatusMTPConnectFailed         Key = "status.mtp_connect_failed"
+	StatusMTPNoDevices             Key = "status.mtp_no_devices"
+	StatusMTPDeviceOffline         Key = "status.mtp_device_offline"
+	StatusMTPListing               Key = "status.mtp_listing"
+	StatusMTPListingProgress       Key = "status.mtp_listing_progress"
+	StatusMTPListed                Key = "status.mtp_listed"
+	StatusMTPListFailed            Key = "status.mtp_list_failed"
+	StatusMTPCopying               Key = "status.mtp_copying"
+	StatusMTPCopied                Key = "status.mtp_copied"
+	StatusMTPCopyFailed            Key = "status.mtp_copy_failed"
+	StatusMTPNoSelection           Key = "status.mtp_no_selection"
+	StatusMTPSelectOnline          Key = "status.mtp_select_online"
 )
 
 var catalogs = map[Lang]map[Key]string{
@@ -160,6 +185,7 @@ var catalogs = map[Lang]map[Key]string{
 		ToolAndroid:                    "Android ファイル",
 		ToolAndroidShot:                "Android 画面",
 		ToolStopwatch:                  "ストップウォッチ",
+		ToolMTP:                        "MTP ファイル",
 		OpenFile:                       "ファイルを開く",
 		PasteClipboard:                 "クリップボードから貼り付け",
 		InputHint:                      "ファイル指定・ドロップ・%s で入力",
@@ -236,6 +262,18 @@ var catalogs = map[Lang]map[Key]string{
 		StopwatchStopped:               "停止中",
 		StopwatchRunning:               "計測中",
 		StopwatchPaused:                "一時停止",
+		MTPDevices:                     "デバイス",
+		MTPRefresh:                     "再読み込み",
+		MTPUp:                          "上へ",
+		MTPPull:                        "PCへコピー",
+		MTPPushFile:                    "PCのファイルをコピー",
+		MTPPushFolder:                  "PCのフォルダをコピー",
+		MTPEmpty:                       "フォルダは空です。端末をファイル転送（MTP）モードにして接続してください。",
+		MTPColName:                     "名前",
+		MTPColSize:                     "サイズ",
+		MTPColModified:                 "更新日時",
+		MTPNoDevices:                   "接続中の MTP デバイスはありません",
+		MTPHint:                        "USB の MTP で端末のファイルを閲覧・コピーします。USB デバッグは不要です。",
 		DialogOpenDir:                  "保存先フォルダ",
 		DialogSaveAny:                  "ファイルを保存",
 		DialogOpenAny:                  "ファイルを選ぶ",
@@ -291,6 +329,18 @@ var catalogs = map[Lang]map[Key]string{
 		StatusAdbLiveH264:              "ライブプレビュー中（%d×%d、H.264）",
 		StatusAdbLiveFailed:            "ライブプレビューに失敗しました: %v",
 		StatusAdbLiveStopped:           "ライブプレビューを停止しました",
+		StatusMTPConnectFailed:         "MTP デバイスを開けません: %v",
+		StatusMTPNoDevices:             "MTP デバイスがありません。ファイル転送モードで USB 接続してください",
+		StatusMTPDeviceOffline:         "このデバイスはまだ使えません（%s）",
+		StatusMTPListing:               "読み込んでいます…",
+		StatusMTPListingProgress:       "読み込んでいます… %d / %d 件",
+		StatusMTPListed:                "%s を表示しています（%d 件）",
+		StatusMTPListFailed:            "一覧を取得できません: %v",
+		StatusMTPCopying:               "コピーしています…",
+		StatusMTPCopied:                "コピーしました（%d 件）: %s",
+		StatusMTPCopyFailed:            "コピーに失敗しました: %v",
+		StatusMTPNoSelection:           "コピーするファイルまたはフォルダを選んでください",
+		StatusMTPSelectOnline:          "ストレージまたはフォルダを選んでください",
 	},
 	EN: {
 		AppTitle:                       "Dogubako",
@@ -299,6 +349,7 @@ var catalogs = map[Lang]map[Key]string{
 		ToolAndroid:                    "Android Files",
 		ToolAndroidShot:                "Android Screen",
 		ToolStopwatch:                  "Stopwatch",
+		ToolMTP:                        "MTP Files",
 		OpenFile:                       "Open File",
 		PasteClipboard:                 "Paste from Clipboard",
 		InputHint:                      "Open, drop, or paste with %s",
@@ -375,6 +426,18 @@ var catalogs = map[Lang]map[Key]string{
 		StopwatchStopped:               "Stopped",
 		StopwatchRunning:               "Running",
 		StopwatchPaused:                "Paused",
+		MTPDevices:                     "Devices",
+		MTPRefresh:                     "Reload",
+		MTPUp:                          "Up",
+		MTPPull:                        "Copy to PC",
+		MTPPushFile:                    "Copy File from PC",
+		MTPPushFolder:                  "Copy Folder from PC",
+		MTPEmpty:                       "This folder is empty. Connect a device in file transfer (MTP) mode.",
+		MTPColName:                     "Name",
+		MTPColSize:                     "Size",
+		MTPColModified:                 "Modified",
+		MTPNoDevices:                   "No MTP devices connected",
+		MTPHint:                        "Browse and copy files over USB MTP. USB debugging is not required.",
 		DialogOpenDir:                  "Destination Folder",
 		DialogSaveAny:                  "Save File",
 		DialogOpenAny:                  "Choose File",
@@ -430,6 +493,18 @@ var catalogs = map[Lang]map[Key]string{
 		StatusAdbLiveH264:              "Live preview (%d×%d, H.264)",
 		StatusAdbLiveFailed:            "Live preview failed: %v",
 		StatusAdbLiveStopped:           "Live preview stopped",
+		StatusMTPConnectFailed:         "Could not open the MTP device: %v",
+		StatusMTPNoDevices:             "No MTP devices. Plug in a device in file transfer mode.",
+		StatusMTPDeviceOffline:         "This device is not ready (%s)",
+		StatusMTPListing:               "Loading…",
+		StatusMTPListingProgress:       "Loading… %d / %d",
+		StatusMTPListed:                "Showing %s (%d items)",
+		StatusMTPListFailed:            "Could not list files: %v",
+		StatusMTPCopying:               "Copying…",
+		StatusMTPCopied:                "Copied %d item(s) to %s",
+		StatusMTPCopyFailed:            "Copy failed: %v",
+		StatusMTPNoSelection:           "Select a file or folder to copy",
+		StatusMTPSelectOnline:          "Select a storage or folder",
 	},
 }
 

@@ -34,6 +34,7 @@ type Root struct {
 	androidTool    AndroidTool
 	androidShot    AndroidShotTool
 	stopwatchTool  StopwatchTool
+	mtpTool        MTPTool
 
 	model Model
 
@@ -43,6 +44,8 @@ type Root struct {
 	pendingAndroidPull     <-chan dialog.FileResult
 	pendingAndroidPush     <-chan dialog.FileResult
 	pendingAndroidShotSave <-chan dialog.FileResult
+	pendingMTPPull         <-chan dialog.FileResult
+	pendingMTPPush         <-chan dialog.FileResult
 	pendingCapture         <-chan capture.Result
 	captureCancel          context.CancelFunc
 	captureHidden          bool
@@ -67,11 +70,13 @@ func (r *Root) WriteStateKey(context *guigui.Context, w *guigui.StateKeyWriter) 
 	w.WriteUint64(r.model.Android().Generation())
 	w.WriteUint64(r.model.AndroidShot().Generation())
 	w.WriteUint64(r.model.Stopwatch().Generation())
+	w.WriteUint64(r.model.MTP().Generation())
 	w.WriteBool(r.model.Screenshot().HasImage())
 	w.WriteBool(r.pendingCapture != nil)
 	w.WriteBool(r.model.Android().Busy())
 	w.WriteBool(r.model.AndroidShot().Busy())
 	w.WriteBool(r.model.AndroidShot().Live())
+	w.WriteBool(r.model.MTP().Busy())
 	w.WriteBool(r.model.Stopwatch().Running())
 	if r.model.Mode() == ToolStopwatch {
 		w.WriteInt64(r.model.Stopwatch().DisplayTicks())
@@ -88,6 +93,8 @@ func (r *Root) contentWidget() guigui.Widget {
 		return &r.androidShot
 	case ToolStopwatch:
 		return &r.stopwatchTool
+	case ToolMTP:
+		return &r.mtpTool
 	default:
 		return &r.imageTool
 	}
@@ -165,6 +172,21 @@ func (r *Root) Build(context *guigui.Context, adder *guigui.ChildAdder) error {
 	r.stopwatchTool.OnCopy(func(context *guigui.Context) {
 		r.copyStopwatch()
 	})
+	r.mtpTool.OnRefresh(func(context *guigui.Context) {
+		r.model.MTP().Reload()
+	})
+	r.mtpTool.OnUp(func(context *guigui.Context) {
+		r.model.MTP().GoUp()
+	})
+	r.mtpTool.OnPull(func(context *guigui.Context) {
+		r.startMTPPull()
+	})
+	r.mtpTool.OnPushFile(func(context *guigui.Context) {
+		r.startMTPPush(false)
+	})
+	r.mtpTool.OnPushFolder(func(context *guigui.Context) {
+		r.startMTPPush(true)
+	})
 	return nil
 }
 
@@ -193,6 +215,7 @@ func (r *Root) Tick(context *guigui.Context, widgetBounds *guigui.WidgetBounds) 
 	r.drainCapture()
 	r.model.Android().Drain()
 	r.model.AndroidShot().Drain()
+	r.model.MTP().Drain()
 	if r.model.Mode() == ToolScreenshot {
 		r.model.Screenshot().PollFiles()
 	}
@@ -242,6 +265,7 @@ func (r *Root) HandleButtonInput(context *guigui.Context, widgetBounds *guigui.W
 			r.copyStopwatch()
 			return guigui.HandleInputByWidget(r)
 		}
+	case ToolMTP:
 		return guigui.HandleInputResult{}
 	default:
 		switch {
@@ -395,6 +419,34 @@ func (r *Root) drainDialogs() {
 				break
 			}
 			_ = r.model.AndroidShot().SavePath(res.Path)
+		default:
+		}
+	}
+	if r.pendingMTPPull != nil {
+		select {
+		case res := <-r.pendingMTPPull:
+			r.pendingMTPPull = nil
+			if res.Cancelled || res.Err != nil {
+				if res.Err != nil {
+					r.setMTPDialogStatus(res.Err)
+				}
+				break
+			}
+			r.model.MTP().StartPull(res.Path)
+		default:
+		}
+	}
+	if r.pendingMTPPush != nil {
+		select {
+		case res := <-r.pendingMTPPush:
+			r.pendingMTPPush = nil
+			if res.Cancelled || res.Err != nil {
+				if res.Err != nil {
+					r.setMTPDialogStatus(res.Err)
+				}
+				break
+			}
+			r.model.MTP().StartPush(res.Path)
 		default:
 		}
 	}
@@ -608,6 +660,43 @@ func (r *Root) startAndroidPush(folder bool) {
 		return
 	}
 	r.pendingAndroidPush = dialog.OpenFileAsync(i18n.T(lang, i18n.DialogOpenAny), nil)
+}
+
+func (r *Root) startMTPPull() {
+	if r.pendingMTPPull != nil || r.model.MTP().Busy() {
+		return
+	}
+	e, ok := r.model.MTP().SelectedEntry()
+	if !ok {
+		r.model.MTP().SetStatus(i18n.StatusMTPNoSelection)
+		return
+	}
+	lang := r.model.Lang()
+	if e.IsDir {
+		r.pendingMTPPull = dialog.OpenDirectoryAsync(i18n.T(lang, i18n.DialogOpenDir))
+		return
+	}
+	r.pendingMTPPull = dialog.SaveFileAsync(i18n.T(lang, i18n.DialogSaveAny), e.Name, nil)
+}
+
+func (r *Root) startMTPPush(folder bool) {
+	if r.pendingMTPPush != nil || r.model.MTP().Busy() {
+		return
+	}
+	lang := r.model.Lang()
+	if folder {
+		r.pendingMTPPush = dialog.OpenDirectoryAsync(i18n.T(lang, i18n.DialogOpenFolder))
+		return
+	}
+	r.pendingMTPPush = dialog.OpenFileAsync(i18n.T(lang, i18n.DialogOpenAny), nil)
+}
+
+func (r *Root) setMTPDialogStatus(err error) {
+	if errors.Is(err, dialog.ErrNoFileDialog) {
+		r.model.MTP().SetStatus(i18n.StatusNoFileDialog)
+		return
+	}
+	r.model.MTP().SetStatus(i18n.StatusSaveDialogFailed, err)
 }
 
 func (r *Root) setAndroidDialogStatus(err error) {

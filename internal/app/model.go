@@ -22,6 +22,7 @@ const (
 	ToolAndroid     ToolID = "android"
 	ToolAndroidShot ToolID = "android-shot"
 	ToolStopwatch   ToolID = "stopwatch"
+	ToolMTP         ToolID = "mtp"
 )
 
 // Tool is a sidebar entry.
@@ -38,6 +39,10 @@ var Tools = []Tool{
 	{ID: ToolStopwatch},
 }
 
+func init() {
+	Tools = append(Tools, extraTools...)
+}
+
 // Title returns the localized sidebar label for this tool.
 func (t Tool) Title(lang i18n.Lang) string {
 	switch t.ID {
@@ -51,6 +56,8 @@ func (t Tool) Title(lang i18n.Lang) string {
 		return i18n.T(lang, i18n.ToolAndroidShot)
 	case ToolStopwatch:
 		return i18n.T(lang, i18n.ToolStopwatch)
+	case ToolMTP:
+		return i18n.T(lang, i18n.ToolMTP)
 	default:
 		return string(t.ID)
 	}
@@ -65,6 +72,7 @@ type Model struct {
 	android     AndroidModel
 	androidShot AndroidShotModel
 	stopwatch   StopwatchModel
+	mtp         MTPModel
 }
 
 func (m *Model) Lang() i18n.Lang {
@@ -121,6 +129,10 @@ func (m *Model) AndroidShot() *AndroidShotModel {
 
 func (m *Model) Stopwatch() *StopwatchModel {
 	return &m.stopwatch
+}
+
+func (m *Model) MTP() *MTPModel {
+	return &m.mtp
 }
 
 // ImageModel holds the first tool: resize, crop, rotate, and JPEG/PNG conversion.
