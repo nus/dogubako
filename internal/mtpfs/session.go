@@ -657,5 +657,5 @@ func (s *session) sendObjectFile(ctx context.Context, storage, parent uint32, na
 		return err
 	}
 	defer f.Close()
-	return s.sendFile(ctx, opSendObject, f, size)
+	return s.sendFile(ctx, opSendObject, progressReader{ctx: ctx, r: f}, size)
 }

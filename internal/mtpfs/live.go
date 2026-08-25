@@ -363,7 +363,7 @@ func (c *live) PullFile(ctx context.Context, serial, remote, local string) error
 		d.mu.Unlock()
 		return fmt.Errorf("ENOENT: %s", remote)
 	}
-	_, err = d.sess.getObjectTo(ctx, n.handle, n.size, f)
+	_, err = d.sess.getObjectTo(ctx, n.handle, n.size, progressWriter{ctx: ctx, w: f})
 	d.mu.Unlock()
 	if err != nil {
 		return err

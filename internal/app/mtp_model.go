@@ -32,13 +32,15 @@ type mtpListResult struct {
 }
 
 type mtpCopyResult struct {
-	n      int
-	dest   string
-	err    error
-	reload bool
-	copied int
-	total  int
-	done   bool
+	n           int
+	dest        string
+	err         error
+	reload      bool
+	copied      int
+	total       int
+	copiedBytes int64
+	totalBytes  int64
+	done        bool
 }
 
 // MTPTreeRow is one visible line in the MTP file tree.
@@ -71,10 +73,12 @@ type MTPModel struct {
 	pendingList    <-chan mtpListResult
 	pendingCopy    <-chan mtpCopyResult
 
-	listLoaded int
-	listTotal  int
-	copyCopied int
-	copyTotal  int
+	listLoaded      int
+	listTotal       int
+	copyCopied      int
+	copyTotal       int
+	copyCopiedBytes int64
+	copyTotalBytes  int64
 }
 
 func (m *MTPModel) Generation() uint64 { return m.generation }
@@ -125,23 +129,29 @@ func (m *MTPModel) ListPercent() int {
 // ProgressPercent is 0–100 for the in-flight listing or copy.
 func (m *MTPModel) ProgressPercent() int {
 	if m.pendingCopy != nil {
+		if m.copyTotalBytes > 0 {
+			return listPercent64(m.copyCopiedBytes, m.copyTotalBytes)
+		}
 		return listPercent(m.copyCopied, m.copyTotal)
 	}
 	return listPercent(m.listLoaded, m.listTotal)
 }
 
 func listPercent(loaded, total int) int {
+	return listPercent64(int64(loaded), int64(total))
+}
+
+func listPercent64(loaded, total int64) int {
 	if total <= 0 {
 		return 0
 	}
-	p := loaded * 100 / total
-	if p < 0 {
-		return 0
-	}
-	if p > 100 {
+	if loaded >= total {
 		return 100
 	}
-	return p
+	if loaded <= 0 {
+		return 0
+	}
+	return int(loaded * 100 / total)
 }
 
 func (m *MTPModel) Devices() []mtpfs.Device { return m.devices }
@@ -287,6 +297,8 @@ func (m *MTPModel) drainCopy() {
 				m.pendingCopy = nil
 				m.copyCopied = 0
 				m.copyTotal = 0
+				m.copyCopiedBytes = 0
+				m.copyTotalBytes = 0
 				if res.err != nil {
 					m.SetStatus(i18n.StatusMTPCopyFailed, res.err)
 				} else {
@@ -296,7 +308,7 @@ func (m *MTPModel) drainCopy() {
 					}
 				}
 			} else {
-				m.applyCopyProgress(res.copied, res.total)
+				m.applyCopyProgress(res.copied, res.total, res.copiedBytes, res.totalBytes)
 			}
 			guigui.RequestRebuild()
 		default:
@@ -305,11 +317,18 @@ func (m *MTPModel) drainCopy() {
 	}
 }
 
-func (m *MTPModel) applyCopyProgress(copied, total int) {
+func (m *MTPModel) applyCopyProgress(copied, total int, copiedBytes, totalBytes int64) {
 	m.copyCopied = copied
 	m.copyTotal = total
-	if total > 0 {
-		m.SetStatus(i18n.StatusMTPCopyingProgress, listPercent(copied, total), copied, total)
+	m.copyCopiedBytes = copiedBytes
+	m.copyTotalBytes = totalBytes
+	pct := m.ProgressPercent()
+	if total > 1 {
+		m.SetStatus(i18n.StatusMTPCopyingProgress, pct, copied, total)
+		return
+	}
+	if totalBytes > 0 || total > 0 {
+		m.SetStatus(i18n.StatusMTPCopyingPercent, pct)
 		return
 	}
 	m.SetStatus(i18n.StatusMTPCopying)
@@ -551,8 +570,10 @@ func (m *MTPModel) StartPush(local string) {
 func (m *MTPModel) startCopy(pull bool, src, dest string) {
 	m.copyCopied = 0
 	m.copyTotal = 0
+	m.copyCopiedBytes = 0
+	m.copyTotalBytes = 0
 	m.SetStatus(i18n.StatusMTPCopying)
-	ch := make(chan mtpCopyResult, 8)
+	ch := make(chan mtpCopyResult, 16)
 	m.pendingCopy = ch
 	m.generation++
 	client := m.Client()
@@ -560,9 +581,9 @@ func (m *MTPModel) startCopy(pull bool, src, dest string) {
 	go func() {
 		ctx, cancel := context.WithTimeout(context.Background(), mtpCopyTimeout)
 		defer cancel()
-		ctx = mtpfs.WithCopyProgress(ctx, func(copied, total int) {
+		ctx = mtpfs.WithCopyProgress(ctx, func(copied, total int, copiedBytes, totalBytes int64) {
 			select {
-			case ch <- mtpCopyResult{copied: copied, total: total}:
+			case ch <- mtpCopyResult{copied: copied, total: total, copiedBytes: copiedBytes, totalBytes: totalBytes}:
 			default:
 			}
 		})
