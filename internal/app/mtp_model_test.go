@@ -128,3 +128,61 @@ func TestMTPModelSortsByColumn(t *testing.T) {
 		t.Fatalf("name desc = %v", got)
 	}
 }
+
+func TestListPercent(t *testing.T) {
+	if got := listPercent(0, 0); got != 0 {
+		t.Fatalf("unknown total = %d", got)
+	}
+	if got := listPercent(2, 8); got != 25 {
+		t.Fatalf("2/8 = %d", got)
+	}
+	if got := listPercent(8, 8); got != 100 {
+		t.Fatalf("8/8 = %d", got)
+	}
+	if got := listPercent(9, 8); got != 100 {
+		t.Fatalf("over 100 = %d", got)
+	}
+}
+
+func TestMTPModelListingProgressPercent(t *testing.T) {
+	var m MTPModel
+	ch := make(chan mtpListResult, 2)
+	m.pendingList = ch
+	m.children = map[string][]mtpfs.Entry{}
+
+	ch <- mtpListResult{
+		path:    "/",
+		loaded:  2,
+		total:   8,
+		entries: []mtpfs.Entry{{Name: "a", Path: "/a"}},
+	}
+	m.Drain()
+	if !m.Loading() {
+		t.Fatal("expected loading")
+	}
+	if got := m.ListPercent(); got != 25 {
+		t.Fatalf("percent = %d", got)
+	}
+	got := m.StatusText(i18n.JA)
+	if got != "読み込んでいます… 25%（2 / 8 件）" {
+		t.Fatalf("ja status = %q", got)
+	}
+	if en := m.StatusText(i18n.EN); en != "Loading… 25% (2 / 8)" {
+		t.Fatalf("en status = %q", en)
+	}
+
+	ch <- mtpListResult{
+		path:    "/",
+		loaded:  8,
+		total:   8,
+		entries: []mtpfs.Entry{{Name: "a", Path: "/a"}, {Name: "b", Path: "/b"}},
+		done:    true,
+	}
+	m.Drain()
+	if m.Loading() {
+		t.Fatal("listing should be done")
+	}
+	if got := m.ListPercent(); got != 0 {
+		t.Fatalf("percent after done = %d", got)
+	}
+}

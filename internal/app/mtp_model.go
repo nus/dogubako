@@ -67,6 +67,9 @@ type MTPModel struct {
 	pendingDevices <-chan mtpDevicesResult
 	pendingList    <-chan mtpListResult
 	pendingCopy    <-chan mtpCopyResult
+
+	listLoaded int
+	listTotal  int
 }
 
 func (m *MTPModel) Generation() uint64 { return m.generation }
@@ -102,6 +105,30 @@ func (m *MTPModel) Client() mtpfs.Client {
 
 func (m *MTPModel) Busy() bool {
 	return m.pendingDevices != nil || m.pendingList != nil || m.pendingCopy != nil
+}
+
+// Loading reports whether devices or a directory listing is in progress.
+func (m *MTPModel) Loading() bool {
+	return m.pendingDevices != nil || m.pendingList != nil
+}
+
+// ListPercent is 0–100 while a directory listing reports a known total.
+func (m *MTPModel) ListPercent() int {
+	return listPercent(m.listLoaded, m.listTotal)
+}
+
+func listPercent(loaded, total int) int {
+	if total <= 0 {
+		return 0
+	}
+	p := loaded * 100 / total
+	if p < 0 {
+		return 0
+	}
+	if p > 100 {
+		return 100
+	}
+	return p
 }
 
 func (m *MTPModel) Devices() []mtpfs.Device { return m.devices }
@@ -225,17 +252,17 @@ func (m *MTPModel) drainDevices() {
 }
 
 func (m *MTPModel) drainList() {
-	if m.pendingList == nil {
-		return
-	}
-	select {
-	case res := <-m.pendingList:
-		if res.done {
-			m.pendingList = nil
+	for m.pendingList != nil {
+		select {
+		case res := <-m.pendingList:
+			if res.done {
+				m.pendingList = nil
+			}
+			m.applyList(res)
+			guigui.RequestRebuild()
+		default:
+			return
 		}
-		m.applyList(res)
-		guigui.RequestRebuild()
-	default:
 	}
 }
 
@@ -324,13 +351,17 @@ func (m *MTPModel) applyList(res mtpListResult) {
 		m.generation++
 	}
 	if !res.done {
+		m.listLoaded = res.loaded
+		m.listTotal = res.total
 		if res.total > 0 {
-			m.SetStatus(i18n.StatusMTPListingProgress, res.loaded, res.total)
+			m.SetStatus(i18n.StatusMTPListingProgress, listPercent(res.loaded, res.total), res.loaded, res.total)
 		} else {
 			m.SetStatus(i18n.StatusMTPListing)
 		}
 		return
 	}
+	m.listLoaded = 0
+	m.listTotal = 0
 	if res.entries == nil {
 		m.children[res.path] = []mtpfs.Entry{}
 		m.generation++
@@ -442,6 +473,8 @@ func (m *MTPModel) startList(path string) {
 		return
 	}
 	path = mtpfs.Clean(path)
+	m.listLoaded = 0
+	m.listTotal = 0
 	m.SetStatus(i18n.StatusMTPListing)
 	ch := make(chan mtpListResult, 8)
 	m.pendingList = ch

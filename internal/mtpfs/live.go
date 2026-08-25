@@ -229,6 +229,7 @@ func (d *openDev) entriesFromInfos(ctx context.Context, dir string, n node, hand
 	entries := make([]Entry, 0, len(handles))
 	used := map[string]int{}
 	total := len(handles)
+	reportListProgress(ctx, 0, total, entries)
 	for i, h := range handles {
 		if err := ctx.Err(); err != nil {
 			reportListProgress(ctx, i, total, entries)
