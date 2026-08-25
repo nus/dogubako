@@ -8,8 +8,11 @@ import (
 	"io"
 	"os"
 	"path/filepath"
+	"sync"
 	"testing"
 	"time"
+
+	"github.com/nus/dogubako/internal/usbhost"
 )
 
 func TestCleanJoinParent(t *testing.T) {
@@ -429,5 +432,286 @@ func TestIsPropChildSkipsParent(t *testing.T) {
 	child := propObject{handle: 6, hasParent: true, parent: 5}
 	if !isPropChild(child, 5, false) {
 		t.Fatal("direct child should be kept")
+	}
+}
+
+func TestCloseSkipsCommandWhenBroken(t *testing.T) {
+	tr := &seqTransport{}
+	s := &session{t: tr, broken: true}
+	s.close()
+	if len(tr.writes) != 0 {
+		t.Fatalf("CloseSession sent on broken session: %d writes", len(tr.writes))
+	}
+}
+
+func TestSessionBrokenOnUSBReadError(t *testing.T) {
+	tr := &seqTransport{}
+	s := &session{t: tr}
+	_, err := s.storageIDs(context.Background())
+	if err == nil {
+		t.Fatal("expected USB error")
+	}
+	if !s.broken {
+		t.Fatal("session should be marked broken after a transport error")
+	}
+}
+
+func TestStaleResponseMarksBroken(t *testing.T) {
+	tr := &seqTransport{reads: [][]byte{encodeResponse(respOK, 99, nil)}}
+	s := &session{t: tr}
+	_, err := s.runCommand(context.Background(), opCloseSession, nil)
+	if err == nil {
+		t.Fatal("expected transaction mismatch")
+	}
+	if !s.broken {
+		t.Fatal("stale response should break the session")
+	}
+	if isAnyResponse(err) {
+		t.Fatalf("mismatch should not look like an MTP response: %v", err)
+	}
+}
+
+func TestInvalidContainerTypeMarksBroken(t *testing.T) {
+	garbage := make([]byte, 16)
+	binary.LittleEndian.PutUint32(garbage[0:4], 16)
+	binary.LittleEndian.PutUint16(garbage[4:6], 99)
+	tr := &seqTransport{reads: [][]byte{garbage}}
+	s := &session{t: tr}
+	_, err := s.runCommand(context.Background(), opGetStorageIDs, nil)
+	if err == nil {
+		t.Fatal("expected invalid container")
+	}
+	if !s.broken {
+		t.Fatal("invalid container should break the session")
+	}
+}
+
+func TestGetObjectUnknownLengthKeepsTrailingResponse(t *testing.T) {
+	payload := []byte("abc")
+	data := encodeData(opGetObject, 0, payload)
+	binary.LittleEndian.PutUint32(data[0:4], lengthUnknown)
+	resp := encodeResponse(respOK, 0, nil)
+	tr := &seqTransport{reads: [][]byte{append(append([]byte{}, data...), resp...)}}
+	s := &session{t: tr}
+	var buf bytes.Buffer
+	n, err := s.getObjectFullTo(context.Background(), 9, &buf)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if n != 3 || buf.String() != "abc" {
+		t.Fatalf("got %q n=%d (response must not be written into the file)", buf.String(), n)
+	}
+	if len(s.pending) != 0 {
+		t.Fatalf("pending leftover = %d", len(s.pending))
+	}
+	if s.broken {
+		t.Fatal("successful GetObject should leave the session healthy")
+	}
+}
+
+func TestGetObjectToZeroSizeStillDownloads(t *testing.T) {
+	fail := encodeResponse(respOpNotSupported, 0, nil)
+	data := encodeData(opGetObject, 1, []byte("hi"))
+	ok := encodeResponse(respOK, 1, nil)
+	tr := &seqTransport{reads: [][]byte{
+		fail,
+		append(append([]byte{}, data...), ok...),
+	}}
+	s := &session{t: tr}
+	var buf bytes.Buffer
+	n, err := s.getObjectTo(context.Background(), 5, 0, &buf)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if n != 2 || buf.String() != "hi" {
+		t.Fatalf("got %q n=%d", buf.String(), n)
+	}
+}
+
+func TestGetPartialObjectFallsBackOnInvalidParameter(t *testing.T) {
+	fail := encodeResponse(respInvalidParameter, 0, nil)
+	data := encodeData(opGetObject, 1, []byte("xyz"))
+	ok := encodeResponse(respOK, 1, nil)
+	tr := &seqTransport{reads: [][]byte{
+		fail,
+		append(append([]byte{}, data...), ok...),
+	}}
+	s := &session{t: tr}
+	var buf bytes.Buffer
+	n, err := s.getObjectTo(context.Background(), 9, 3, &buf)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if n != 3 || buf.String() != "xyz" {
+		t.Fatalf("got %q n=%d", buf.String(), n)
+	}
+}
+
+func TestEntriesFromInfosStopsOnTransportError(t *testing.T) {
+	info := encodeObjectInfo(1, 0, fmtUndefined, 4, "a.txt", 0)
+	d0 := encodeData(opGetObjectInfo, 0, info)
+	r0 := encodeResponse(respOK, 0, nil)
+	tr := &seqTransport{reads: [][]byte{append(append([]byte{}, d0...), r0...)}}
+	s := &session{t: tr}
+	d := &openDev{sess: s, nodes: map[string]node{}}
+	_, err := d.entriesFromInfos(context.Background(), "/Internal", node{storageID: 1}, []uint32{1, 2})
+	if err == nil {
+		t.Fatal("expected error after USB read failed")
+	}
+	if !s.broken {
+		t.Fatal("transport error during GetObjectInfo should break the session")
+	}
+}
+
+func encodeStorageInfo(desc, volume string) []byte {
+	var w byteWriter
+	w.u16(1)
+	w.u16(2)
+	w.u16(0)
+	w.u64(0)
+	w.u64(0)
+	w.u32(0)
+	w.mtpString(desc)
+	w.mtpString(volume)
+	return w.b
+}
+
+type scriptedMTP struct {
+	info usbhost.Info
+
+	mu          sync.Mutex
+	failStorage int
+	lastOp      uint16
+	lastTx      uint32
+	queue       [][]byte
+	closed      int
+}
+
+func (c *scriptedMTP) Info() usbhost.Info { return c.info }
+func (c *scriptedMTP) MaxPacketOut() int  { return 512 }
+
+func (c *scriptedMTP) Close() error {
+	c.mu.Lock()
+	defer c.mu.Unlock()
+	c.closed++
+	return nil
+}
+
+func (c *scriptedMTP) WriteStream(header []byte, r io.Reader, size int64, timeout time.Duration) error {
+	return fmt.Errorf("WriteStream not implemented")
+}
+
+func (c *scriptedMTP) Write(p []byte, timeout time.Duration) error {
+	c.mu.Lock()
+	defer c.mu.Unlock()
+	h, err := decodeHeader(p)
+	if err != nil {
+		return err
+	}
+	c.lastOp = h.code
+	c.lastTx = h.transactionID
+	if h.code == opGetStorageIDs && c.failStorage > 0 {
+		c.failStorage--
+		c.queue = nil
+		return nil
+	}
+	c.queue = c.reply(h)
+	return nil
+}
+
+func (c *scriptedMTP) Read(max int, timeout time.Duration) ([]byte, error) {
+	c.mu.Lock()
+	defer c.mu.Unlock()
+	if c.lastOp == opGetStorageIDs && len(c.queue) == 0 {
+		return nil, fmt.Errorf("usb timeout")
+	}
+	if len(c.queue) == 0 {
+		return nil, fmt.Errorf("no MTP reply queued for 0x%04x", c.lastOp)
+	}
+	b := c.queue[0]
+	c.queue = c.queue[1:]
+	return b, nil
+}
+
+func (c *scriptedMTP) reply(h containerHeader) [][]byte {
+	tx := h.transactionID
+	switch h.code {
+	case opOpenSession, opCloseSession:
+		return [][]byte{encodeResponse(respOK, tx, nil)}
+	case opGetDeviceInfo:
+		return [][]byte{append(encodeData(h.code, tx, nil), encodeResponse(respOK, tx, nil)...)}
+	case opGetStorageIDs:
+		payload := encodeU32Array([]uint32{0x00010001})
+		return [][]byte{append(encodeData(h.code, tx, payload), encodeResponse(respOK, tx, nil)...)}
+	case opGetStorageInfo:
+		payload := encodeStorageInfo("Internal", "vol0")
+		return [][]byte{append(encodeData(h.code, tx, payload), encodeResponse(respOK, tx, nil)...)}
+	default:
+		return [][]byte{encodeResponse(respOpNotSupported, tx, nil)}
+	}
+}
+
+func TestLiveRetriesListAfterBrokenSession(t *testing.T) {
+	info := usbhost.Info{ID: "dev", Product: "Pixel"}
+	var opens int
+	remainingFails := 1
+	c := &live{
+		sessions: map[string]*openDev{},
+		listFn: func() ([]usbhost.Info, error) {
+			return []usbhost.Info{info}, nil
+		},
+		openFn: func(id string) (usbhost.Conn, error) {
+			opens++
+			fail := 0
+			if remainingFails > 0 {
+				fail = 1
+				remainingFails--
+			}
+			return &scriptedMTP{info: info, failStorage: fail}, nil
+		},
+	}
+	ents, err := c.List(context.Background(), "dev", "/")
+	if err != nil {
+		t.Fatalf("list after retry: %v", err)
+	}
+	if len(ents) != 1 || ents[0].Name != "Internal" {
+		t.Fatalf("entries = %+v", ents)
+	}
+	if opens != 2 {
+		t.Fatalf("opens = %d, want 2 (reconnect after the first USB timeout)", opens)
+	}
+}
+
+func TestLiveListAfterFailedListUsesFreshSession(t *testing.T) {
+	info := usbhost.Info{ID: "dev", Product: "Pixel"}
+	var opens int
+	remainingFails := 2
+	c := &live{
+		sessions: map[string]*openDev{},
+		listFn: func() ([]usbhost.Info, error) {
+			return []usbhost.Info{info}, nil
+		},
+		openFn: func(id string) (usbhost.Conn, error) {
+			opens++
+			fail := 0
+			if remainingFails > 0 {
+				fail = 1
+				remainingFails--
+			}
+			return &scriptedMTP{info: info, failStorage: fail}, nil
+		},
+	}
+	if _, err := c.List(context.Background(), "dev", "/"); err == nil {
+		t.Fatal("expected first list to fail after retry")
+	}
+	ents, err := c.List(context.Background(), "dev", "/")
+	if err != nil {
+		t.Fatalf("second list should work on a fresh session: %v", err)
+	}
+	if len(ents) != 1 || ents[0].Name != "Internal" {
+		t.Fatalf("entries = %+v", ents)
+	}
+	if opens < 3 {
+		t.Fatalf("opens = %d, want at least 3", opens)
 	}
 }
