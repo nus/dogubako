@@ -46,6 +46,14 @@ func kdialogDirArgs(title string) (string, []string) {
 	return "kdialog", []string{"--getexistingdirectory", ".", "--title", title}
 }
 
+func zenityErrorArgs(title, message string) (string, []string) {
+	return "zenity", []string{"--error", "--no-wrap", "--title=" + title, "--text=" + message}
+}
+
+func kdialogErrorArgs(title, message string) (string, []string) {
+	return "kdialog", []string{"--error", message, "--title", title}
+}
+
 func zenityFilter(filter *FileFilter) string {
 	if filter == nil || len(filter.Extensions) == 0 {
 		return "All files | *"

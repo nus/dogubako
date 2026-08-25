@@ -60,6 +60,7 @@ var (
 	sel_interfaceDesc        objc.SEL
 	sel_sendIORequest        objc.SEL
 	sel_clearStall           objc.SEL
+	sel_abort                objc.SEL
 	sel_initWithLength       objc.SEL
 	sel_initWithBytes        objc.SEL
 	sel_mutableBytes         objc.SEL
@@ -124,6 +125,7 @@ func loadFrameworks() error {
 	sel_interfaceDesc = objc.RegisterName("interfaceDescriptor")
 	sel_sendIORequest = objc.RegisterName("sendIORequestWithData:bytesTransferred:completionTimeout:error:")
 	sel_clearStall = objc.RegisterName("clearStallWithError:")
+	sel_abort = objc.RegisterName("abortWithOption:error:")
 	sel_initWithLength = objc.RegisterName("initWithLength:")
 	sel_initWithBytes = objc.RegisterName("initWithBytes:length:")
 	sel_mutableBytes = objc.RegisterName("mutableBytes")

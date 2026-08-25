@@ -16,6 +16,8 @@ import (
 const (
 	maxBulkWriteChunk = 256 * 1024
 	defaultReadSize   = 512 * 1024
+
+	ioUSBHostAbortSynchronous = 1
 )
 
 type conn struct {
@@ -142,10 +144,12 @@ func (c *conn) closeLocked() error {
 	c.closed = true
 	runtime.SetFinalizer(c, nil)
 	if c.bulkOut != 0 {
+		c.abortPipe(c.bulkOut)
 		c.bulkOut.Send(sel_release)
 		c.bulkOut = 0
 	}
 	if c.bulkIn != 0 {
+		c.abortPipe(c.bulkIn)
 		c.bulkIn.Send(sel_release)
 		c.bulkIn = 0
 	}
@@ -290,6 +294,14 @@ func (c *conn) ioRequestN(pipe objc.ID, data objc.ID, timeout time.Duration) (in
 func (c *conn) clearStall(pipe objc.ID) {
 	var nserr objc.ID
 	_ = objc.Send[bool](pipe, sel_clearStall, unsafe.Pointer(&nserr))
+}
+
+func (c *conn) abortPipe(pipe objc.ID) {
+	if pipe == 0 {
+		return
+	}
+	var nserr objc.ID
+	_ = objc.Send[bool](pipe, sel_abort, uintptr(ioUSBHostAbortSynchronous), unsafe.Pointer(&nserr))
 }
 
 func dataWithBytes(p []byte) (objc.ID, error) {

@@ -67,6 +67,8 @@ type MTPModel struct {
 	pendingDevices <-chan mtpDevicesResult
 	pendingList    <-chan mtpListResult
 	pendingCopy    <-chan mtpCopyResult
+
+	retryAlert *mtpAlert
 }
 
 func (m *MTPModel) Generation() uint64 { return m.generation }
@@ -211,6 +213,27 @@ func (m *MTPModel) Drain() {
 	m.drainCopy()
 }
 
+func (m *MTPModel) TakeRetryAlert() (i18n.Key, []any, bool) {
+	a := m.retryAlert
+	m.retryAlert = nil
+	if a == nil {
+		return "", nil, false
+	}
+	return a.key, a.args, true
+}
+
+func (m *MTPModel) queueRetryAlert(key i18n.Key, err error) {
+	if !mtpfs.IsRetryExhausted(err) {
+		return
+	}
+	m.retryAlert = &mtpAlert{key: key, args: []any{err}}
+}
+
+type mtpAlert struct {
+	key  i18n.Key
+	args []any
+}
+
 func (m *MTPModel) drainDevices() {
 	if m.pendingDevices == nil {
 		return
@@ -248,6 +271,7 @@ func (m *MTPModel) drainCopy() {
 		m.pendingCopy = nil
 		if res.err != nil {
 			m.SetStatus(i18n.StatusMTPCopyFailed, res.err)
+			m.queueRetryAlert(i18n.StatusMTPCopyFailed, res.err)
 		} else {
 			m.SetStatus(i18n.StatusMTPCopied, res.n, res.dest)
 			if res.reload && m.serial != "" {
@@ -337,6 +361,7 @@ func (m *MTPModel) applyList(res mtpListResult) {
 	}
 	if res.err != nil {
 		m.SetStatus(i18n.StatusMTPListFailed, res.err)
+		m.queueRetryAlert(i18n.StatusMTPListFailed, res.err)
 		return
 	}
 	m.SetStatus(i18n.StatusMTPListed, res.path, len(m.children[res.path]))

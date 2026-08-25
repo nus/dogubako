@@ -39,6 +39,25 @@ func tryOSDialog(kind osaKind, title, suggested string, filter *FileFilter) (Fil
 	return FileResult{Path: path}, true
 }
 
+func tryOSAlert(title, message string) bool {
+	if _, err := execLookPath("osascript"); err != nil {
+		return false
+	}
+	_, err := execOSA(osaAlertScript(title, message))
+	if err == nil || errorsIsCancel(err) {
+		return true
+	}
+	return !isCommandMissing(err)
+}
+
+func osaAlertScript(title, message string) string {
+	return strings.Join([]string{
+		"try",
+		"  display dialog " + osaQuote(message) + " with title " + osaQuote(title) + ` buttons {"OK"} default button 1 with icon stop`,
+		"end try",
+	}, "\n")
+}
+
 func osaScript(kind osaKind, title, suggested string, filter *FileFilter) string {
 	prompt := osaQuote(title)
 	var cmd string

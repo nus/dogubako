@@ -19,6 +19,8 @@ var (
 type live struct {
 	mu       sync.Mutex
 	sessions map[string]*openDev
+	listFn   func() ([]usbhost.Info, error)
+	openFn   func(id string) (usbhost.Conn, error)
 }
 
 type openDev struct {
@@ -47,16 +49,28 @@ func Default() Client {
 	return newLive()
 }
 
+func (c *live) listUSB() ([]usbhost.Info, error) {
+	if c.listFn != nil {
+		return c.listFn()
+	}
+	return usbhost.List()
+}
+
+func (c *live) openUSB(id string) (usbhost.Conn, error) {
+	if c.openFn != nil {
+		return c.openFn(id)
+	}
+	return usbhost.Open(id)
+}
+
 func (c *live) Devices(ctx context.Context) ([]Device, error) {
 	if err := ctx.Err(); err != nil {
 		return nil, err
 	}
-	infos, err := usbhost.List()
+	infos, err := c.listUSB()
 	if err != nil {
 		return nil, err
 	}
-	c.mu.Lock()
-	defer c.mu.Unlock()
 	keep := map[string]bool{}
 	out := make([]Device, 0, len(infos))
 	for _, info := range infos {
@@ -68,13 +82,20 @@ func (c *live) Devices(ctx context.Context) ([]Device, error) {
 			Product: info.Product,
 		})
 	}
+
+	c.mu.Lock()
+	var stale []*openDev
 	for id, d := range c.sessions {
 		if !keep[id] {
-			d.mu.Lock()
-			d.sess.close()
-			d.mu.Unlock()
+			stale = append(stale, d)
 			delete(c.sessions, id)
 		}
+	}
+	c.mu.Unlock()
+	for _, d := range stale {
+		d.mu.Lock()
+		d.sess.close()
+		d.mu.Unlock()
 	}
 	return out, nil
 }
@@ -84,13 +105,13 @@ func (c *live) device(ctx context.Context, serial string) (*openDev, error) {
 		return nil, err
 	}
 	c.mu.Lock()
-	if d, ok := c.sessions[serial]; ok {
+	if d, ok := c.sessions[serial]; ok && d.sess != nil && !d.sess.broken {
 		c.mu.Unlock()
 		return d, nil
 	}
 	c.mu.Unlock()
 
-	conn, err := usbhost.Open(serial)
+	conn, err := c.openUSB(serial)
 	if err != nil {
 		return nil, err
 	}
@@ -105,48 +126,113 @@ func (c *live) device(ctx context.Context, serial string) (*openDev, error) {
 		nodes: map[string]node{"/": {storage: true, isDir: true, name: "/"}},
 	}
 	c.mu.Lock()
-	if existing, ok := c.sessions[serial]; ok {
+	if existing, ok := c.sessions[serial]; ok && existing.sess != nil && !existing.sess.broken {
 		c.mu.Unlock()
 		sess.close()
 		return existing, nil
 	}
+	old := c.sessions[serial]
 	c.sessions[serial] = d
 	c.mu.Unlock()
+	if old != nil && old != d {
+		old.mu.Lock()
+		old.sess.close()
+		old.sess = nil
+		old.mu.Unlock()
+	}
 	return d, nil
 }
 
+func sessionBroken(s *session) bool {
+	return s != nil && s.broken
+}
+
+func (c *live) invalidate(serial string, d *openDev) {
+	if d.sess != nil {
+		d.sess.close()
+		d.sess = nil
+	}
+	c.mu.Lock()
+	if c.sessions[serial] == d {
+		delete(c.sessions, serial)
+	}
+	c.mu.Unlock()
+}
+
+func doWith[T any](c *live, ctx context.Context, serial string, retry bool, fn func(*openDev) (T, error)) (T, error) {
+	var zero T
+	var last T
+	var lastErr error
+	attempts := 1
+	if retry {
+		attempts = 2
+	}
+	for i := 0; i < attempts; i++ {
+		if err := ctx.Err(); err != nil {
+			return zero, err
+		}
+		d, err := c.device(ctx, serial)
+		if err != nil {
+			return zero, err
+		}
+		d.mu.Lock()
+		if d.sess == nil || d.sess.broken {
+			c.invalidate(serial, d)
+			d.mu.Unlock()
+			lastErr = fmt.Errorf("MTP session closed")
+			continue
+		}
+		last, err = fn(d)
+		broken := sessionBroken(d.sess)
+		if broken {
+			c.invalidate(serial, d)
+		}
+		d.mu.Unlock()
+		if err == nil {
+			return last, nil
+		}
+		lastErr = err
+		if !broken {
+			return last, err
+		}
+	}
+	if lastErr == nil {
+		lastErr = fmt.Errorf("MTP session closed")
+	}
+	return last, retryExhausted(lastErr)
+}
+
+func doVoid(c *live, ctx context.Context, serial string, retry bool, fn func(*openDev) error) error {
+	_, err := doWith(c, ctx, serial, retry, func(d *openDev) (struct{}, error) {
+		return struct{}{}, fn(d)
+	})
+	return err
+}
+
 func (c *live) Stat(ctx context.Context, serial, path string) (Entry, error) {
-	d, err := c.device(ctx, serial)
-	if err != nil {
-		return Entry{}, err
-	}
-	d.mu.Lock()
-	defer d.mu.Unlock()
-	path = Clean(path)
-	if path == "/" {
-		return Entry{Name: "/", Path: "/", IsDir: true}, nil
-	}
-	if n, ok := d.nodes[path]; ok {
+	return doWith(c, ctx, serial, true, func(d *openDev) (Entry, error) {
+		path = Clean(path)
+		if path == "/" {
+			return Entry{Name: "/", Path: "/", IsDir: true}, nil
+		}
+		if n, ok := d.nodes[path]; ok {
+			return n.entry(path), nil
+		}
+		if _, err := d.listPath(ctx, Parent(path)); err != nil {
+			return Entry{}, err
+		}
+		n, ok := d.nodes[path]
+		if !ok {
+			return Entry{}, fmt.Errorf("ENOENT: %s", path)
+		}
 		return n.entry(path), nil
-	}
-	if _, err := d.listPath(ctx, Parent(path)); err != nil {
-		return Entry{}, err
-	}
-	n, ok := d.nodes[path]
-	if !ok {
-		return Entry{}, fmt.Errorf("ENOENT: %s", path)
-	}
-	return n.entry(path), nil
+	})
 }
 
 func (c *live) List(ctx context.Context, serial, dir string) ([]Entry, error) {
-	d, err := c.device(ctx, serial)
-	if err != nil {
-		return nil, err
-	}
-	d.mu.Lock()
-	defer d.mu.Unlock()
-	return d.listPath(ctx, Clean(dir))
+	return doWith(c, ctx, serial, true, func(d *openDev) ([]Entry, error) {
+		return d.listPath(ctx, Clean(dir))
+	})
 }
 
 func (d *openDev) listPath(ctx context.Context, dir string) ([]Entry, error) {
@@ -236,6 +322,9 @@ func (d *openDev) entriesFromInfos(ctx context.Context, dir string, n node, hand
 		}
 		info, err := d.sess.objectInfo(ctx, h)
 		if err != nil {
+			if d.sess.broken || !isAnyResponse(err) {
+				return entries, err
+			}
 			continue
 		}
 		name := info.filename
@@ -279,7 +368,10 @@ func (d *openDev) listStorages(ctx context.Context) ([]Entry, error) {
 		}
 		info, err := d.sess.storageInfo(ctx, id)
 		if err != nil {
-			return nil, err
+			if d.sess.broken || !isAnyResponse(err) {
+				return nil, err
+			}
+			continue
 		}
 		name := info.description
 		if name == "" {
@@ -344,30 +436,34 @@ func (c *live) PullFile(ctx context.Context, serial, remote, local string) error
 	if st.IsDir {
 		return fmt.Errorf("EISDIR: %s", remote)
 	}
-	d, err := c.device(ctx, serial)
-	if err != nil {
-		return err
-	}
 	if err := os.MkdirAll(parentDir(local), 0o755); err != nil {
 		return err
 	}
-	f, err := os.Create(local)
-	if err != nil {
-		return err
-	}
-	defer f.Close()
-	d.mu.Lock()
-	n, ok := d.nodes[Clean(remote)]
-	if !ok {
-		d.mu.Unlock()
-		return fmt.Errorf("ENOENT: %s", remote)
-	}
-	_, err = d.sess.getObjectTo(ctx, n.handle, n.size, f)
-	d.mu.Unlock()
-	if err != nil {
-		return err
-	}
-	return f.Close()
+	return doVoid(c, ctx, serial, true, func(d *openDev) error {
+		n, ok := d.nodes[Clean(remote)]
+		if !ok {
+			if _, err := d.listPath(ctx, Parent(Clean(remote))); err != nil {
+				return err
+			}
+			n, ok = d.nodes[Clean(remote)]
+			if !ok {
+				return fmt.Errorf("ENOENT: %s", remote)
+			}
+		}
+		f, err := os.Create(local)
+		if err != nil {
+			return err
+		}
+		_, err = d.sess.getObjectTo(ctx, n.handle, n.size, f)
+		if cerr := f.Close(); err == nil {
+			err = cerr
+		}
+		if err != nil {
+			_ = os.Remove(local)
+			return err
+		}
+		return nil
+	})
 }
 
 func (c *live) PushFile(ctx context.Context, serial, local, remote string, perm os.FileMode, mtime time.Time) error {
@@ -380,32 +476,24 @@ func (c *live) PushFile(ctx context.Context, serial, local, remote string, perm 
 	remote = Clean(remote)
 	parent := Parent(remote)
 	name := Base(remote)
-	d, err := c.device(ctx, serial)
-	if err != nil {
-		return err
-	}
-	d.mu.Lock()
-	defer d.mu.Unlock()
-	pn, err := d.ensureDir(ctx, parent)
-	if err != nil {
-		return err
-	}
-	parentHandle := pn.handle
-	if pn.storage {
-		parentHandle = handleRoot
-	}
-	return d.sess.sendObjectFile(ctx, pn.storageID, parentHandle, name, local, st.Size())
+	return doVoid(c, ctx, serial, false, func(d *openDev) error {
+		pn, err := d.ensureDir(ctx, parent)
+		if err != nil {
+			return err
+		}
+		parentHandle := pn.handle
+		if pn.storage {
+			parentHandle = handleRoot
+		}
+		return d.sess.sendObjectFile(ctx, pn.storageID, parentHandle, name, local, st.Size())
+	})
 }
 
 func (c *live) MkdirAll(ctx context.Context, serial, path string) error {
-	d, err := c.device(ctx, serial)
-	if err != nil {
+	return doVoid(c, ctx, serial, false, func(d *openDev) error {
+		_, err := d.ensureDir(ctx, Clean(path))
 		return err
-	}
-	d.mu.Lock()
-	defer d.mu.Unlock()
-	_, err = d.ensureDir(ctx, Clean(path))
-	return err
+	})
 }
 
 func (d *openDev) ensureDir(ctx context.Context, path string) (node, error) {
