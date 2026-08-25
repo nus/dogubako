@@ -46,6 +46,7 @@ type Conn interface {
 	Write(p []byte, timeout time.Duration) error
 	Read(max int, timeout time.Duration) ([]byte, error)
 	WriteStream(header []byte, r io.Reader, size int64, timeout time.Duration) error
+	WriteStreamProgress(header []byte, r io.Reader, size int64, timeout time.Duration, wrote func(int64)) error
 	Close() error
 }
 

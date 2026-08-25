@@ -206,7 +206,19 @@ func (s *session) sendFile(ctx context.Context, op uint16, r io.Reader, size int
 	binary.LittleEndian.PutUint16(header[4:6], containerData)
 	binary.LittleEndian.PutUint16(header[6:8], op)
 	binary.LittleEndian.PutUint32(header[8:12], tx)
-	if err := s.t.WriteStream(header, r, size, dataTimeout); err != nil {
+	wrote := func(n int64) { addCopyBytes(ctx, n) }
+	var err error
+	if ps, ok := s.t.(interface {
+		WriteStreamProgress([]byte, io.Reader, int64, time.Duration, func(int64)) error
+	}); ok {
+		err = ps.WriteStreamProgress(header, r, size, dataTimeout, wrote)
+	} else {
+		err = s.t.WriteStream(header, r, size, dataTimeout)
+		if err == nil {
+			addCopyBytes(ctx, size)
+		}
+	}
+	if err != nil {
 		return err
 	}
 	h, _, err := s.readContainer(ctx, dataTimeout)
@@ -657,5 +669,5 @@ func (s *session) sendObjectFile(ctx context.Context, storage, parent uint32, na
 		return err
 	}
 	defer f.Close()
-	return s.sendFile(ctx, opSendObject, progressReader{ctx: ctx, r: f}, size)
+	return s.sendFile(ctx, opSendObject, f, size)
 }

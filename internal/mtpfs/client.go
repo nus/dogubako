@@ -179,19 +179,6 @@ func (p progressWriter) Write(b []byte) (int, error) {
 	return n, err
 }
 
-type progressReader struct {
-	ctx context.Context
-	r   io.Reader
-}
-
-func (p progressReader) Read(b []byte) (int, error) {
-	n, err := p.r.Read(b)
-	if n > 0 {
-		addCopyBytes(p.ctx, int64(n))
-	}
-	return n, err
-}
-
 // Client talks to MTP devices over USB bulk transfers.
 type Client interface {
 	Devices(ctx context.Context) ([]Device, error)

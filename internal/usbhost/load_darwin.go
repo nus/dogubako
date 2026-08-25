@@ -61,7 +61,6 @@ var (
 	sel_sendIORequest        objc.SEL
 	sel_clearStall           objc.SEL
 	sel_initWithLength       objc.SEL
-	sel_initWithBytes        objc.SEL
 	sel_mutableBytes         objc.SEL
 	sel_length               objc.SEL
 )
@@ -125,7 +124,6 @@ func loadFrameworks() error {
 	sel_sendIORequest = objc.RegisterName("sendIORequestWithData:bytesTransferred:completionTimeout:error:")
 	sel_clearStall = objc.RegisterName("clearStallWithError:")
 	sel_initWithLength = objc.RegisterName("initWithLength:")
-	sel_initWithBytes = objc.RegisterName("initWithBytes:length:")
 	sel_mutableBytes = objc.RegisterName("mutableBytes")
 	sel_length = objc.RegisterName("length")
 	return nil

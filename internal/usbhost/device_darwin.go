@@ -182,6 +182,10 @@ func (c *conn) Read(max int, timeout time.Duration) ([]byte, error) {
 }
 
 func (c *conn) WriteStream(header []byte, r io.Reader, size int64, timeout time.Duration) error {
+	return c.WriteStreamProgress(header, r, size, timeout, nil)
+}
+
+func (c *conn) WriteStreamProgress(header []byte, r io.Reader, size int64, timeout time.Duration, wrote func(int64)) error {
 	c.mu.Lock()
 	defer c.mu.Unlock()
 	if c.closed {
@@ -202,9 +206,12 @@ func (c *conn) WriteStream(header []byte, r io.Reader, size int64, timeout time.
 		if err := c.sendLocked(c.bulkOut, buf, timeout); err != nil {
 			return err
 		}
+		if wrote != nil && size > 0 {
+			wrote(size)
+		}
 		return c.maybeZLPLocked(total, timeout)
 	}
-	if err := c.writeStreamLocked(header, r, size, timeout); err != nil {
+	if err := c.writeStreamLocked(header, r, size, timeout, wrote); err != nil {
 		return err
 	}
 	return c.maybeZLPLocked(total, timeout)
@@ -296,23 +303,24 @@ func dataWithBytes(p []byte) (objc.ID, error) {
 	if len(p) == 0 {
 		return 0, nil
 	}
-	ptr := unsafe.Pointer(unsafe.SliceData(p))
-	data := objc.ID(class_NSMutableData).Send(sel_alloc).Send(sel_initWithBytes, ptr, uintptr(len(p)))
-	runtime.KeepAlive(p)
+	data := objc.ID(class_NSMutableData).Send(sel_alloc).Send(sel_initWithLength, uintptr(len(p)))
 	if data == 0 {
 		return 0, fmt.Errorf("allocate USB write buffer")
 	}
+	ptr := objc.Send[unsafe.Pointer](data, sel_mutableBytes)
+	if ptr == nil {
+		data.Send(sel_release)
+		return 0, fmt.Errorf("USB write buffer pointer is nil")
+	}
+	copy(unsafe.Slice((*byte)(ptr), len(p)), p)
+	runtime.KeepAlive(p)
 	return data, nil
 }
 
-func (c *conn) writeStreamLocked(header []byte, r io.Reader, size int64, timeout time.Duration) error {
+func (c *conn) writeStreamLocked(header []byte, r io.Reader, size int64, timeout time.Duration, wrote func(int64)) error {
 	// Chunk at a multiple of wMaxPacketSize so each URB except the last is
 	// full packets. A short packet in the middle of SendObject wedges Android.
-	runtime.LockOSThread()
-	defer runtime.UnlockOSThread()
-	pool := newPool()
-	defer pool.Send(sel_drain)
-
+	// Do not LockOSThread around file reads; sendLocked pins the thread per URB.
 	mps := c.MaxPacketOut()
 	chunk := maxBulkWriteChunk
 	if mps > 1 {
@@ -335,10 +343,12 @@ func (c *conn) writeStreamLocked(header []byte, r io.Reader, size int64, timeout
 			n = left
 		}
 		filled := 0
+		hdr := 0
 		if hdrOff < len(header) {
-			c := copy(buf, header[hdrOff:])
-			hdrOff += c
-			filled += c
+			ncopy := copy(buf, header[hdrOff:])
+			hdrOff += ncopy
+			filled += ncopy
+			hdr = ncopy
 		}
 		if filled < n && fileOff < size {
 			want := n - filled
@@ -356,6 +366,11 @@ func (c *conn) writeStreamLocked(header []byte, r io.Reader, size int64, timeout
 			return err
 		}
 		sent += int64(filled)
+		if wrote != nil {
+			if payload := int64(filled - hdr); payload > 0 {
+				wrote(payload)
+			}
+		}
 	}
 	return nil
 }
