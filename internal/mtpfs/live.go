@@ -199,7 +199,7 @@ func doWith[T any](c *live, ctx context.Context, serial string, retry bool, fn f
 	if lastErr == nil {
 		lastErr = fmt.Errorf("MTP session closed")
 	}
-	return last, lastErr
+	return last, retryExhausted(lastErr)
 }
 
 func doVoid(c *live, ctx context.Context, serial string, retry bool, fn func(*openDev) error) error {

@@ -703,6 +703,8 @@ func TestLiveListAfterFailedListUsesFreshSession(t *testing.T) {
 	}
 	if _, err := c.List(context.Background(), "dev", "/"); err == nil {
 		t.Fatal("expected first list to fail after retry")
+	} else if !IsRetryExhausted(err) {
+		t.Fatalf("first list error should be retry-exhausted: %v", err)
 	}
 	ents, err := c.List(context.Background(), "dev", "/")
 	if err != nil {
