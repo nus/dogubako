@@ -22,10 +22,40 @@ func Pull(ctx context.Context, c Client, serial, remote, local string) (int, err
 			dest = filepath.Join(local, "mtp-root")
 		}
 	}
-	return pullEntry(ctx, c, serial, st, dest)
+	cache := map[string][]Entry{}
+	total, err := countPull(ctx, c, serial, st, cache)
+	if err != nil {
+		return 0, err
+	}
+	reportCopyProgress(ctx, 0, total)
+	copied := 0
+	return pullEntry(ctx, c, serial, st, dest, cache, &copied, total)
 }
 
-func pullEntry(ctx context.Context, c Client, serial string, st Entry, dest string) (int, error) {
+func countPull(ctx context.Context, c Client, serial string, st Entry, cache map[string][]Entry) (int, error) {
+	if err := ctx.Err(); err != nil {
+		return 0, err
+	}
+	if !st.IsDir {
+		return 1, nil
+	}
+	children, err := c.List(ctx, serial, st.Path)
+	if err != nil {
+		return 0, fmt.Errorf("%s: %w", st.Path, err)
+	}
+	cache[st.Path] = children
+	n := 0
+	for _, child := range children {
+		k, err := countPull(ctx, c, serial, child, cache)
+		n += k
+		if err != nil {
+			return n, err
+		}
+	}
+	return n, nil
+}
+
+func pullEntry(ctx context.Context, c Client, serial string, st Entry, dest string, cache map[string][]Entry, copied *int, total int) (int, error) {
 	if err := ctx.Err(); err != nil {
 		return 0, err
 	}
@@ -33,18 +63,24 @@ func pullEntry(ctx context.Context, c Client, serial string, st Entry, dest stri
 		if err := c.PullFile(ctx, serial, st.Path, dest); err != nil {
 			return 0, fmt.Errorf("%s: %w", st.Path, err)
 		}
+		*copied++
+		reportCopyProgress(ctx, *copied, total)
 		return 1, nil
 	}
 	if err := os.MkdirAll(dest, 0o755); err != nil {
 		return 0, err
 	}
-	children, err := c.List(ctx, serial, st.Path)
-	if err != nil {
-		return 0, fmt.Errorf("%s: %w", st.Path, err)
+	children, ok := cache[st.Path]
+	if !ok {
+		var err error
+		children, err = c.List(ctx, serial, st.Path)
+		if err != nil {
+			return 0, fmt.Errorf("%s: %w", st.Path, err)
+		}
 	}
 	n := 0
 	for _, child := range children {
-		k, err := pullEntry(ctx, c, serial, child, filepath.Join(dest, child.Name))
+		k, err := pullEntry(ctx, c, serial, child, filepath.Join(dest, child.Name), cache, copied, total)
 		n += k
 		if err != nil {
 			return n, err
@@ -66,10 +102,46 @@ func Push(ctx context.Context, c Client, serial, local, remote string) (int, err
 	} else if err == nil && !st.IsDir && info.IsDir() {
 		return 0, fmt.Errorf("cannot copy a folder onto a file: %s", remote)
 	}
-	return pushWalk(ctx, c, serial, local, dest, info)
+	total, err := countLocalFiles(local, info)
+	if err != nil {
+		return 0, err
+	}
+	reportCopyProgress(ctx, 0, total)
+	copied := 0
+	return pushWalk(ctx, c, serial, local, dest, info, &copied, total)
 }
 
-func pushWalk(ctx context.Context, c Client, serial, local, remote string, info fs.FileInfo) (int, error) {
+func countLocalFiles(local string, info fs.FileInfo) (int, error) {
+	if info.Mode()&os.ModeSymlink != 0 {
+		return 0, nil
+	}
+	if info.IsDir() {
+		entries, err := os.ReadDir(local)
+		if err != nil {
+			return 0, err
+		}
+		n := 0
+		for _, e := range entries {
+			child := filepath.Join(local, e.Name())
+			fi, err := os.Lstat(child)
+			if err != nil {
+				return n, err
+			}
+			k, err := countLocalFiles(child, fi)
+			n += k
+			if err != nil {
+				return n, err
+			}
+		}
+		return n, nil
+	}
+	if info.Mode().IsRegular() {
+		return 1, nil
+	}
+	return 0, nil
+}
+
+func pushWalk(ctx context.Context, c Client, serial, local, remote string, info fs.FileInfo, copied *int, total int) (int, error) {
 	if err := ctx.Err(); err != nil {
 		return 0, err
 	}
@@ -91,7 +163,7 @@ func pushWalk(ctx context.Context, c Client, serial, local, remote string, info 
 			if err != nil {
 				return n, err
 			}
-			k, err := pushWalk(ctx, c, serial, childLocal, Join(remote, e.Name()), fi)
+			k, err := pushWalk(ctx, c, serial, childLocal, Join(remote, e.Name()), fi, copied, total)
 			n += k
 			if err != nil {
 				return n, err
@@ -106,5 +178,7 @@ func pushWalk(ctx context.Context, c Client, serial, local, remote string, info 
 	if err := c.PushFile(ctx, serial, local, remote, perm, info.ModTime()); err != nil {
 		return 0, fmt.Errorf("%s: %w", remote, err)
 	}
+	*copied++
+	reportCopyProgress(ctx, *copied, total)
 	return 1, nil
 }

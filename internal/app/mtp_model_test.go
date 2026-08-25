@@ -186,3 +186,36 @@ func TestMTPModelListingProgressPercent(t *testing.T) {
 		t.Fatalf("percent after done = %d", got)
 	}
 }
+
+func TestMTPModelCopyProgressPercent(t *testing.T) {
+	var m MTPModel
+	ch := make(chan mtpCopyResult, 2)
+	m.pendingCopy = ch
+
+	ch <- mtpCopyResult{copied: 1, total: 4}
+	m.Drain()
+	if !m.Copying() {
+		t.Fatal("expected copying")
+	}
+	if got := m.ProgressPercent(); got != 25 {
+		t.Fatalf("percent = %d", got)
+	}
+	if got := m.StatusText(i18n.JA); got != "コピーしています… 25%（1 / 4 件）" {
+		t.Fatalf("ja status = %q", got)
+	}
+	if got := m.StatusText(i18n.EN); got != "Copying… 25% (1 / 4)" {
+		t.Fatalf("en status = %q", got)
+	}
+
+	ch <- mtpCopyResult{n: 4, dest: "/tmp", done: true}
+	m.Drain()
+	if m.Copying() {
+		t.Fatal("copy should be done")
+	}
+	if got := m.ProgressPercent(); got != 0 {
+		t.Fatalf("percent after done = %d", got)
+	}
+	if got := m.StatusText(i18n.JA); got != "コピーしました（4 件）: /tmp" {
+		t.Fatalf("ja done = %q", got)
+	}
+}

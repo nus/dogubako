@@ -171,6 +171,7 @@ const (
 	StatusMTPListed                Key = "status.mtp_listed"
 	StatusMTPListFailed            Key = "status.mtp_list_failed"
 	StatusMTPCopying               Key = "status.mtp_copying"
+	StatusMTPCopyingProgress       Key = "status.mtp_copying_progress"
 	StatusMTPCopied                Key = "status.mtp_copied"
 	StatusMTPCopyFailed            Key = "status.mtp_copy_failed"
 	StatusMTPNoSelection           Key = "status.mtp_no_selection"
@@ -337,6 +338,7 @@ var catalogs = map[Lang]map[Key]string{
 		StatusMTPListed:                "%s を表示しています（%d 件）",
 		StatusMTPListFailed:            "一覧を取得できません: %v",
 		StatusMTPCopying:               "コピーしています…",
+		StatusMTPCopyingProgress:       "コピーしています… %d%%（%d / %d 件）",
 		StatusMTPCopied:                "コピーしました（%d 件）: %s",
 		StatusMTPCopyFailed:            "コピーに失敗しました: %v",
 		StatusMTPNoSelection:           "コピーするファイルまたはフォルダを選んでください",
@@ -501,6 +503,7 @@ var catalogs = map[Lang]map[Key]string{
 		StatusMTPListed:                "Showing %s (%d items)",
 		StatusMTPListFailed:            "Could not list files: %v",
 		StatusMTPCopying:               "Copying…",
+		StatusMTPCopyingProgress:       "Copying… %d%% (%d / %d)",
 		StatusMTPCopied:                "Copied %d item(s) to %s",
 		StatusMTPCopyFailed:            "Copy failed: %v",
 		StatusMTPNoSelection:           "Select a file or folder to copy",

@@ -36,6 +36,9 @@ type mtpCopyResult struct {
 	dest   string
 	err    error
 	reload bool
+	copied int
+	total  int
+	done   bool
 }
 
 // MTPTreeRow is one visible line in the MTP file tree.
@@ -70,6 +73,8 @@ type MTPModel struct {
 
 	listLoaded int
 	listTotal  int
+	copyCopied int
+	copyTotal  int
 }
 
 func (m *MTPModel) Generation() uint64 { return m.generation }
@@ -114,6 +119,14 @@ func (m *MTPModel) Loading() bool {
 
 // ListPercent is 0–100 while a directory listing reports a known total.
 func (m *MTPModel) ListPercent() int {
+	return listPercent(m.listLoaded, m.listTotal)
+}
+
+// ProgressPercent is 0–100 for the in-flight listing or copy.
+func (m *MTPModel) ProgressPercent() int {
+	if m.pendingCopy != nil {
+		return listPercent(m.copyCopied, m.copyTotal)
+	}
 	return listPercent(m.listLoaded, m.listTotal)
 }
 
@@ -267,23 +280,39 @@ func (m *MTPModel) drainList() {
 }
 
 func (m *MTPModel) drainCopy() {
-	if m.pendingCopy == nil {
+	for m.pendingCopy != nil {
+		select {
+		case res := <-m.pendingCopy:
+			if res.done {
+				m.pendingCopy = nil
+				m.copyCopied = 0
+				m.copyTotal = 0
+				if res.err != nil {
+					m.SetStatus(i18n.StatusMTPCopyFailed, res.err)
+				} else {
+					m.SetStatus(i18n.StatusMTPCopied, res.n, res.dest)
+					if res.reload && m.serial != "" {
+						m.startList(m.Root())
+					}
+				}
+			} else {
+				m.applyCopyProgress(res.copied, res.total)
+			}
+			guigui.RequestRebuild()
+		default:
+			return
+		}
+	}
+}
+
+func (m *MTPModel) applyCopyProgress(copied, total int) {
+	m.copyCopied = copied
+	m.copyTotal = total
+	if total > 0 {
+		m.SetStatus(i18n.StatusMTPCopyingProgress, listPercent(copied, total), copied, total)
 		return
 	}
-	select {
-	case res := <-m.pendingCopy:
-		m.pendingCopy = nil
-		if res.err != nil {
-			m.SetStatus(i18n.StatusMTPCopyFailed, res.err)
-		} else {
-			m.SetStatus(i18n.StatusMTPCopied, res.n, res.dest)
-			if res.reload && m.serial != "" {
-				m.startList(m.Root())
-			}
-		}
-		guigui.RequestRebuild()
-	default:
-	}
+	m.SetStatus(i18n.StatusMTPCopying)
 }
 
 func (m *MTPModel) applyDevices(devs []mtpfs.Device, err error) {
@@ -520,8 +549,10 @@ func (m *MTPModel) StartPush(local string) {
 }
 
 func (m *MTPModel) startCopy(pull bool, src, dest string) {
+	m.copyCopied = 0
+	m.copyTotal = 0
 	m.SetStatus(i18n.StatusMTPCopying)
-	ch := make(chan mtpCopyResult, 1)
+	ch := make(chan mtpCopyResult, 8)
 	m.pendingCopy = ch
 	m.generation++
 	client := m.Client()
@@ -529,6 +560,12 @@ func (m *MTPModel) startCopy(pull bool, src, dest string) {
 	go func() {
 		ctx, cancel := context.WithTimeout(context.Background(), mtpCopyTimeout)
 		defer cancel()
+		ctx = mtpfs.WithCopyProgress(ctx, func(copied, total int) {
+			select {
+			case ch <- mtpCopyResult{copied: copied, total: total}:
+			default:
+			}
+		})
 		var n int
 		var err error
 		if pull {
@@ -536,6 +573,6 @@ func (m *MTPModel) startCopy(pull bool, src, dest string) {
 		} else {
 			n, err = mtpfs.Push(ctx, client, serial, src, dest)
 		}
-		ch <- mtpCopyResult{n: n, dest: dest, err: err, reload: !pull}
+		ch <- mtpCopyResult{n: n, dest: dest, err: err, reload: !pull, done: true}
 	}()
 }

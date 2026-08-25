@@ -165,6 +165,52 @@ func TestMemPullPush(t *testing.T) {
 	}
 }
 
+func TestCopyReportsProgress(t *testing.T) {
+	now := time.Unix(1_700_000_000, 0)
+	fs := NewMem(Device{Serial: "dev1", State: "online", Model: "Pixel"})
+	fs.PutDir("/Internal/DCIM", now)
+	fs.PutFile("/Internal/DCIM/a.txt", []byte("a"), now)
+	fs.PutFile("/Internal/DCIM/b.txt", []byte("b"), now)
+
+	var pull [][2]int
+	ctx := WithCopyProgress(context.Background(), func(copied, total int) {
+		pull = append(pull, [2]int{copied, total})
+	})
+	dir := t.TempDir()
+	n, err := Pull(ctx, fs, "dev1", "/Internal/DCIM", dir)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if n != 2 {
+		t.Fatalf("pulled %d", n)
+	}
+	if len(pull) < 3 || pull[0] != [2]int{0, 2} || pull[len(pull)-1] != [2]int{2, 2} {
+		t.Fatalf("pull progress = %v", pull)
+	}
+
+	src := t.TempDir()
+	if err := os.WriteFile(filepath.Join(src, "x.txt"), []byte("x"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(filepath.Join(src, "y.txt"), []byte("y"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	var push [][2]int
+	ctx = WithCopyProgress(context.Background(), func(copied, total int) {
+		push = append(push, [2]int{copied, total})
+	})
+	n, err = Push(ctx, fs, "dev1", src, "/Internal")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if n != 2 {
+		t.Fatalf("pushed %d", n)
+	}
+	if len(push) < 3 || push[0] != [2]int{0, 2} || push[len(push)-1] != [2]int{2, 2} {
+		t.Fatalf("push progress = %v", push)
+	}
+}
+
 func TestUniqueName(t *testing.T) {
 	used := map[string]int{}
 	a := uniqueName(used, "DCIM")

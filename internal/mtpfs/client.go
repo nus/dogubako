@@ -71,6 +71,30 @@ func reportListProgress(ctx context.Context, loaded, total int, entries []Entry)
 	fn(loaded, total, entries)
 }
 
+// CopyProgressFunc is called while copying files so the UI can show progress.
+type CopyProgressFunc func(copied, total int)
+
+type copyProgressKey struct{}
+
+// WithCopyProgress attaches a copy progress callback to ctx.
+func WithCopyProgress(ctx context.Context, fn CopyProgressFunc) context.Context {
+	if fn == nil {
+		return ctx
+	}
+	if ctx == nil {
+		ctx = context.Background()
+	}
+	return context.WithValue(ctx, copyProgressKey{}, fn)
+}
+
+func reportCopyProgress(ctx context.Context, copied, total int) {
+	fn, _ := ctx.Value(copyProgressKey{}).(CopyProgressFunc)
+	if fn == nil {
+		return
+	}
+	fn(copied, total)
+}
+
 // Client talks to MTP devices over USB bulk transfers.
 type Client interface {
 	Devices(ctx context.Context) ([]Device, error)

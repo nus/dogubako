@@ -82,7 +82,8 @@ func (t *MTPTool) WriteStateKey(context *guigui.Context, w *guigui.StateKeyWrite
 	w.WriteString(m.Selected())
 	w.WriteBool(m.Busy())
 	w.WriteBool(m.Loading())
-	w.WriteInt(m.ListPercent())
+	w.WriteBool(m.Copying())
+	w.WriteInt(m.ProgressPercent())
 	w.WriteInt(t.colSizeW)
 	w.WriteInt(t.colModW)
 }
@@ -321,9 +322,9 @@ func (t *MTPTool) Build(context *guigui.Context, adder *guigui.ChildAdder) error
 		context.SetEnabled(&t.fileList, !model.Copying())
 	}
 
-	t.showProgress = model.Loading()
+	t.showProgress = model.Busy()
 	if t.showProgress {
-		pct := model.ListPercent()
+		pct := model.ProgressPercent()
 		t.progress.SetPercent(pct)
 		t.progressPct.SetValue(fmt.Sprintf("%d%%", pct))
 		t.progressPct.SetHorizontalAlign(basicwidget.HorizontalAlignEnd)
@@ -705,7 +706,7 @@ func (r *mtpFileRow) HandlePointingInput(context *guigui.Context, widgetBounds *
 	return r.tool.handleColResize(context, widgetBounds.Bounds(), widgetBounds.IsHitAtCursor())
 }
 
-// progressBar is a determinate 0–100 fill shown while MTP listing is in progress.
+// progressBar is a determinate 0–100 fill shown while MTP listing or copy is in progress.
 type progressBar struct {
 	guigui.DefaultWidget
 
