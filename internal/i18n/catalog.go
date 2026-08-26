@@ -171,6 +171,8 @@ const (
 	StatusMTPListed                Key = "status.mtp_listed"
 	StatusMTPListFailed            Key = "status.mtp_list_failed"
 	StatusMTPCopying               Key = "status.mtp_copying"
+	StatusMTPCopyingPercent        Key = "status.mtp_copying_percent"
+	StatusMTPCopyingProgress       Key = "status.mtp_copying_progress"
 	StatusMTPCopied                Key = "status.mtp_copied"
 	StatusMTPCopyFailed            Key = "status.mtp_copy_failed"
 	StatusMTPNoSelection           Key = "status.mtp_no_selection"
@@ -333,10 +335,12 @@ var catalogs = map[Lang]map[Key]string{
 		StatusMTPNoDevices:             "MTP デバイスがありません。ファイル転送モードで USB 接続してください",
 		StatusMTPDeviceOffline:         "このデバイスはまだ使えません（%s）",
 		StatusMTPListing:               "読み込んでいます…",
-		StatusMTPListingProgress:       "読み込んでいます… %d / %d 件",
+		StatusMTPListingProgress:       "読み込んでいます… %d%%（%d / %d 件）",
 		StatusMTPListed:                "%s を表示しています（%d 件）",
 		StatusMTPListFailed:            "一覧を取得できません: %v",
 		StatusMTPCopying:               "コピーしています…",
+		StatusMTPCopyingPercent:        "コピーしています… %d%%",
+		StatusMTPCopyingProgress:       "コピーしています… %d%%（%d / %d 件）",
 		StatusMTPCopied:                "コピーしました（%d 件）: %s",
 		StatusMTPCopyFailed:            "コピーに失敗しました: %v",
 		StatusMTPNoSelection:           "コピーするファイルまたはフォルダを選んでください",
@@ -497,10 +501,12 @@ var catalogs = map[Lang]map[Key]string{
 		StatusMTPNoDevices:             "No MTP devices. Plug in a device in file transfer mode.",
 		StatusMTPDeviceOffline:         "This device is not ready (%s)",
 		StatusMTPListing:               "Loading…",
-		StatusMTPListingProgress:       "Loading… %d / %d",
+		StatusMTPListingProgress:       "Loading… %d%% (%d / %d)",
 		StatusMTPListed:                "Showing %s (%d items)",
 		StatusMTPListFailed:            "Could not list files: %v",
 		StatusMTPCopying:               "Copying…",
+		StatusMTPCopyingPercent:        "Copying… %d%%",
+		StatusMTPCopyingProgress:       "Copying… %d%% (%d / %d)",
 		StatusMTPCopied:                "Copied %d item(s) to %s",
 		StatusMTPCopyFailed:            "Copy failed: %v",
 		StatusMTPNoSelection:           "Select a file or folder to copy",

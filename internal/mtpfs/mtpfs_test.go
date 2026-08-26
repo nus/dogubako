@@ -168,6 +168,98 @@ func TestMemPullPush(t *testing.T) {
 	}
 }
 
+func TestCopyReportsProgress(t *testing.T) {
+	now := time.Unix(1_700_000_000, 0)
+	fs := NewMem(Device{Serial: "dev1", State: "online", Model: "Pixel"})
+	fs.PutDir("/Internal/DCIM", now)
+	fs.PutFile("/Internal/DCIM/a.txt", []byte("a"), now)
+	fs.PutFile("/Internal/DCIM/b.txt", []byte("b"), now)
+
+	var pull [][2]int
+	ctx := WithCopyProgress(context.Background(), func(copied, total int, copiedBytes, totalBytes int64) {
+		pull = append(pull, [2]int{copied, total})
+	})
+	dir := t.TempDir()
+	n, err := Pull(ctx, fs, "dev1", "/Internal/DCIM", dir)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if n != 2 {
+		t.Fatalf("pulled %d", n)
+	}
+	if len(pull) < 3 || pull[0] != [2]int{0, 2} || pull[len(pull)-1] != [2]int{2, 2} {
+		t.Fatalf("pull progress = %v", pull)
+	}
+
+	src := t.TempDir()
+	if err := os.WriteFile(filepath.Join(src, "x.txt"), []byte("x"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(filepath.Join(src, "y.txt"), []byte("y"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	var push [][2]int
+	ctx = WithCopyProgress(context.Background(), func(copied, total int, copiedBytes, totalBytes int64) {
+		push = append(push, [2]int{copied, total})
+	})
+	n, err = Push(ctx, fs, "dev1", src, "/Internal")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if n != 2 {
+		t.Fatalf("pushed %d", n)
+	}
+	if len(push) < 3 || push[0] != [2]int{0, 2} || push[len(push)-1] != [2]int{2, 2} {
+		t.Fatalf("push progress = %v", push)
+	}
+}
+
+func TestCopyReportsSingleFileByteProgress(t *testing.T) {
+	now := time.Unix(1_700_000_000, 0)
+	data := make([]byte, 2*partialChunk)
+	for i := range data {
+		data[i] = byte(i)
+	}
+	fs := NewMem(Device{Serial: "dev1", State: "online", Model: "Pixel"})
+	fs.PutDir("/Internal", now)
+	fs.PutFile("/Internal/big.bin", data, now)
+
+	var pcts []int
+	ctx := WithCopyProgress(context.Background(), func(copied, total int, copiedBytes, totalBytes int64) {
+		pcts = append(pcts, listPercent64(copiedBytes, totalBytes))
+	})
+	dir := t.TempDir()
+	n, err := Pull(ctx, fs, "dev1", "/Internal/big.bin", dir)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if n != 1 {
+		t.Fatalf("pulled %d", n)
+	}
+	if len(pcts) < 3 || pcts[0] != 0 || pcts[1] != 50 || pcts[len(pcts)-1] != 100 {
+		t.Fatalf("pull percents = %v", pcts)
+	}
+
+	src := filepath.Join(t.TempDir(), "out.bin")
+	if err := os.WriteFile(src, data, 0o644); err != nil {
+		t.Fatal(err)
+	}
+	pcts = nil
+	ctx = WithCopyProgress(context.Background(), func(copied, total int, copiedBytes, totalBytes int64) {
+		pcts = append(pcts, listPercent64(copiedBytes, totalBytes))
+	})
+	n, err = Push(ctx, fs, "dev1", src, "/Internal")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if n != 1 {
+		t.Fatalf("pushed %d", n)
+	}
+	if len(pcts) < 3 || pcts[0] != 0 || pcts[1] != 50 || pcts[len(pcts)-1] != 100 {
+		t.Fatalf("push percents = %v", pcts)
+	}
+}
+
 func TestUniqueName(t *testing.T) {
 	used := map[string]int{}
 	a := uniqueName(used, "DCIM")
@@ -199,6 +291,10 @@ func (t *seqTransport) Read(max int, timeout time.Duration) ([]byte, error) {
 
 func (t *seqTransport) WriteStream(header []byte, r io.Reader, size int64, timeout time.Duration) error {
 	return fmt.Errorf("WriteStream not implemented")
+}
+
+func (t *seqTransport) WriteStreamProgress(header []byte, r io.Reader, size int64, timeout time.Duration, wrote func(int64)) error {
+	return fmt.Errorf("WriteStreamProgress not implemented")
 }
 
 func (t *seqTransport) Close() error { return nil }
@@ -305,7 +401,7 @@ func TestGetPartialObjectRespectsSize(t *testing.T) {
 	tr := &seqTransport{reads: [][]byte{append(append([]byte{}, data...), resp...)}}
 	s := &session{t: tr}
 	var buf bytes.Buffer
-	n, err := s.getObjectTo(context.Background(), 42, int64(len(content)), &buf)
+	n, err := s.getPartialTo(context.Background(), 42, int64(len(content)), &buf)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -332,7 +428,7 @@ func TestGetPartialObjectChunksThenStops(t *testing.T) {
 	}}
 	s := &session{t: tr}
 	var buf bytes.Buffer
-	n, err := s.getObjectTo(context.Background(), 7, size, &buf)
+	n, err := s.getPartialTo(context.Background(), 7, size, &buf)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -352,17 +448,14 @@ func TestGetPartialObjectChunksThenStops(t *testing.T) {
 	}
 }
 
-func TestGetObjectFullKeepsTrailingResponse(t *testing.T) {
+func TestGetObjectToStreamsFullObject(t *testing.T) {
 	payload := []byte("abc")
-	data := encodeData(opGetObject, 1, payload)
-	resp := encodeResponse(respOK, 1, nil)
+	data := encodeData(opGetObject, 0, payload)
+	resp := encodeResponse(respOK, 0, nil)
 	tr := &seqTransport{reads: [][]byte{
-		encodeResponse(respOpNotSupported, 0, nil), // GetPartialObject rejected
 		append(append([]byte{}, data...), resp...),
 	}}
-	s := &session{t: tr, tx: 0}
-	// First command is GetPartialObject (tx 0). Force fallback by making
-	// getObjectTo see OpNotSupported. getObjectTo starts tx at 0.
+	s := &session{t: tr}
 	var buf bytes.Buffer
 	n, err := s.getObjectTo(context.Background(), 9, 3, &buf)
 	if err != nil {
@@ -370,6 +463,13 @@ func TestGetObjectFullKeepsTrailingResponse(t *testing.T) {
 	}
 	if n != 3 || buf.String() != "abc" {
 		t.Fatalf("got %q n=%d", buf.String(), n)
+	}
+	h, err := decodeHeader(tr.writes[0])
+	if err != nil {
+		t.Fatal(err)
+	}
+	if h.code != opGetObject {
+		t.Fatalf("op = 0x%04x want GetObject", h.code)
 	}
 }
 
@@ -528,12 +628,10 @@ func TestGetObjectToZeroSizeStillDownloads(t *testing.T) {
 	}
 }
 
-func TestGetPartialObjectFallsBackOnInvalidParameter(t *testing.T) {
-	fail := encodeResponse(respInvalidParameter, 0, nil)
-	data := encodeData(opGetObject, 1, []byte("xyz"))
-	ok := encodeResponse(respOK, 1, nil)
+func TestGetObjectToUsesFullObjectForKnownSize(t *testing.T) {
+	data := encodeData(opGetObject, 0, []byte("xyz"))
+	ok := encodeResponse(respOK, 0, nil)
 	tr := &seqTransport{reads: [][]byte{
-		fail,
 		append(append([]byte{}, data...), ok...),
 	}}
 	s := &session{t: tr}
@@ -544,6 +642,13 @@ func TestGetPartialObjectFallsBackOnInvalidParameter(t *testing.T) {
 	}
 	if n != 3 || buf.String() != "xyz" {
 		t.Fatalf("got %q n=%d", buf.String(), n)
+	}
+	h, err := decodeHeader(tr.writes[0])
+	if err != nil {
+		t.Fatal(err)
+	}
+	if h.code != opGetObject {
+		t.Fatalf("op = 0x%04x want GetObject", h.code)
 	}
 }
 
@@ -599,6 +704,10 @@ func (c *scriptedMTP) Close() error {
 
 func (c *scriptedMTP) WriteStream(header []byte, r io.Reader, size int64, timeout time.Duration) error {
 	return fmt.Errorf("WriteStream not implemented")
+}
+
+func (c *scriptedMTP) WriteStreamProgress(header []byte, r io.Reader, size int64, timeout time.Duration, wrote func(int64)) error {
+	return fmt.Errorf("WriteStreamProgress not implemented")
 }
 
 func (c *scriptedMTP) Write(p []byte, timeout time.Duration) error {

@@ -12,15 +12,66 @@ import (
 )
 
 const (
-	initOptionsNone  = 0
+	initOptionsNone = 0
+	// IOUSBHostObjectInitOptionsDeviceSeize. Asks the current owner
+	// (Image Capture / PTPCamera) to close via kUSBHostMessageDeviceIsRequestingClose.
 	initOptionsSeize = 1 << 1
 
 	kernSuccess = 0
 
-	ioReturnExclusiveAccess = 0xe00002c5
+	ioReturnNoMemory        = 0xe00002bd
+	ioReturnNoResources     = 0xe00002be
+	ioReturnNoDevice        = 0xe00002c0
 	ioReturnNotPrivileged   = 0xe00002c1
+	ioReturnBadArgument     = 0xe00002c2
+	ioReturnExclusiveAccess = 0xe00002c5
+	ioReturnUnsupported     = 0xe00002c7
+	ioReturnNotReady        = 0xe00002d5
 	ioReturnTimeout         = 0xe00002d6
+	ioReturnNotAttached     = 0xe00002e0
+	ioReturnAborted         = 0xe00002eb
+	ioReturnNotResponding   = 0xe00002ed
+	ioUSBPipeStalled        = 0xe0004061
+
+	// kUSBHostMessageDeviceIsRequestingClose (IOUSBHostFamilyDefinitions.h)
+	usbHostMessageDeviceIsRequestingClose = 0xe0005003
 )
+
+// ioReturnName maps the IOReturn codes IOUSBHost reports for bulk transfers.
+// The framework's localized descriptions ("Unable to send IO.") are identical
+// for every failure cause, so the numeric code is what identifies the problem.
+func ioReturnName(code uint32) string {
+	switch code {
+	case ioReturnNoMemory:
+		return "kIOReturnNoMemory"
+	case ioReturnNoResources:
+		return "kIOReturnNoResources"
+	case ioReturnNoDevice:
+		return "kIOReturnNoDevice"
+	case ioReturnNotPrivileged:
+		return "kIOReturnNotPrivileged"
+	case ioReturnBadArgument:
+		return "kIOReturnBadArgument"
+	case ioReturnExclusiveAccess:
+		return "kIOReturnExclusiveAccess"
+	case ioReturnUnsupported:
+		return "kIOReturnUnsupported"
+	case ioReturnNotReady:
+		return "kIOReturnNotReady"
+	case ioReturnTimeout:
+		return "kIOReturnTimeout"
+	case ioReturnNotAttached:
+		return "kIOReturnNotAttached"
+	case ioReturnAborted:
+		return "kIOReturnAborted"
+	case ioReturnNotResponding:
+		return "kIOReturnNotResponding"
+	case ioUSBPipeStalled:
+		return "kIOUSBPipeStalled"
+	default:
+		return ""
+	}
+}
 
 var (
 	loadOnce sync.Once
@@ -58,13 +109,17 @@ var (
 	sel_copyPipe             objc.SEL
 	sel_configurationDesc    objc.SEL
 	sel_interfaceDesc        objc.SEL
-	sel_sendIORequest        objc.SEL
-	sel_clearStall           objc.SEL
+	sel_enqueueIORequest     objc.SEL
 	sel_abort                objc.SEL
+	sel_clearStall           objc.SEL
+	sel_setIdleTimeout       objc.SEL
+	sel_idleTimeout          objc.SEL
+	sel_ioDataWithCapacity   objc.SEL
 	sel_initWithLength       objc.SEL
 	sel_initWithBytes        objc.SEL
 	sel_mutableBytes         objc.SEL
 	sel_length               objc.SEL
+	sel_setLength            objc.SEL
 )
 
 func ensureLoaded() error {
@@ -123,13 +178,17 @@ func loadFrameworks() error {
 	sel_copyPipe = objc.RegisterName("copyPipeWithAddress:error:")
 	sel_configurationDesc = objc.RegisterName("configurationDescriptor")
 	sel_interfaceDesc = objc.RegisterName("interfaceDescriptor")
-	sel_sendIORequest = objc.RegisterName("sendIORequestWithData:bytesTransferred:completionTimeout:error:")
+	sel_enqueueIORequest = objc.RegisterName("enqueueIORequestWithData:completionTimeout:error:completionHandler:")
+	sel_abort = objc.RegisterName("abortWithError:")
 	sel_clearStall = objc.RegisterName("clearStallWithError:")
-	sel_abort = objc.RegisterName("abortWithOption:error:")
+	sel_setIdleTimeout = objc.RegisterName("setIdleTimeout:error:")
+	sel_idleTimeout = objc.RegisterName("idleTimeout")
+	sel_ioDataWithCapacity = objc.RegisterName("ioDataWithCapacity:error:")
 	sel_initWithLength = objc.RegisterName("initWithLength:")
 	sel_initWithBytes = objc.RegisterName("initWithBytes:length:")
 	sel_mutableBytes = objc.RegisterName("mutableBytes")
 	sel_length = objc.RegisterName("length")
+	sel_setLength = objc.RegisterName("setLength:")
 	return nil
 }
 
@@ -159,25 +218,49 @@ func nsError(errID objc.ID) error {
 	if errID == 0 {
 		return fmt.Errorf("IOUSBHost error")
 	}
-	code := int(objc.Send[int64](errID, sel_code))
+	code := nsErrorCode(errID)
 	msg := goString(errID.Send(sel_localizedDescription))
-	if uint32(code) == ioReturnExclusiveAccess || uint32(code) == ioReturnNotPrivileged {
+	if code == ioReturnExclusiveAccess || code == ioReturnNotPrivileged {
 		if msg == "" {
 			return ErrBusy
 		}
 		return fmt.Errorf("%w: %s", ErrBusy, msg)
 	}
-	if msg == "" {
-		return fmt.Errorf("IOUSBHost error 0x%x", uint32(code))
+	detail := fmt.Sprintf("0x%08x", code)
+	if name := ioReturnName(code); name != "" {
+		detail += " " + name
 	}
-	return fmt.Errorf("%s", msg)
+	if msg == "" {
+		return fmt.Errorf("IOUSBHost error %s", detail)
+	}
+	return fmt.Errorf("%s (%s)", msg, detail)
 }
 
-func isTimeout(errID objc.ID) bool {
-	if errID == 0 {
-		return false
+func ioReturnErr(code uint32) error {
+	detail := fmt.Sprintf("0x%08x", code)
+	if name := ioReturnName(code); name != "" {
+		detail += " " + name
 	}
-	return uint32(objc.Send[int64](errID, sel_code)) == ioReturnTimeout
+	return fmt.Errorf("Unable to send IO. (%s)", detail)
+}
+
+func nsErrorCode(errID objc.ID) uint32 {
+	if errID == 0 {
+		return 0
+	}
+	return uint32(objc.Send[int64](errID, sel_code))
+}
+
+// shouldClearStallCode reports whether the pipe is likely Halted. Timeout and
+// abort are host-side cancellations; clearStallWithError: would reset the data
+// toggle and desynchronize a bulk stream.
+func shouldClearStallCode(code uint32) bool {
+	switch code {
+	case 0, ioReturnTimeout, ioReturnAborted, ioReturnNoDevice, ioReturnNotAttached:
+		return false
+	default:
+		return true
+	}
 }
 
 func newPool() objc.ID {

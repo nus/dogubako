@@ -1,6 +1,7 @@
 package app
 
 import (
+	"fmt"
 	"image"
 	"image/color"
 	"slices"
@@ -44,18 +45,24 @@ type MTPTool struct {
 	pushDir  basicwidget.Button
 	status   basicwidget.Text
 
-	deviceItems  []basicwidget.ListItem[string]
-	fileItems    []basicwidget.ListItem[string]
-	toolbarItems []guigui.LinearLayoutItem
-	headerItems  []guigui.LinearLayoutItem
-	fileColItems []guigui.LinearLayoutItem
-	actionItems  []guigui.LinearLayoutItem
-	layoutItems  []guigui.LinearLayoutItem
-	toolbar      guigui.LinearLayout
-	fileCol      guigui.LinearLayout
-	actionRow    guigui.LinearLayout
+	progress    progressBar
+	progressPct basicwidget.Text
 
-	showEmpty bool
+	deviceItems   []basicwidget.ListItem[string]
+	fileItems     []basicwidget.ListItem[string]
+	toolbarItems  []guigui.LinearLayoutItem
+	headerItems   []guigui.LinearLayoutItem
+	fileColItems  []guigui.LinearLayoutItem
+	actionItems   []guigui.LinearLayoutItem
+	layoutItems   []guigui.LinearLayoutItem
+	progressItems []guigui.LinearLayoutItem
+	toolbar       guigui.LinearLayout
+	fileCol       guigui.LinearLayout
+	actionRow     guigui.LinearLayout
+	progressRow   guigui.LinearLayout
+
+	showEmpty    bool
+	showProgress bool
 
 	colSizeW, colModW int
 	colDrag           int
@@ -74,6 +81,9 @@ func (t *MTPTool) WriteStateKey(context *guigui.Context, w *guigui.StateKeyWrite
 	w.WriteString(m.Serial())
 	w.WriteString(m.Selected())
 	w.WriteBool(m.Busy())
+	w.WriteBool(m.Loading())
+	w.WriteBool(m.Copying())
+	w.WriteInt(m.ProgressPercent())
 	w.WriteInt(t.colSizeW)
 	w.WriteInt(t.colModW)
 }
@@ -273,7 +283,9 @@ func (t *MTPTool) Build(context *guigui.Context, adder *guigui.ChildAdder) error
 		t.empty.SetWrapMode(basicwidget.WrapModeNormal)
 		t.empty.SetHorizontalAlign(basicwidget.HorizontalAlignCenter)
 		t.empty.SetVerticalAlign(basicwidget.VerticalAlignMiddle)
-		if len(devs) == 0 {
+		if model.Loading() {
+			t.empty.SetValue(model.StatusText(lang))
+		} else if len(devs) == 0 {
 			t.empty.SetValue(i18n.T(lang, i18n.MTPNoDevices))
 		} else {
 			t.empty.SetValue(i18n.T(lang, i18n.MTPEmpty))
@@ -308,6 +320,17 @@ func (t *MTPTool) Build(context *guigui.Context, adder *guigui.ChildAdder) error
 			model.SelectPath(item.Value)
 		})
 		context.SetEnabled(&t.fileList, !model.Copying())
+	}
+
+	t.showProgress = model.Busy()
+	if t.showProgress {
+		pct := model.ProgressPercent()
+		t.progress.SetPercent(pct)
+		t.progressPct.SetValue(fmt.Sprintf("%d%%", pct))
+		t.progressPct.SetHorizontalAlign(basicwidget.HorizontalAlignEnd)
+		t.progressPct.SetVerticalAlign(basicwidget.VerticalAlignMiddle)
+		adder.AddWidget(&t.progress)
+		adder.AddWidget(&t.progressPct)
 	}
 
 	t.pullBtn.SetText(i18n.T(lang, i18n.MTPPull))
@@ -380,6 +403,21 @@ func (t *MTPTool) Layout(context *guigui.Context, widgetBounds *guigui.WidgetBou
 		guigui.LinearLayoutItem{Widget: &t.deviceList, Size: guigui.FixedSize(deviceH)},
 		guigui.LinearLayoutItem{Size: guigui.FixedSize(u), Layout: &t.toolbar},
 		guigui.LinearLayoutItem{Size: guigui.FlexibleSize(1), Layout: &t.fileCol},
+	)
+	if t.showProgress {
+		t.progressItems = slices.Delete(t.progressItems, 0, len(t.progressItems))
+		t.progressItems = append(t.progressItems,
+			guigui.LinearLayoutItem{Widget: &t.progress, Size: guigui.FlexibleSize(1)},
+			guigui.LinearLayoutItem{Widget: &t.progressPct, Size: guigui.FixedSize(3 * u)},
+		)
+		t.progressRow = guigui.LinearLayout{
+			Direction: guigui.LayoutDirectionHorizontal,
+			Items:     t.progressItems,
+			Gap:       u / 4,
+		}
+		t.layoutItems = append(t.layoutItems, guigui.LinearLayoutItem{Size: guigui.FixedSize(u), Layout: &t.progressRow})
+	}
+	t.layoutItems = append(t.layoutItems,
 		guigui.LinearLayoutItem{Size: guigui.FixedSize(u), Layout: &t.actionRow},
 		guigui.LinearLayoutItem{Widget: &t.status, Size: guigui.FixedSize(u)},
 	)
@@ -666,4 +704,53 @@ func (r *mtpFileRow) HandlePointingInput(context *guigui.Context, widgetBounds *
 		return guigui.HandleInputResult{}
 	}
 	return r.tool.handleColResize(context, widgetBounds.Bounds(), widgetBounds.IsHitAtCursor())
+}
+
+// progressBar is a determinate 0–100 fill shown while MTP listing or copy is in progress.
+type progressBar struct {
+	guigui.DefaultWidget
+
+	percent int
+}
+
+func (p *progressBar) SetPercent(percent int) {
+	if percent < 0 {
+		percent = 0
+	}
+	if percent > 100 {
+		percent = 100
+	}
+	p.percent = percent
+}
+
+func (p *progressBar) WriteStateKey(context *guigui.Context, w *guigui.StateKeyWriter) {
+	w.WriteInt(p.percent)
+}
+
+func (p *progressBar) Measure(context *guigui.Context, constraints guigui.Constraints) image.Point {
+	u := basicwidget.UnitSize(context)
+	s := image.Pt(8*u, u)
+	if w, ok := constraints.FixedWidth(); ok {
+		s.X = w
+	}
+	if h, ok := constraints.FixedHeight(); ok {
+		s.Y = h
+	}
+	return s
+}
+
+func (p *progressBar) Draw(context *guigui.Context, widgetBounds *guigui.WidgetBounds, dst *ebiten.Image) {
+	b := widgetBounds.Bounds()
+	if b.Empty() {
+		return
+	}
+	h := max(6, b.Dy()/3)
+	y := b.Min.Y + (b.Dy()-h)/2
+	track := color.NRGBA{R: 0xc8, G: 0xc8, B: 0xc8, A: 0xff}
+	fill := color.NRGBA{R: 0x2f, G: 0x6f, B: 0xdb, A: 0xff}
+	vector.FillRect(dst, float32(b.Min.X), float32(y), float32(b.Dx()), float32(h), track, false)
+	fw := b.Dx() * p.percent / 100
+	if fw > 0 {
+		vector.FillRect(dst, float32(b.Min.X), float32(y), float32(fw), float32(h), fill, false)
+	}
 }

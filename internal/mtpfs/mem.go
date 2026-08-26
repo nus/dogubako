@@ -3,6 +3,7 @@ package mtpfs
 import (
 	"context"
 	"fmt"
+	"io"
 	"os"
 	"path/filepath"
 	"strings"
@@ -137,7 +138,15 @@ func (m *Mem) PullFile(ctx context.Context, serial, remote, local string) error 
 	if err := os.MkdirAll(filepath.Dir(local), 0o755); err != nil {
 		return err
 	}
-	return os.WriteFile(local, n.data, 0o644)
+	f, err := os.Create(local)
+	if err != nil {
+		return err
+	}
+	defer f.Close()
+	if err := writeProgress(ctx, f, n.data); err != nil {
+		return err
+	}
+	return f.Close()
 }
 
 func (m *Mem) PushFile(ctx context.Context, serial, local, remote string, perm os.FileMode, mtime time.Time) error {
@@ -169,7 +178,34 @@ func (m *Mem) PushFile(ctx context.Context, serial, local, remote string, perm o
 		mod:   mtime,
 		data:  append([]byte(nil), data...),
 	}
+	addCopyBytesChunked(ctx, int64(len(data)))
 	return nil
+}
+
+func writeProgress(ctx context.Context, w io.Writer, data []byte) error {
+	pw := progressWriter{ctx: ctx, w: w}
+	for off := 0; off < len(data); {
+		end := off + partialChunk
+		if end > len(data) {
+			end = len(data)
+		}
+		if _, err := pw.Write(data[off:end]); err != nil {
+			return err
+		}
+		off = end
+	}
+	return nil
+}
+
+func addCopyBytesChunked(ctx context.Context, n int64) {
+	for n > 0 {
+		chunk := int64(partialChunk)
+		if chunk > n {
+			chunk = n
+		}
+		addCopyBytes(ctx, chunk)
+		n -= chunk
+	}
 }
 
 func (m *Mem) MkdirAll(ctx context.Context, serial, path string) error {

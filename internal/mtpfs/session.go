@@ -12,7 +12,7 @@ import (
 const (
 	cmdTimeout   = 20 * time.Second
 	dataTimeout  = 60 * time.Second
-	readChunk    = 512 * 1024
+	readChunk    = 64 * 1024 // matches usbhost bulk IN cap
 	partialChunk = 256 * 1024
 )
 
@@ -20,6 +20,7 @@ type transport interface {
 	Write(p []byte, timeout time.Duration) error
 	Read(max int, timeout time.Duration) ([]byte, error)
 	WriteStream(header []byte, r io.Reader, size int64, timeout time.Duration) error
+	WriteStreamProgress(header []byte, r io.Reader, size int64, timeout time.Duration, wrote func(int64)) error
 	Close() error
 }
 
@@ -231,7 +232,8 @@ func (s *session) sendFile(ctx context.Context, op uint16, r io.Reader, size int
 	binary.LittleEndian.PutUint16(header[4:6], containerData)
 	binary.LittleEndian.PutUint16(header[6:8], op)
 	binary.LittleEndian.PutUint32(header[8:12], tx)
-	if err := s.t.WriteStream(header, r, size, dataTimeout); err != nil {
+	wrote := func(n int64) { addCopyBytes(ctx, n) }
+	if err := s.t.WriteStreamProgress(header, r, size, dataTimeout, wrote); err != nil {
 		return s.kill(err)
 	}
 	h, _, err := s.readContainer(ctx, dataTimeout)
@@ -252,19 +254,8 @@ func (s *session) getObjectTo(ctx context.Context, handle uint32, size int64, w 
 			return 0, err
 		}
 	}
-	if size > 0 && size != int64(objectSizeMax32) {
-		n, err := s.getPartialTo(ctx, handle, size, w)
-		if err == nil {
-			return n, nil
-		}
-		if s.broken {
-			return n, err
-		}
-		if n == 0 && isPartialObjectUnsupported(err) {
-			return s.getObjectFullTo(ctx, handle, w)
-		}
-		return n, err
-	}
+	// Full-file GetObject is one bulk data phase. GetPartialObject would
+	// round-trip a command every 256KiB.
 	return s.getObjectFullTo(ctx, handle, w)
 }
 

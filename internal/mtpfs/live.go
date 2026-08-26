@@ -315,6 +315,7 @@ func (d *openDev) entriesFromInfos(ctx context.Context, dir string, n node, hand
 	entries := make([]Entry, 0, len(handles))
 	used := map[string]int{}
 	total := len(handles)
+	reportListProgress(ctx, 0, total, entries)
 	for i, h := range handles {
 		if err := ctx.Err(); err != nil {
 			reportListProgress(ctx, i, total, entries)
@@ -454,7 +455,7 @@ func (c *live) PullFile(ctx context.Context, serial, remote, local string) error
 		if err != nil {
 			return err
 		}
-		_, err = d.sess.getObjectTo(ctx, n.handle, n.size, f)
+		_, err = d.sess.getObjectTo(ctx, n.handle, n.size, progressWriter{ctx: ctx, w: f})
 		if cerr := f.Close(); err == nil {
 			err = cerr
 		}

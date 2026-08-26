@@ -129,6 +129,124 @@ func TestMTPModelSortsByColumn(t *testing.T) {
 	}
 }
 
+func TestListPercent(t *testing.T) {
+	if got := listPercent(0, 0); got != 0 {
+		t.Fatalf("unknown total = %d", got)
+	}
+	if got := listPercent(2, 8); got != 25 {
+		t.Fatalf("2/8 = %d", got)
+	}
+	if got := listPercent(8, 8); got != 100 {
+		t.Fatalf("8/8 = %d", got)
+	}
+	if got := listPercent(9, 8); got != 100 {
+		t.Fatalf("over 100 = %d", got)
+	}
+}
+
+func TestMTPModelListingProgressPercent(t *testing.T) {
+	var m MTPModel
+	ch := make(chan mtpListResult, 2)
+	m.pendingList = ch
+	m.children = map[string][]mtpfs.Entry{}
+
+	ch <- mtpListResult{
+		path:    "/",
+		loaded:  2,
+		total:   8,
+		entries: []mtpfs.Entry{{Name: "a", Path: "/a"}},
+	}
+	m.Drain()
+	if !m.Loading() {
+		t.Fatal("expected loading")
+	}
+	if got := m.ListPercent(); got != 25 {
+		t.Fatalf("percent = %d", got)
+	}
+	got := m.StatusText(i18n.JA)
+	if got != "読み込んでいます… 25%（2 / 8 件）" {
+		t.Fatalf("ja status = %q", got)
+	}
+	if en := m.StatusText(i18n.EN); en != "Loading… 25% (2 / 8)" {
+		t.Fatalf("en status = %q", en)
+	}
+
+	ch <- mtpListResult{
+		path:    "/",
+		loaded:  8,
+		total:   8,
+		entries: []mtpfs.Entry{{Name: "a", Path: "/a"}, {Name: "b", Path: "/b"}},
+		done:    true,
+	}
+	m.Drain()
+	if m.Loading() {
+		t.Fatal("listing should be done")
+	}
+	if got := m.ListPercent(); got != 0 {
+		t.Fatalf("percent after done = %d", got)
+	}
+}
+
+func TestMTPModelCopyProgressPercent(t *testing.T) {
+	var m MTPModel
+	ch := make(chan mtpCopyResult, 2)
+	m.pendingCopy = ch
+
+	ch <- mtpCopyResult{copied: 1, total: 4}
+	m.Drain()
+	if !m.Copying() {
+		t.Fatal("expected copying")
+	}
+	if got := m.ProgressPercent(); got != 25 {
+		t.Fatalf("percent = %d", got)
+	}
+	if got := m.StatusText(i18n.JA); got != "コピーしています… 25%（1 / 4 件）" {
+		t.Fatalf("ja status = %q", got)
+	}
+	if got := m.StatusText(i18n.EN); got != "Copying… 25% (1 / 4)" {
+		t.Fatalf("en status = %q", got)
+	}
+
+	ch <- mtpCopyResult{n: 4, dest: "/tmp", done: true}
+	m.Drain()
+	if m.Copying() {
+		t.Fatal("copy should be done")
+	}
+	if got := m.ProgressPercent(); got != 0 {
+		t.Fatalf("percent after done = %d", got)
+	}
+	if got := m.StatusText(i18n.JA); got != "コピーしました（4 件）: /tmp" {
+		t.Fatalf("ja done = %q", got)
+	}
+}
+
+func TestMTPModelCopyProgressSingleFileBytes(t *testing.T) {
+	var m MTPModel
+	ch := make(chan mtpCopyResult, 3)
+	m.pendingCopy = ch
+
+	ch <- mtpCopyResult{copied: 0, total: 1, copiedBytes: 0, totalBytes: 100}
+	m.Drain()
+	if got := m.ProgressPercent(); got != 0 {
+		t.Fatalf("start percent = %d", got)
+	}
+	if got := m.StatusText(i18n.JA); got != "コピーしています… 0%" {
+		t.Fatalf("ja start = %q", got)
+	}
+
+	ch <- mtpCopyResult{copied: 0, total: 1, copiedBytes: 42, totalBytes: 100}
+	m.Drain()
+	if got := m.ProgressPercent(); got != 42 {
+		t.Fatalf("percent = %d", got)
+	}
+	if got := m.StatusText(i18n.JA); got != "コピーしています… 42%" {
+		t.Fatalf("ja status = %q", got)
+	}
+	if got := m.StatusText(i18n.EN); got != "Copying… 42%" {
+		t.Fatalf("en status = %q", got)
+	}
+}
+
 func TestMTPModelRetryExhaustedQueuesAlert(t *testing.T) {
 	fs := mtpfs.NewMem(mtpfs.Device{Serial: "pixel", State: "online", Model: "Pixel 7"})
 	fs.Fail["/"] = mtpfs.RetryExhausted(context.DeadlineExceeded)
