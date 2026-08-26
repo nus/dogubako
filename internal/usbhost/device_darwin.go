@@ -5,7 +5,9 @@ package usbhost
 import (
 	"fmt"
 	"io"
+	"os"
 	"runtime"
+	"strings"
 	"sync"
 	"time"
 	"unsafe"
@@ -14,11 +16,12 @@ import (
 )
 
 const (
-	// One bulk IO. The kernel has to wire (and for ordinary memory, bounce)
-	// the whole buffer per request, and large requests are what fail with
-	// "Unable to send IO" during SendObject on some controllers.
-	maxBulkWriteChunk = 64 * 1024
-	defaultReadSize   = 512 * 1024
+	// One bulk URB. Larger requests need the kernel to wire more pages;
+	// 64KiB matches the MTP read chunk.
+	maxBulkIO = 64 * 1024
+	// Defer electrical suspend after the pipes go idle, so a pause between
+	// URBs (disk write, scheduling) does not suspend the device.
+	idleKeepAwakeSec = 120.0
 	// Requests at least this large use an ioData buffer. Command containers
 	// are far smaller and are cheaper to hand over as ordinary memory.
 	ioBufferMinSize = 4 * 1024
@@ -35,7 +38,15 @@ type conn struct {
 	maxPacketOut int
 	ioOut        ioBuffer
 	ioIn         ioBuffer
+	interest     objc.Block
+	ioBlock      objc.Block
+	ioDone       chan ioResult
 	closed       bool
+}
+
+type ioResult struct {
+	n      int
+	status uint32
 }
 
 // ioBuffer caches a buffer from ioDataWithCapacity:. Its length is fixed, so
@@ -70,49 +81,52 @@ func open(id string) (Conn, error) {
 
 func openService(svc uint32, info Info) (*conn, error) {
 	var nserr objc.ID
+	interest := objc.NewBlock(func(_ objc.Block, host objc.ID, messageType uint32, arg unsafe.Pointer) {
+		if messageType == usbHostMessageDeviceIsRequestingClose {
+			debugf("interest refuse close 0x%08x (another client tried to seize the device)", messageType)
+			return
+		}
+		debugf("interest msg=0x%08x", messageType)
+	})
 	iface := objc.ID(class_IOUSBHostInterface).Send(sel_alloc)
-	// initWithIOService already takes exclusive ownership of the interface;
-	// IOUSBHostObjectInitOptions has no seize bit.
-	iface = iface.Send(sel_initWithIOService, uintptr(svc), uintptr(initOptionsNone), uintptr(0), unsafe.Pointer(&nserr), uintptr(0))
+	iface = iface.Send(sel_initWithIOService, uintptr(svc), uintptr(initOptionsSeize), uintptr(0), unsafe.Pointer(&nserr), interest)
 	if iface == 0 {
+		interest.Release()
 		return nil, nsError(nserr)
+	}
+
+	fail := func(err error) (*conn, error) {
+		interest.Release()
+		iface.Send(sel_destroy)
+		iface.Send(sel_release)
+		return nil, err
 	}
 
 	cfgPtr := objc.Send[unsafe.Pointer](iface, sel_configurationDesc)
 	ifacePtr := objc.Send[unsafe.Pointer](iface, sel_interfaceDesc)
 	if cfgPtr == nil || ifacePtr == nil {
-		iface.Send(sel_destroy)
-		iface.Send(sel_release)
-		return nil, fmt.Errorf("missing USB descriptors")
+		return fail(fmt.Errorf("missing USB descriptors"))
 	}
 	ifaceNum := int(*(*byte)(unsafe.Add(ifacePtr, 2)))
 	alt := int(*(*byte)(unsafe.Add(ifacePtr, 3)))
 	cfgLen := int(*(*uint16)(unsafe.Add(cfgPtr, 2)))
 	if cfgLen < 9 {
-		iface.Send(sel_destroy)
-		iface.Send(sel_release)
-		return nil, fmt.Errorf("invalid configuration descriptor")
+		return fail(fmt.Errorf("invalid configuration descriptor"))
 	}
 	config := unsafe.Slice((*byte)(cfgPtr), cfgLen)
 	ep, ok := parseEndpoints(config, ifaceNum, alt)
 	if !ok {
-		iface.Send(sel_destroy)
-		iface.Send(sel_release)
-		return nil, fmt.Errorf("MTP bulk endpoints not found")
+		return fail(fmt.Errorf("MTP bulk endpoints not found"))
 	}
 
 	bulkOut, err := copyPipe(iface, ep.bulkOut)
 	if err != nil {
-		iface.Send(sel_destroy)
-		iface.Send(sel_release)
-		return nil, err
+		return fail(err)
 	}
 	bulkIn, err := copyPipe(iface, ep.bulkIn)
 	if err != nil {
 		bulkOut.Send(sel_release)
-		iface.Send(sel_destroy)
-		iface.Send(sel_release)
-		return nil, err
+		return fail(err)
 	}
 
 	c := &conn{
@@ -123,9 +137,37 @@ func openService(svc uint32, info Info) (*conn, error) {
 		outAddr:      ep.bulkOut,
 		inAddr:       ep.bulkIn,
 		maxPacketOut: ep.maxPacketOut,
+		interest:     interest,
+		ioDone:       make(chan ioResult, 2),
 	}
+	c.ioBlock = objc.NewBlock(func(_ objc.Block, status int32, n uintptr) {
+		select {
+		case c.ioDone <- ioResult{n: int(n), status: uint32(status)}:
+		default:
+			// Never block the IOUSBHost completion queue.
+		}
+	})
+	c.setIdleTimeout(idleKeepAwakeSec)
+	gotIdle := 0.0
+	if sel_idleTimeout != 0 {
+		gotIdle = objc.Send[float64](c.iface, sel_idleTimeout)
+	}
+	debugf("opened %s idleTimeout=%.0fs (property=%.3fs) in=0x%02x out=0x%02x mps=%d", info.ID, idleKeepAwakeSec, gotIdle, ep.bulkIn, ep.bulkOut, c.MaxPacketOut())
 	runtime.SetFinalizer(c, (*conn).finalize)
 	return c, nil
+}
+
+func (c *conn) setIdleTimeout(seconds float64) {
+	for _, obj := range []objc.ID{c.iface, c.bulkIn, c.bulkOut} {
+		if obj == 0 || sel_setIdleTimeout == 0 {
+			continue
+		}
+		var nserr objc.ID
+		ok := objc.Send[bool](obj, sel_setIdleTimeout, seconds, unsafe.Pointer(&nserr))
+		if !ok {
+			debugf("setIdleTimeout err=%v", nsError(nserr))
+		}
+	}
 }
 
 func copyPipe(iface objc.ID, addr int) (objc.ID, error) {
@@ -162,6 +204,8 @@ func (c *conn) closeLocked() error {
 	}
 	c.closed = true
 	runtime.SetFinalizer(c, nil)
+	c.abortPipe(c.bulkIn)
+	c.abortPipe(c.bulkOut)
 	c.ioOut.release()
 	c.ioIn.release()
 	if c.bulkOut != 0 {
@@ -176,6 +220,14 @@ func (c *conn) closeLocked() error {
 		c.iface.Send(sel_destroy)
 		c.iface.Send(sel_release)
 		c.iface = 0
+	}
+	if c.ioBlock != 0 {
+		c.ioBlock.Release()
+		c.ioBlock = 0
+	}
+	if c.interest != 0 {
+		c.interest.Release()
+		c.interest = 0
 	}
 	return nil
 }
@@ -203,8 +255,8 @@ func (c *conn) Read(max int, timeout time.Duration) ([]byte, error) {
 	if c.closed {
 		return nil, fmt.Errorf("usb connection closed")
 	}
-	if max <= 0 {
-		max = defaultReadSize
+	if max <= 0 || max > maxBulkIO {
+		max = maxBulkIO
 	}
 	return c.recvLocked(c.bulkIn, max, timeout)
 }
@@ -223,7 +275,7 @@ func (c *conn) WriteStreamProgress(header []byte, r io.Reader, size int64, timeo
 	if total < 0 {
 		return fmt.Errorf("invalid stream size")
 	}
-	if total <= int64(maxBulkWriteChunk) {
+	if total <= int64(maxBulkIO) {
 		buf := make([]byte, total)
 		copy(buf, header)
 		if size > 0 {
@@ -327,12 +379,20 @@ func (c *conn) writeBufferLocked(p []byte) (objc.ID, bool, error) {
 }
 
 func (c *conn) readBufferLocked(max int) (objc.ID, bool) {
-	if max >= ioBufferMinSize {
-		if data := c.ioBufferLocked(&c.ioIn, max); data != 0 {
-			return data, false
-		}
+	// Reuse one NSMutableData. A completed IN may shrink length to the
+	// short-packet size; restore it so the next URB is still `max` bytes.
+	if c.ioIn.data != 0 && c.ioIn.size == max {
+		c.ioIn.data.Send(sel_setLength, uintptr(max))
+		return c.ioIn.data, false
 	}
-	return objc.ID(class_NSMutableData).Send(sel_alloc).Send(sel_initWithLength, uintptr(max)), true
+	c.ioIn.release()
+	data := objc.ID(class_NSMutableData).Send(sel_alloc).Send(sel_initWithLength, uintptr(max))
+	if data == 0 {
+		return 0, true
+	}
+	c.ioIn.data = data
+	c.ioIn.size = max
+	return data, false
 }
 
 // ioBufferLocked returns a cached IOBufferMemoryDescriptor-backed buffer of
@@ -365,18 +425,76 @@ func (b *ioBuffer) release() {
 	b.size = 0
 }
 
-func (c *conn) ioRequestN(pipe objc.ID, data objc.ID, length int, timeout time.Duration) (int, error) {
-	var transferred uint64
+func (c *conn) abortPipe(pipe objc.ID) {
+	if pipe == 0 || sel_abort == 0 {
+		return
+	}
 	var nserr objc.ID
-	ok := objc.Send[bool](pipe, sel_sendIORequest, data, unsafe.Pointer(&transferred), timeout.Seconds(), unsafe.Pointer(&nserr))
-	runtime.KeepAlive(transferred)
-	if !ok {
-		if !isTimeout(nserr) {
+	_ = objc.Send[bool](pipe, sel_abort, unsafe.Pointer(&nserr))
+}
+
+func (c *conn) ioRequestN(pipe objc.ID, data objc.ID, length int, timeout time.Duration) (int, error) {
+	n, code, err := c.submitIO(pipe, data, length, timeout)
+	if err != nil {
+		if shouldClearStallCode(code) {
 			c.clearStall(pipe)
 		}
-		return 0, fmt.Errorf("USB %s, %d bytes: %w", c.pipeLabel(pipe), length, nsError(nserr))
+		return 0, fmt.Errorf("USB %s, %d bytes: %w", c.pipeLabel(pipe), length, err)
 	}
-	return int(transferred), nil
+	return n, nil
+}
+
+func (c *conn) submitIO(pipe objc.ID, data objc.ID, length int, timeout time.Duration) (int, uint32, error) {
+	dataLen := 0
+	if data != 0 && sel_length != 0 {
+		dataLen = int(objc.Send[uintptr](data, sel_length))
+	}
+	select {
+	case <-c.ioDone:
+	default:
+	}
+	var nserr objc.ID
+	t0 := time.Now()
+	ok := objc.Send[bool](pipe, sel_enqueueIORequest, data, timeout.Seconds(), unsafe.Pointer(&nserr), c.ioBlock)
+	if !ok {
+		err := nsError(nserr)
+		debugf("%s req=%d nsdata.len=%d xfer=0 dur=%s err=%v", c.pipeLabel(pipe), length, dataLen, time.Since(t0), err)
+		return 0, nsErrorCode(nserr), err
+	}
+	return c.waitIO(pipe, length, dataLen, timeout, t0)
+}
+
+func (c *conn) waitIO(pipe objc.ID, length, dataLen int, timeout time.Duration, t0 time.Time) (int, uint32, error) {
+	wait := timeout + time.Second
+	if timeout <= 0 {
+		wait = 2 * time.Minute
+	}
+	timer := time.NewTimer(wait)
+	defer timer.Stop()
+	select {
+	case res := <-c.ioDone:
+		if res.status != 0 {
+			err := ioReturnErr(res.status)
+			debugf("%s req=%d nsdata.len=%d xfer=%d dur=%s err=%v", c.pipeLabel(pipe), length, dataLen, res.n, time.Since(t0), err)
+			return res.n, res.status, err
+		}
+		debugf("%s req=%d nsdata.len=%d xfer=%d dur=%s", c.pipeLabel(pipe), length, dataLen, res.n, time.Since(t0))
+		return res.n, 0, nil
+	case <-timer.C:
+		debugf("%s req=%d nsdata.len=%d xfer=0 dur=%s err=%v", c.pipeLabel(pipe), length, dataLen, time.Since(t0), ioReturnErr(ioReturnTimeout))
+		c.abortPipe(pipe)
+		drain := time.NewTimer(time.Second)
+		defer drain.Stop()
+		select {
+		case res := <-c.ioDone:
+			if res.status != 0 {
+				return res.n, res.status, ioReturnErr(res.status)
+			}
+			return res.n, ioReturnTimeout, ioReturnErr(ioReturnTimeout)
+		case <-drain.C:
+			return 0, ioReturnTimeout, ioReturnErr(ioReturnTimeout)
+		}
+	}
 }
 
 func (c *conn) pipeLabel(pipe objc.ID) string {
@@ -423,7 +541,7 @@ func (c *conn) writeStreamLocked(header []byte, r io.Reader, size int64, timeout
 	// full packets. A short packet in the middle of SendObject wedges Android.
 	// Do not LockOSThread around file reads; sendLocked pins the thread per URB.
 	mps := c.MaxPacketOut()
-	chunk := maxBulkWriteChunk
+	chunk := maxBulkIO
 	if mps > 1 {
 		chunk = (chunk / mps) * mps
 		if chunk == 0 {
@@ -474,4 +592,15 @@ func (c *conn) writeStreamLocked(header []byte, r io.Reader, size int64, timeout
 		}
 	}
 	return nil
+}
+
+func debugf(format string, args ...any) {
+	if os.Getenv("DOGUBAKO_MTP_DEBUG") == "" {
+		return
+	}
+	msg := fmt.Sprintf(format, args...)
+	if os.Getenv("DOGUBAKO_MTP_DEBUG") == "1" && !strings.Contains(msg, "err=") && !strings.Contains(msg, "opened ") && !strings.Contains(msg, "interest ") {
+		return
+	}
+	fmt.Fprintf(os.Stderr, "usbhost: %s\n", msg)
 }

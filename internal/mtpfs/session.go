@@ -12,7 +12,7 @@ import (
 const (
 	cmdTimeout   = 20 * time.Second
 	dataTimeout  = 60 * time.Second
-	readChunk    = 512 * 1024
+	readChunk    = 64 * 1024 // matches usbhost bulk IN cap
 	partialChunk = 256 * 1024
 )
 
@@ -230,16 +230,8 @@ func (s *session) getObjectTo(ctx context.Context, handle uint32, size int64, w 
 	if size == 0 {
 		return 0, nil
 	}
-	if size > 0 && size != int64(objectSizeMax32) {
-		n, err := s.getPartialTo(ctx, handle, size, w)
-		if err == nil {
-			return n, nil
-		}
-		if n == 0 && (isResponse(err, respOpNotSupported) || isResponse(err, respParamNotSupported)) {
-			return s.getObjectFullTo(ctx, handle, w)
-		}
-		return n, err
-	}
+	// Full-file GetObject is one bulk data phase. GetPartialObject would
+	// round-trip a command every 256KiB.
 	return s.getObjectFullTo(ctx, handle, w)
 }
 

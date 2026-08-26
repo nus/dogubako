@@ -398,7 +398,7 @@ func TestGetPartialObjectRespectsSize(t *testing.T) {
 	tr := &seqTransport{reads: [][]byte{append(append([]byte{}, data...), resp...)}}
 	s := &session{t: tr}
 	var buf bytes.Buffer
-	n, err := s.getObjectTo(context.Background(), 42, int64(len(content)), &buf)
+	n, err := s.getPartialTo(context.Background(), 42, int64(len(content)), &buf)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -425,7 +425,7 @@ func TestGetPartialObjectChunksThenStops(t *testing.T) {
 	}}
 	s := &session{t: tr}
 	var buf bytes.Buffer
-	n, err := s.getObjectTo(context.Background(), 7, size, &buf)
+	n, err := s.getPartialTo(context.Background(), 7, size, &buf)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -445,17 +445,14 @@ func TestGetPartialObjectChunksThenStops(t *testing.T) {
 	}
 }
 
-func TestGetObjectFullKeepsTrailingResponse(t *testing.T) {
+func TestGetObjectToStreamsFullObject(t *testing.T) {
 	payload := []byte("abc")
-	data := encodeData(opGetObject, 1, payload)
-	resp := encodeResponse(respOK, 1, nil)
+	data := encodeData(opGetObject, 0, payload)
+	resp := encodeResponse(respOK, 0, nil)
 	tr := &seqTransport{reads: [][]byte{
-		encodeResponse(respOpNotSupported, 0, nil), // GetPartialObject rejected
 		append(append([]byte{}, data...), resp...),
 	}}
-	s := &session{t: tr, tx: 0}
-	// First command is GetPartialObject (tx 0). Force fallback by making
-	// getObjectTo see OpNotSupported. getObjectTo starts tx at 0.
+	s := &session{t: tr}
 	var buf bytes.Buffer
 	n, err := s.getObjectTo(context.Background(), 9, 3, &buf)
 	if err != nil {
@@ -463,6 +460,13 @@ func TestGetObjectFullKeepsTrailingResponse(t *testing.T) {
 	}
 	if n != 3 || buf.String() != "abc" {
 		t.Fatalf("got %q n=%d", buf.String(), n)
+	}
+	h, err := decodeHeader(tr.writes[0])
+	if err != nil {
+		t.Fatal(err)
+	}
+	if h.code != opGetObject {
+		t.Fatalf("op = 0x%04x want GetObject", h.code)
 	}
 }
 
