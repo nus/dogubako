@@ -106,6 +106,7 @@ const (
 	MTPColModified   Key = "mtp.col_modified"
 	MTPNoDevices     Key = "mtp.no_devices"
 	MTPHint          Key = "mtp.hint"
+	MTPCancel        Key = "mtp.cancel"
 	DialogOpenDir    Key = "dialog.open_dir"
 	DialogSaveAny    Key = "dialog.save_any"
 	DialogOpenAny    Key = "dialog.open_any"
@@ -175,6 +176,7 @@ const (
 	StatusMTPCopyingProgress       Key = "status.mtp_copying_progress"
 	StatusMTPCopied                Key = "status.mtp_copied"
 	StatusMTPCopyFailed            Key = "status.mtp_copy_failed"
+	StatusMTPCopyCancelled         Key = "status.mtp_copy_cancelled"
 	StatusMTPNoSelection           Key = "status.mtp_no_selection"
 	StatusMTPSelectOnline          Key = "status.mtp_select_online"
 )
@@ -276,6 +278,7 @@ var catalogs = map[Lang]map[Key]string{
 		MTPColModified:                 "更新日時",
 		MTPNoDevices:                   "接続中の MTP デバイスはありません",
 		MTPHint:                        "USB の MTP で端末のファイルを閲覧・コピーします。USB デバッグは不要です。",
+		MTPCancel:                      "キャンセル",
 		DialogOpenDir:                  "保存先フォルダ",
 		DialogSaveAny:                  "ファイルを保存",
 		DialogOpenAny:                  "ファイルを選ぶ",
@@ -343,6 +346,7 @@ var catalogs = map[Lang]map[Key]string{
 		StatusMTPCopyingProgress:       "コピーしています… %d%%（%d / %d 件）",
 		StatusMTPCopied:                "コピーしました（%d 件）: %s",
 		StatusMTPCopyFailed:            "コピーに失敗しました: %v",
+		StatusMTPCopyCancelled:         "コピーをキャンセルしました",
 		StatusMTPNoSelection:           "コピーするファイルまたはフォルダを選んでください",
 		StatusMTPSelectOnline:          "ストレージまたはフォルダを選んでください",
 	},
@@ -442,6 +446,7 @@ var catalogs = map[Lang]map[Key]string{
 		MTPColModified:                 "Modified",
 		MTPNoDevices:                   "No MTP devices connected",
 		MTPHint:                        "Browse and copy files over USB MTP. USB debugging is not required.",
+		MTPCancel:                      "Cancel",
 		DialogOpenDir:                  "Destination Folder",
 		DialogSaveAny:                  "Save File",
 		DialogOpenAny:                  "Choose File",
@@ -509,6 +514,7 @@ var catalogs = map[Lang]map[Key]string{
 		StatusMTPCopyingProgress:       "Copying… %d%% (%d / %d)",
 		StatusMTPCopied:                "Copied %d item(s) to %s",
 		StatusMTPCopyFailed:            "Copy failed: %v",
+		StatusMTPCopyCancelled:         "Copy cancelled",
 		StatusMTPNoSelection:           "Select a file or folder to copy",
 		StatusMTPSelectOnline:          "Select a storage or folder",
 	},

@@ -233,7 +233,7 @@ func (s *session) sendFile(ctx context.Context, op uint16, r io.Reader, size int
 	binary.LittleEndian.PutUint16(header[6:8], op)
 	binary.LittleEndian.PutUint32(header[8:12], tx)
 	wrote := func(n int64) { addCopyBytes(ctx, n) }
-	if err := s.t.WriteStreamProgress(header, r, size, dataTimeout, wrote); err != nil {
+	if err := s.t.WriteStreamProgress(header, ctxReader{ctx: ctx, r: r}, size, dataTimeout, wrote); err != nil {
 		return s.kill(err)
 	}
 	h, _, err := s.readContainer(ctx, dataTimeout)
@@ -751,13 +751,44 @@ func (s *session) sendObjectFile(ctx context.Context, storage, parent uint32, na
 		infoSize = objectSizeMax32
 	}
 	payload := encodeObjectInfo(storage, parent, fmtUndefined, infoSize, name, 0)
-	if _, err := s.sendData(ctx, opSendObjectInfo, []uint32{storage, parent}, payload); err != nil {
-		return err
-	}
-	f, err := os.Open(local)
+	resp, err := s.sendData(ctx, opSendObjectInfo, []uint32{storage, parent}, payload)
 	if err != nil {
 		return err
 	}
+	var handle uint32
+	if len(resp) >= 3 {
+		handle = resp[2]
+	}
+	f, err := os.Open(local)
+	if err != nil {
+		s.deleteObjectBestEffort(handle)
+		return err
+	}
 	defer f.Close()
-	return s.sendFile(ctx, opSendObject, f, size)
+	if err := s.sendFile(ctx, opSendObject, f, size); err != nil {
+		s.deleteObjectBestEffort(handle)
+		return err
+	}
+	return nil
+}
+
+func (s *session) deleteObjectBestEffort(handle uint32) {
+	if s == nil || s.broken || handle == 0 {
+		return
+	}
+	dctx, cancel := context.WithTimeout(context.Background(), cmdTimeout)
+	_, _ = s.runCommand(dctx, opDeleteObject, []uint32{handle})
+	cancel()
+}
+
+type ctxReader struct {
+	ctx context.Context
+	r   io.Reader
+}
+
+func (c ctxReader) Read(p []byte) (int, error) {
+	if err := c.ctx.Err(); err != nil {
+		return 0, err
+	}
+	return c.r.Read(p)
 }

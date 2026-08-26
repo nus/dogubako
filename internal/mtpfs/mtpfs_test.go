@@ -4,6 +4,7 @@ import (
 	"bytes"
 	"context"
 	"encoding/binary"
+	"errors"
 	"fmt"
 	"io"
 	"os"
@@ -257,6 +258,30 @@ func TestCopyReportsSingleFileByteProgress(t *testing.T) {
 	}
 	if len(pcts) < 3 || pcts[0] != 0 || pcts[1] != 50 || pcts[len(pcts)-1] != 100 {
 		t.Fatalf("push percents = %v", pcts)
+	}
+}
+
+func TestPullCancelRemovesIncompleteFile(t *testing.T) {
+	now := time.Unix(1_700_000_000, 0)
+	data := make([]byte, 2*partialChunk)
+	fs := NewMem(Device{Serial: "dev1", State: "online", Model: "Pixel"})
+	fs.PutDir("/Internal", now)
+	fs.PutFile("/Internal/big.bin", data, now)
+
+	ctx, cancel := context.WithCancel(context.Background())
+	ctx = WithCopyProgress(ctx, func(copied, total int, copiedBytes, totalBytes int64) {
+		if copiedBytes > 0 {
+			cancel()
+		}
+	})
+	dir := t.TempDir()
+	_, err := Pull(ctx, fs, "dev1", "/Internal/big.bin", dir)
+	if !errors.Is(err, context.Canceled) {
+		t.Fatalf("err = %v", err)
+	}
+	dest := filepath.Join(dir, "big.bin")
+	if _, statErr := os.Stat(dest); !os.IsNotExist(statErr) {
+		t.Fatalf("incomplete file should be removed, stat = %v", statErr)
 	}
 }
 

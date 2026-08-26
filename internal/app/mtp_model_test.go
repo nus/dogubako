@@ -220,6 +220,61 @@ func TestMTPModelCopyProgressPercent(t *testing.T) {
 	}
 }
 
+func TestMTPModelCancelCopy(t *testing.T) {
+	now := time.Unix(1_700_000_000, 0)
+	fs := mtpfs.NewMem(mtpfs.Device{Serial: "pixel", State: "online", Model: "Pixel 7"})
+	fs.PutFile("/Internal/a.txt", []byte("hello"), now)
+	stall := &stallPullClient{Mem: fs, started: make(chan struct{})}
+
+	var m MTPModel
+	m.SetClient(stall)
+	m.RefreshDevices()
+	waitMTP(t, &m)
+	m.ToggleExpand("/Internal")
+	waitMTP(t, &m)
+	m.SelectPath("/Internal/a.txt")
+	m.StartPull(t.TempDir())
+
+	select {
+	case <-stall.started:
+	case <-time.After(2 * time.Second):
+		t.Fatal("copy did not start")
+	}
+	if !m.Copying() {
+		t.Fatal("expected copying")
+	}
+	m.CancelCopy()
+	waitMTP(t, &m)
+	if m.Copying() {
+		t.Fatal("copy should be cancelled")
+	}
+	if got := m.StatusText(i18n.JA); got != "コピーをキャンセルしました" {
+		t.Fatalf("ja status = %q", got)
+	}
+	if got := m.StatusText(i18n.EN); got != "Copy cancelled" {
+		t.Fatalf("en status = %q", got)
+	}
+	if _, _, ok := m.TakeRetryAlert(); ok {
+		t.Fatal("cancel should not alert")
+	}
+}
+
+func TestMTPModelCancelCopyIdle(t *testing.T) {
+	var m MTPModel
+	m.CancelCopy()
+}
+
+type stallPullClient struct {
+	*mtpfs.Mem
+	started chan struct{}
+}
+
+func (s *stallPullClient) PullFile(ctx context.Context, serial, remote, local string) error {
+	close(s.started)
+	<-ctx.Done()
+	return ctx.Err()
+}
+
 func TestMTPModelCopyProgressSingleFileBytes(t *testing.T) {
 	var m MTPModel
 	ch := make(chan mtpCopyResult, 3)

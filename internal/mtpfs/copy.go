@@ -187,3 +187,17 @@ func pushWalk(ctx context.Context, c Client, serial, local, remote string, info 
 	addCopyFile(ctx)
 	return 1, nil
 }
+
+// closeAndRemoveIncomplete closes f and deletes local when the pull failed,
+// so a cancelled or failed copy never leaves a truncated file.
+func closeAndRemoveIncomplete(f *os.File, local string, err error) error {
+	if f != nil {
+		if cerr := f.Close(); err == nil {
+			err = cerr
+		}
+	}
+	if err != nil {
+		_ = os.Remove(local)
+	}
+	return err
+}
