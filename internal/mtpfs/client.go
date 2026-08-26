@@ -172,6 +172,9 @@ type progressWriter struct {
 }
 
 func (p progressWriter) Write(b []byte) (int, error) {
+	if err := p.ctx.Err(); err != nil {
+		return 0, err
+	}
 	n, err := p.w.Write(b)
 	if n > 0 {
 		addCopyBytes(p.ctx, int64(n))

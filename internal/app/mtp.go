@@ -22,6 +22,7 @@ var (
 	eventMTPPull       = guigui.GenerateEventKey()
 	eventMTPPushFile   = guigui.GenerateEventKey()
 	eventMTPPushFolder = guigui.GenerateEventKey()
+	eventMTPCancel     = guigui.GenerateEventKey()
 )
 
 // MTPTool browses files on a connected MTP device over USB.
@@ -47,6 +48,7 @@ type MTPTool struct {
 
 	progress    progressBar
 	progressPct basicwidget.Text
+	cancelBtn   basicwidget.Button
 
 	deviceItems   []basicwidget.ListItem[string]
 	fileItems     []basicwidget.ListItem[string]
@@ -63,6 +65,7 @@ type MTPTool struct {
 
 	showEmpty    bool
 	showProgress bool
+	showCancel   bool
 
 	colSizeW, colModW int
 	colDrag           int
@@ -102,6 +105,9 @@ func (t *MTPTool) OnPushFile(f func(context *guigui.Context)) {
 }
 func (t *MTPTool) OnPushFolder(f func(context *guigui.Context)) {
 	guigui.SetEventHandler(t, eventMTPPushFolder, f)
+}
+func (t *MTPTool) OnCancel(f func(context *guigui.Context)) {
+	guigui.SetEventHandler(t, eventMTPCancel, f)
 }
 
 func (t *MTPTool) colWidths(u int) (sizeW, modW int) {
@@ -323,6 +329,7 @@ func (t *MTPTool) Build(context *guigui.Context, adder *guigui.ChildAdder) error
 	}
 
 	t.showProgress = model.Busy()
+	t.showCancel = model.Copying()
 	if t.showProgress {
 		pct := model.ProgressPercent()
 		t.progress.SetPercent(pct)
@@ -331,6 +338,13 @@ func (t *MTPTool) Build(context *guigui.Context, adder *guigui.ChildAdder) error
 		t.progressPct.SetVerticalAlign(basicwidget.VerticalAlignMiddle)
 		adder.AddWidget(&t.progress)
 		adder.AddWidget(&t.progressPct)
+	}
+	if t.showCancel {
+		adder.AddWidget(&t.cancelBtn)
+		t.cancelBtn.SetText(i18n.T(lang, i18n.MTPCancel))
+		t.cancelBtn.OnDown(func(context *guigui.Context) {
+			guigui.DispatchEvent(t, eventMTPCancel)
+		})
 	}
 
 	t.pullBtn.SetText(i18n.T(lang, i18n.MTPPull))
@@ -410,6 +424,9 @@ func (t *MTPTool) Layout(context *guigui.Context, widgetBounds *guigui.WidgetBou
 			guigui.LinearLayoutItem{Widget: &t.progress, Size: guigui.FlexibleSize(1)},
 			guigui.LinearLayoutItem{Widget: &t.progressPct, Size: guigui.FixedSize(3 * u)},
 		)
+		if t.showCancel {
+			t.progressItems = append(t.progressItems, guigui.LinearLayoutItem{Widget: &t.cancelBtn})
+		}
 		t.progressRow = guigui.LinearLayout{
 			Direction: guigui.LayoutDirectionHorizontal,
 			Items:     t.progressItems,

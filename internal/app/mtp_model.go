@@ -2,6 +2,7 @@ package app
 
 import (
 	"context"
+	"errors"
 	"fmt"
 	"time"
 
@@ -72,6 +73,7 @@ type MTPModel struct {
 	pendingDevices <-chan mtpDevicesResult
 	pendingList    <-chan mtpListResult
 	pendingCopy    <-chan mtpCopyResult
+	copyCancel     context.CancelFunc
 
 	listLoaded      int
 	listTotal       int
@@ -317,13 +319,18 @@ func (m *MTPModel) drainCopy() {
 		case res := <-m.pendingCopy:
 			if res.done {
 				m.pendingCopy = nil
+				m.copyCancel = nil
 				m.copyCopied = 0
 				m.copyTotal = 0
 				m.copyCopiedBytes = 0
 				m.copyTotalBytes = 0
 				if res.err != nil {
-					m.SetStatus(i18n.StatusMTPCopyFailed, res.err)
-					m.queueRetryAlert(i18n.StatusMTPCopyFailed, res.err)
+					if errors.Is(res.err, context.Canceled) {
+						m.SetStatus(i18n.StatusMTPCopyCancelled)
+					} else {
+						m.SetStatus(i18n.StatusMTPCopyFailed, res.err)
+						m.queueRetryAlert(i18n.StatusMTPCopyFailed, res.err)
+					}
 				} else {
 					m.SetStatus(i18n.StatusMTPCopied, res.n, res.dest)
 					if res.reload && m.serial != "" {
@@ -506,6 +513,13 @@ func (m *MTPModel) SelectPath(path string) {
 
 func (m *MTPModel) Copying() bool { return m.pendingCopy != nil }
 
+func (m *MTPModel) CancelCopy() {
+	if m.copyCancel == nil {
+		return
+	}
+	m.copyCancel()
+}
+
 func (m *MTPModel) ToggleExpand(path string) {
 	e, ok := m.lookup(path)
 	if !ok || !e.IsDir {
@@ -599,13 +613,14 @@ func (m *MTPModel) startCopy(pull bool, src, dest string) {
 	m.SetStatus(i18n.StatusMTPCopying)
 	ch := make(chan mtpCopyResult, 16)
 	m.pendingCopy = ch
+	ctx, cancel := context.WithTimeout(context.Background(), mtpCopyTimeout)
+	m.copyCancel = cancel
 	m.generation++
 	client := m.Client()
 	serial := m.serial
 	go func() {
-		ctx, cancel := context.WithTimeout(context.Background(), mtpCopyTimeout)
 		defer cancel()
-		ctx = mtpfs.WithCopyProgress(ctx, func(copied, total int, copiedBytes, totalBytes int64) {
+		ctx := mtpfs.WithCopyProgress(ctx, func(copied, total int, copiedBytes, totalBytes int64) {
 			select {
 			case ch <- mtpCopyResult{copied: copied, total: total, copiedBytes: copiedBytes, totalBytes: totalBytes}:
 			default:

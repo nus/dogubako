@@ -187,6 +187,9 @@ func (r *Root) Build(context *guigui.Context, adder *guigui.ChildAdder) error {
 	r.mtpTool.OnPushFolder(func(context *guigui.Context) {
 		r.startMTPPush(true)
 	})
+	r.mtpTool.OnCancel(func(context *guigui.Context) {
+		r.model.MTP().CancelCopy()
+	})
 	return nil
 }
 

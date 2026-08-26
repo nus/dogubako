@@ -21,6 +21,7 @@ const (
 	opGetObjectHandles   = 0x1007
 	opGetObjectInfo      = 0x1008
 	opGetObject          = 0x1009
+	opDeleteObject       = 0x100b
 	opSendObjectInfo     = 0x100c
 	opSendObject         = 0x100d
 	opGetPartialObject   = 0x101b

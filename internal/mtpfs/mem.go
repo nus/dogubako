@@ -142,11 +142,7 @@ func (m *Mem) PullFile(ctx context.Context, serial, remote, local string) error 
 	if err != nil {
 		return err
 	}
-	defer f.Close()
-	if err := writeProgress(ctx, f, n.data); err != nil {
-		return err
-	}
-	return f.Close()
+	return closeAndRemoveIncomplete(f, local, writeProgress(ctx, f, n.data))
 }
 
 func (m *Mem) PushFile(ctx context.Context, serial, local, remote string, perm os.FileMode, mtime time.Time) error {
@@ -185,6 +181,9 @@ func (m *Mem) PushFile(ctx context.Context, serial, local, remote string, perm o
 func writeProgress(ctx context.Context, w io.Writer, data []byte) error {
 	pw := progressWriter{ctx: ctx, w: w}
 	for off := 0; off < len(data); {
+		if err := ctx.Err(); err != nil {
+			return err
+		}
 		end := off + partialChunk
 		if end > len(data) {
 			end = len(data)

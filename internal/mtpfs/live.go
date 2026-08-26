@@ -456,14 +456,7 @@ func (c *live) PullFile(ctx context.Context, serial, remote, local string) error
 			return err
 		}
 		_, err = d.sess.getObjectTo(ctx, n.handle, n.size, progressWriter{ctx: ctx, w: f})
-		if cerr := f.Close(); err == nil {
-			err = cerr
-		}
-		if err != nil {
-			_ = os.Remove(local)
-			return err
-		}
-		return nil
+		return closeAndRemoveIncomplete(f, local, err)
 	})
 }
 
