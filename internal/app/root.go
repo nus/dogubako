@@ -216,6 +216,9 @@ func (r *Root) Tick(context *guigui.Context, widgetBounds *guigui.WidgetBounds) 
 	r.model.Android().Drain()
 	r.model.AndroidShot().Drain()
 	r.model.MTP().Drain()
+	if key, args, ok := r.model.MTP().TakeRetryAlert(); ok {
+		dialog.AlertAsync(i18n.T(r.model.Lang(), i18n.AppTitle), i18n.T(r.model.Lang(), key, args...))
+	}
 	if r.model.Mode() == ToolScreenshot {
 		r.model.Screenshot().PollFiles()
 	}

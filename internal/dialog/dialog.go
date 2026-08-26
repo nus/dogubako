@@ -124,6 +124,25 @@ func resultFromCmd(out []byte, err error) FileResult {
 	return FileResult{Err: err}
 }
 
+// AlertAsync shows a blocking error dialog on a new goroutine.
+// macOS uses osascript; Ubuntu uses zenity, then kdialog.
+func AlertAsync(title, message string) {
+	go alertSync(title, message)
+}
+
+func alertSync(title, message string) {
+	if title == "" {
+		title = "Error"
+	}
+	if tryOSAlert(title, message) {
+		return
+	}
+	if _, ok := tryExternal(zenityErrorArgs(title, message)); ok {
+		return
+	}
+	_, _ = tryExternal(kdialogErrorArgs(title, message))
+}
+
 func isCommandMissing(err error) bool {
 	return errors.Is(err, exec.ErrNotFound)
 }

@@ -28,15 +28,32 @@ type session struct {
 	t       transport
 	tx      uint32
 	pending []byte
+	broken  bool
 }
 
 func (s *session) close() {
 	if s == nil || s.t == nil {
 		return
 	}
-	_, _ = s.runCommand(context.Background(), opCloseSession, nil)
+	if !s.broken {
+		ctx, cancel := context.WithTimeout(context.Background(), 2*time.Second)
+		_, _ = s.runCommand(ctx, opCloseSession, nil)
+		cancel()
+	}
 	_ = s.t.Close()
 	s.t = nil
+}
+
+func (s *session) kill(err error) error {
+	if s != nil {
+		s.broken = true
+	}
+	return err
+}
+
+func isAnyResponse(err error) bool {
+	var re responseError
+	return errorAs(err, &re)
 }
 
 func (s *session) nextTx() uint32 {
@@ -49,7 +66,10 @@ func (s *session) open(ctx context.Context) error {
 	_, err := s.runCommand(ctx, opOpenSession, []uint32{1})
 	if err != nil {
 		if isResponse(err, respSessionAlreadyOpen) {
-			_, _ = s.runCommand(ctx, opCloseSession, nil)
+			_, closeErr := s.runCommand(ctx, opCloseSession, nil)
+			if s.broken {
+				return closeErr
+			}
 			_, err = s.runCommand(ctx, opOpenSession, []uint32{1})
 			if isResponse(err, respSessionAlreadyOpen) {
 				err = nil
@@ -60,7 +80,9 @@ func (s *session) open(ctx context.Context) error {
 		}
 	}
 	// Some responders only fully initialize after DeviceInfo is read.
-	_, _ = s.receiveData(ctx, opGetDeviceInfo, nil)
+	if _, err := s.receiveData(ctx, opGetDeviceInfo, nil); err != nil && s.broken {
+		return err
+	}
 	return nil
 }
 
@@ -124,13 +146,13 @@ func (s *session) runCommand(ctx context.Context, op uint16, params []uint32) ([
 	}
 	tx := s.nextTx()
 	if err := s.t.Write(encodeCommand(op, tx, params), cmdTimeout); err != nil {
-		return nil, err
+		return nil, s.kill(err)
 	}
 	h, payload, err := s.readContainer(ctx, cmdTimeout)
 	if err != nil {
 		return nil, err
 	}
-	if err := checkResponse(h, op); err != nil {
+	if err := s.checkResponse(h, op, tx); err != nil {
 		return nil, err
 	}
 	return paramsFrom(payload), nil
@@ -142,26 +164,29 @@ func (s *session) receiveData(ctx context.Context, op uint16, params []uint32) (
 	}
 	tx := s.nextTx()
 	if err := s.t.Write(encodeCommand(op, tx, params), cmdTimeout); err != nil {
-		return nil, err
+		return nil, s.kill(err)
 	}
 	h, payload, err := s.readContainer(ctx, dataTimeout)
 	if err != nil {
 		return nil, err
 	}
 	if h.typ == containerResponse {
-		if err := checkResponse(h, op); err != nil {
+		if err := s.checkResponse(h, op, tx); err != nil {
 			return nil, err
 		}
 		return nil, nil
 	}
 	if h.typ != containerData {
-		return nil, fmt.Errorf("MTP: expected data container, got type %d", h.typ)
+		return nil, s.kill(fmt.Errorf("MTP: expected data container, got type %d", h.typ))
+	}
+	if err := s.checkTx(h, tx, op); err != nil {
+		return nil, err
 	}
 	rh, rpayload, err := s.readContainer(ctx, cmdTimeout)
 	if err != nil {
 		return nil, err
 	}
-	if err := checkResponse(rh, op); err != nil {
+	if err := s.checkResponse(rh, op, tx); err != nil {
 		return nil, err
 	}
 	_ = rpayload
@@ -174,16 +199,16 @@ func (s *session) sendData(ctx context.Context, op uint16, params []uint32, payl
 	}
 	tx := s.nextTx()
 	if err := s.t.Write(encodeCommand(op, tx, params), cmdTimeout); err != nil {
-		return nil, err
+		return nil, s.kill(err)
 	}
 	if err := s.t.Write(encodeData(op, tx, payload), dataTimeout); err != nil {
-		return nil, err
+		return nil, s.kill(err)
 	}
 	h, body, err := s.readContainer(ctx, cmdTimeout)
 	if err != nil {
 		return nil, err
 	}
-	if err := checkResponse(h, op); err != nil {
+	if err := s.checkResponse(h, op, tx); err != nil {
 		return nil, err
 	}
 	return paramsFrom(body), nil
@@ -195,7 +220,7 @@ func (s *session) sendFile(ctx context.Context, op uint16, r io.Reader, size int
 	}
 	tx := s.nextTx()
 	if err := s.t.Write(encodeCommand(op, tx, nil), cmdTimeout); err != nil {
-		return err
+		return s.kill(err)
 	}
 	phase := int64(containerHeaderSize) + size
 	lenField := uint32(phase)
@@ -209,30 +234,36 @@ func (s *session) sendFile(ctx context.Context, op uint16, r io.Reader, size int
 	binary.LittleEndian.PutUint32(header[8:12], tx)
 	wrote := func(n int64) { addCopyBytes(ctx, n) }
 	if err := s.t.WriteStreamProgress(header, r, size, dataTimeout, wrote); err != nil {
-		return err
+		return s.kill(err)
 	}
 	h, _, err := s.readContainer(ctx, dataTimeout)
 	if err != nil {
 		return err
 	}
-	return checkResponse(h, op)
+	return s.checkResponse(h, op, tx)
 }
 
 func (s *session) getObjectTo(ctx context.Context, handle uint32, size int64, w io.Writer) (int64, error) {
 	if err := ctx.Err(); err != nil {
 		return 0, err
 	}
-	if size == int64(objectSizeMax32) {
+	if size <= 0 || size == int64(objectSizeMax32) {
 		if sz, err := s.objectSize64(ctx, handle); err == nil && sz >= 0 {
 			size = sz
+		} else if s.broken {
+			return 0, err
 		}
-	}
-	if size == 0 {
-		return 0, nil
 	}
 	// Full-file GetObject is one bulk data phase. GetPartialObject would
 	// round-trip a command every 256KiB.
 	return s.getObjectFullTo(ctx, handle, w)
+}
+
+func isPartialObjectUnsupported(err error) bool {
+	return isResponse(err, respOpNotSupported) ||
+		isResponse(err, respParamNotSupported) ||
+		isResponse(err, respInvalidParameter) ||
+		isResponse(err, respIncompleteTransfer)
 }
 
 func (s *session) getPartialTo(ctx context.Context, handle uint32, size int64, w io.Writer) (int64, error) {
@@ -279,7 +310,7 @@ func (s *session) getPartialTo(ctx context.Context, handle uint32, size int64, w
 func (s *session) getObjectFullTo(ctx context.Context, handle uint32, w io.Writer) (int64, error) {
 	tx := s.nextTx()
 	if err := s.t.Write(encodeCommand(opGetObject, tx, []uint32{handle}), cmdTimeout); err != nil {
-		return 0, err
+		return 0, s.kill(err)
 	}
 	for {
 		if err := s.fillAtLeast(ctx, dataTimeout, containerHeaderSize); err != nil {
@@ -287,6 +318,9 @@ func (s *session) getObjectFullTo(ctx context.Context, handle uint32, w io.Write
 		}
 		h, err := decodeHeader(s.pending)
 		if err != nil {
+			return 0, s.kill(err)
+		}
+		if err := s.validateHeader(h); err != nil {
 			return 0, err
 		}
 		if h.typ == containerEvent {
@@ -300,20 +334,23 @@ func (s *session) getObjectFullTo(ctx context.Context, handle uint32, w io.Write
 			if err != nil {
 				return 0, err
 			}
-			return 0, checkResponse(rh, opGetObject)
+			return 0, s.checkResponse(rh, opGetObject, tx)
 		}
 		if h.typ != containerData {
-			return 0, fmt.Errorf("MTP: expected data for GetObject, got type %d", h.typ)
+			return 0, s.kill(fmt.Errorf("MTP: expected data for GetObject, got type %d", h.typ))
+		}
+		if err := s.checkTx(h, tx, opGetObject); err != nil {
+			return 0, err
 		}
 		s.consume(containerHeaderSize)
 		var written int64
 		if h.length == lengthUnknown || int(h.length) < containerHeaderSize {
-			return s.copyUntilResponse(ctx, w)
+			return s.copyUntilResponse(ctx, tx, w)
 		}
 		remaining := int64(h.length) - containerHeaderSize
 		for remaining > 0 {
 			if err := ctx.Err(); err != nil {
-				return written, err
+				return written, s.kill(err)
 			}
 			if len(s.pending) == 0 {
 				before := len(s.pending)
@@ -333,7 +370,8 @@ func (s *session) getObjectFullTo(ctx context.Context, handle uint32, w io.Write
 			written += int64(k)
 			remaining -= int64(k)
 			if err != nil {
-				return written, err
+				// Local write failed but the device is still sending object data.
+				return written, s.kill(err)
 			}
 			if k == 0 {
 				break
@@ -343,15 +381,15 @@ func (s *session) getObjectFullTo(ctx context.Context, handle uint32, w io.Write
 		if err != nil {
 			return written, err
 		}
-		return written, checkResponse(rh, opGetObject)
+		return written, s.checkResponse(rh, opGetObject, tx)
 	}
 }
 
-func (s *session) copyUntilResponse(ctx context.Context, w io.Writer) (int64, error) {
+func (s *session) copyUntilResponse(ctx context.Context, tx uint32, w io.Writer) (int64, error) {
 	var written int64
 	for {
 		if err := ctx.Err(); err != nil {
-			return written, err
+			return written, s.kill(err)
 		}
 		if len(s.pending) == 0 {
 			before := len(s.pending)
@@ -362,14 +400,22 @@ func (s *session) copyUntilResponse(ctx context.Context, w io.Writer) (int64, er
 				continue
 			}
 		}
-		if written > 0 && isResponsePrefix(s.pending) {
+		if data, _, ok := splitTrailingResponse(s.pending, tx); ok {
+			if len(data) > 0 {
+				n, err := w.Write(data)
+				s.consume(n)
+				written += int64(n)
+				if err != nil {
+					return written, s.kill(err)
+				}
+			}
 			break
 		}
 		n, err := w.Write(s.pending)
 		s.consume(n)
 		written += int64(n)
 		if err != nil {
-			return written, err
+			return written, s.kill(err)
 		}
 		if n == 0 {
 			break
@@ -379,27 +425,43 @@ func (s *session) copyUntilResponse(ctx context.Context, w io.Writer) (int64, er
 	if err != nil {
 		return written, err
 	}
-	return written, checkResponse(rh, opGetObject)
+	return written, s.checkResponse(rh, opGetObject, tx)
 }
 
-func isResponsePrefix(b []byte) bool {
+// splitTrailingResponse reports whether b ends with an MTP response container.
+// tx 0 accepts any transaction id.
+func splitTrailingResponse(b []byte, tx uint32) (data, resp []byte, ok bool) {
 	if len(b) < containerHeaderSize {
-		return false
+		return b, nil, false
 	}
-	h, err := decodeHeader(b)
-	if err != nil {
-		return false
+	max := 32
+	if len(b) < max {
+		max = len(b)
 	}
-	return h.typ == containerResponse && h.length >= containerHeaderSize && h.length <= 32
+	for n := containerHeaderSize; n <= max; n++ {
+		off := len(b) - n
+		h, err := decodeHeader(b[off:])
+		if err != nil {
+			continue
+		}
+		if h.typ != containerResponse || int(h.length) != n {
+			continue
+		}
+		if tx != 0 && h.transactionID != tx {
+			continue
+		}
+		return b[:off], b[off:], true
+	}
+	return b, nil, false
 }
 
 func (s *session) readMore(ctx context.Context, timeout time.Duration) error {
 	if err := ctx.Err(); err != nil {
-		return err
+		return s.kill(err)
 	}
 	chunk, err := s.t.Read(readChunk, timeout)
 	if err != nil {
-		return err
+		return s.kill(err)
 	}
 	if len(chunk) > 0 {
 		s.pending = append(s.pending, chunk...)
@@ -441,6 +503,9 @@ func (s *session) takeContainer(ctx context.Context, timeout time.Duration) (con
 	}
 	h, err := decodeHeader(s.pending)
 	if err != nil {
+		return containerHeader{}, nil, s.kill(err)
+	}
+	if err := s.validateHeader(h); err != nil {
 		return containerHeader{}, nil, err
 	}
 	if h.typ == containerEvent {
@@ -468,6 +533,28 @@ func (s *session) takeContainer(ctx context.Context, timeout time.Duration) (con
 		payload = append([]byte(nil), buf[containerHeaderSize:]...)
 	}
 	return h, payload, nil
+}
+
+const maxDataContainer = 128 << 20
+
+func (s *session) validateHeader(h containerHeader) error {
+	switch h.typ {
+	case containerCommand, containerResponse:
+		if h.length < containerHeaderSize || h.length > 32 {
+			return s.kill(fmt.Errorf("MTP: invalid container length %d type %d", h.length, h.typ))
+		}
+	case containerEvent:
+		if h.length != lengthUnknown && (h.length < containerHeaderSize || h.length > 64) {
+			return s.kill(fmt.Errorf("MTP: invalid event length %d", h.length))
+		}
+	case containerData:
+		if h.length != lengthUnknown && (h.length < containerHeaderSize || int(h.length) > maxDataContainer) {
+			return s.kill(fmt.Errorf("MTP: invalid data container length %d", h.length))
+		}
+	default:
+		return s.kill(fmt.Errorf("MTP: invalid container type %d", h.typ))
+	}
+	return nil
 }
 
 func (s *session) skipContainer(ctx context.Context, timeout time.Duration, h containerHeader) error {
@@ -522,14 +609,32 @@ func (s *session) readContainer(ctx context.Context, timeout time.Duration) (con
 	return s.takeContainer(ctx, timeout)
 }
 
-func checkResponse(h containerHeader, op uint16) error {
+func checkResponse(h containerHeader, op uint16, tx uint32) error {
 	if h.typ != containerResponse {
 		return fmt.Errorf("MTP 0x%04x: expected response, got type %d", op, h.typ)
+	}
+	if h.transactionID != tx {
+		return fmt.Errorf("MTP 0x%04x: transaction mismatch got %d want %d", op, h.transactionID, tx)
 	}
 	if h.code != respOK {
 		return responseError{code: h.code}
 	}
 	return nil
+}
+
+func (s *session) checkResponse(h containerHeader, op uint16, tx uint32) error {
+	err := checkResponse(h, op, tx)
+	if err == nil || isAnyResponse(err) {
+		return err
+	}
+	return s.kill(err)
+}
+
+func (s *session) checkTx(h containerHeader, tx uint32, op uint16) error {
+	if h.transactionID == tx {
+		return nil
+	}
+	return s.kill(fmt.Errorf("MTP 0x%04x: transaction mismatch got %d want %d", op, h.transactionID, tx))
 }
 
 func paramsFrom(payload []byte) []uint32 {
@@ -589,6 +694,9 @@ func (s *session) objectPropListPieces(ctx context.Context, parent uint32) ([]pr
 	for _, code := range codes {
 		b, err := s.receiveData(ctx, opGetObjectPropList, []uint32{parent, formatAll, code, 0, depthDirect})
 		if err != nil {
+			if s.broken || !isAnyResponse(err) {
+				return nil, err
+			}
 			continue
 		}
 		objs, err := parseObjectPropList(b)

@@ -246,3 +246,49 @@ func TestMTPModelCopyProgressSingleFileBytes(t *testing.T) {
 		t.Fatalf("en status = %q", got)
 	}
 }
+
+func TestMTPModelRetryExhaustedQueuesAlert(t *testing.T) {
+	fs := mtpfs.NewMem(mtpfs.Device{Serial: "pixel", State: "online", Model: "Pixel 7"})
+	fs.Fail["/"] = mtpfs.RetryExhausted(context.DeadlineExceeded)
+
+	var m MTPModel
+	m.SetClient(fs)
+	m.RefreshDevices()
+	waitMTP(t, &m)
+
+	key, args, ok := m.TakeRetryAlert()
+	if !ok {
+		t.Fatal("expected a message-box alert after retry was exhausted")
+	}
+	if key != i18n.StatusMTPListFailed {
+		t.Fatalf("alert key = %s", key)
+	}
+	if len(args) != 1 {
+		t.Fatalf("alert args = %v", args)
+	}
+	if got := m.StatusText(i18n.JA); got == "" {
+		t.Fatal("status bar should still show the error")
+	}
+
+	key, _, ok = m.TakeRetryAlert()
+	if ok {
+		t.Fatalf("alert should be consumed: %s", key)
+	}
+}
+
+func TestMTPModelListErrorStaysOnStatusBar(t *testing.T) {
+	fs := mtpfs.NewMem(mtpfs.Device{Serial: "pixel", State: "online", Model: "Pixel 7"})
+	fs.Fail["/"] = context.Canceled
+
+	var m MTPModel
+	m.SetClient(fs)
+	m.RefreshDevices()
+	waitMTP(t, &m)
+
+	if _, _, ok := m.TakeRetryAlert(); ok {
+		t.Fatal("plain list errors should stay on the status bar")
+	}
+	if got := m.StatusText(i18n.JA); got == "" {
+		t.Fatal("expected list error status")
+	}
+}

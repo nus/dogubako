@@ -209,10 +209,12 @@ func (c *conn) closeLocked() error {
 	c.ioOut.release()
 	c.ioIn.release()
 	if c.bulkOut != 0 {
+		c.abortPipe(c.bulkOut)
 		c.bulkOut.Send(sel_release)
 		c.bulkOut = 0
 	}
 	if c.bulkIn != 0 {
+		c.abortPipe(c.bulkIn)
 		c.bulkIn.Send(sel_release)
 		c.bulkIn = 0
 	}

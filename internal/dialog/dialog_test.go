@@ -31,6 +31,15 @@ func TestZenityAndKdialogArgs(t *testing.T) {
 		t.Fatalf("filter arg = %v", args)
 	}
 
+	name, args = zenityErrorArgs("道具箱", "一覧を取得できません")
+	if name != "zenity" || !contains(args, "--error") || !contains(args, "--title=道具箱") || !contains(args, "--text=一覧を取得できません") {
+		t.Fatalf("zenity error = %v", args)
+	}
+	name, args = kdialogErrorArgs("道具箱", "コピーに失敗しました")
+	if name != "kdialog" || !reflect.DeepEqual(args, []string{"--error", "コピーに失敗しました", "--title", "道具箱"}) {
+		t.Fatalf("kdialog error = %v", args)
+	}
+
 	name, args = zenitySaveArgs("画像を保存", "out.png", filter)
 	if name != "zenity" || !contains(args, "--save") || !contains(args, "--filename=out.png") {
 		t.Fatalf("save args = %v", args)
@@ -126,6 +135,13 @@ func TestOSAQuoteAndScript(t *testing.T) {
 	if osaTypeList(&FileFilter{Extensions: []string{"*"}}) != "" {
 		t.Fatal("wildcard should disable type filter")
 	}
+	alert := osaAlertScript("道具箱", `失敗: "usb timeout"`)
+	if !strings.Contains(alert, `display dialog "失敗: \"usb timeout\"" with title "道具箱"`) {
+		t.Fatalf("alert script = %s", alert)
+	}
+	if !strings.Contains(alert, `buttons {"OK"}`) {
+		t.Fatalf("alert buttons = %s", alert)
+	}
 }
 
 func TestTryOSDialogMissing(t *testing.T) {
@@ -133,6 +149,15 @@ func TestTryOSDialogMissing(t *testing.T) {
 	t.Cleanup(func() { execLookPath = origLook })
 	execLookPath = func(string) (string, error) { return "", exec.ErrNotFound }
 	if _, ok := tryOSDialog(osaOpen, "Open", "", nil); ok {
+		t.Fatal("missing osascript should skip")
+	}
+}
+
+func TestTryOSAlertMissing(t *testing.T) {
+	origLook := execLookPath
+	t.Cleanup(func() { execLookPath = origLook })
+	execLookPath = func(string) (string, error) { return "", exec.ErrNotFound }
+	if tryOSAlert("title", "message") {
 		t.Fatal("missing osascript should skip")
 	}
 }
