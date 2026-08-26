@@ -14,8 +14,14 @@ import (
 )
 
 const (
-	maxBulkWriteChunk = 256 * 1024
+	// One bulk IO. The kernel has to wire (and for ordinary memory, bounce)
+	// the whole buffer per request, and large requests are what fail with
+	// "Unable to send IO" during SendObject on some controllers.
+	maxBulkWriteChunk = 64 * 1024
 	defaultReadSize   = 512 * 1024
+	// Requests at least this large use an ioData buffer. Command containers
+	// are far smaller and are cheaper to hand over as ordinary memory.
+	ioBufferMinSize = 4 * 1024
 )
 
 type conn struct {
@@ -24,8 +30,19 @@ type conn struct {
 	iface        objc.ID
 	bulkOut      objc.ID
 	bulkIn       objc.ID
+	outAddr      int
+	inAddr       int
 	maxPacketOut int
+	ioOut        ioBuffer
+	ioIn         ioBuffer
 	closed       bool
+}
+
+// ioBuffer caches a buffer from ioDataWithCapacity:. Its length is fixed, so
+// one buffer serves a single request size and is reallocated when that changes.
+type ioBuffer struct {
+	data objc.ID
+	size int
 }
 
 func open(id string) (Conn, error) {
@@ -54,7 +71,9 @@ func open(id string) (Conn, error) {
 func openService(svc uint32, info Info) (*conn, error) {
 	var nserr objc.ID
 	iface := objc.ID(class_IOUSBHostInterface).Send(sel_alloc)
-	iface = iface.Send(sel_initWithIOService, uintptr(svc), uintptr(initOptionsSeize), uintptr(0), unsafe.Pointer(&nserr), uintptr(0))
+	// initWithIOService already takes exclusive ownership of the interface;
+	// IOUSBHostObjectInitOptions has no seize bit.
+	iface = iface.Send(sel_initWithIOService, uintptr(svc), uintptr(initOptionsNone), uintptr(0), unsafe.Pointer(&nserr), uintptr(0))
 	if iface == 0 {
 		return nil, nsError(nserr)
 	}
@@ -101,6 +120,8 @@ func openService(svc uint32, info Info) (*conn, error) {
 		iface:        iface,
 		bulkOut:      bulkOut,
 		bulkIn:       bulkIn,
+		outAddr:      ep.bulkOut,
+		inAddr:       ep.bulkIn,
 		maxPacketOut: ep.maxPacketOut,
 	}
 	runtime.SetFinalizer(c, (*conn).finalize)
@@ -141,6 +162,8 @@ func (c *conn) closeLocked() error {
 	}
 	c.closed = true
 	runtime.SetFinalizer(c, nil)
+	c.ioOut.release()
+	c.ioIn.release()
 	if c.bulkOut != 0 {
 		c.bulkOut.Send(sel_release)
 		c.bulkOut = 0
@@ -166,7 +189,12 @@ func (c *conn) Write(p []byte, timeout time.Duration) error {
 	if len(p) == 0 {
 		return c.sendZLPLocked(timeout)
 	}
-	return c.sendLocked(c.bulkOut, p, timeout)
+	if err := c.sendLocked(c.bulkOut, p, timeout); err != nil {
+		return err
+	}
+	// A data phase whose length is an exact multiple of the packet size has to
+	// be closed with a zero-length packet, or the responder keeps waiting.
+	return c.maybeZLPLocked(int64(len(p)), timeout)
 }
 
 func (c *conn) Read(max int, timeout time.Duration) ([]byte, error) {
@@ -235,16 +263,20 @@ func (c *conn) sendLocked(pipe objc.ID, p []byte, timeout time.Duration) error {
 	pool := newPool()
 	defer pool.Send(sel_drain)
 
-	var data objc.ID
-	if len(p) > 0 {
-		var err error
-		data, err = dataWithBytes(p)
-		if err != nil {
-			return err
-		}
+	if len(p) == 0 {
+		// A nil buffer sends a zero-length packet.
+		_, err := c.ioRequestN(pipe, 0, 0, timeout)
+		return err
+	}
+	data, release, err := c.writeBufferLocked(p)
+	if err != nil {
+		return err
+	}
+	if release {
 		defer data.Send(sel_release)
 	}
-	return c.ioRequest(pipe, data, timeout)
+	_, err = c.ioRequestN(pipe, data, len(p), timeout)
+	return err
 }
 
 func (c *conn) recvLocked(pipe objc.ID, max int, timeout time.Duration) ([]byte, error) {
@@ -253,13 +285,15 @@ func (c *conn) recvLocked(pipe objc.ID, max int, timeout time.Duration) ([]byte,
 	pool := newPool()
 	defer pool.Send(sel_drain)
 
-	data := objc.ID(class_NSMutableData).Send(sel_alloc).Send(sel_initWithLength, uintptr(max))
+	data, release := c.readBufferLocked(max)
 	if data == 0 {
 		return nil, fmt.Errorf("allocate USB read buffer")
 	}
-	defer data.Send(sel_release)
+	if release {
+		defer data.Send(sel_release)
+	}
 
-	n, err := c.ioRequestN(pipe, data, timeout)
+	n, err := c.ioRequestN(pipe, data, max, timeout)
 	if err != nil {
 		return nil, err
 	}
@@ -275,12 +309,63 @@ func (c *conn) recvLocked(pipe objc.ID, max int, timeout time.Duration) ([]byte,
 	return out, nil
 }
 
-func (c *conn) ioRequest(pipe objc.ID, data objc.ID, timeout time.Duration) error {
-	_, err := c.ioRequestN(pipe, data, timeout)
-	return err
+// writeBufferLocked returns a buffer holding p, and whether the caller owns it.
+func (c *conn) writeBufferLocked(p []byte) (objc.ID, bool, error) {
+	if len(p) >= ioBufferMinSize {
+		if data := c.ioBufferLocked(&c.ioOut, len(p)); data != 0 {
+			if !copyIntoData(data, p) {
+				return 0, false, fmt.Errorf("USB write buffer pointer is nil")
+			}
+			return data, false, nil
+		}
+	}
+	data, err := dataWithBytes(p)
+	if err != nil {
+		return 0, false, err
+	}
+	return data, true, nil
 }
 
-func (c *conn) ioRequestN(pipe objc.ID, data objc.ID, timeout time.Duration) (int, error) {
+func (c *conn) readBufferLocked(max int) (objc.ID, bool) {
+	if max >= ioBufferMinSize {
+		if data := c.ioBufferLocked(&c.ioIn, max); data != 0 {
+			return data, false
+		}
+	}
+	return objc.ID(class_NSMutableData).Send(sel_alloc).Send(sel_initWithLength, uintptr(max)), true
+}
+
+// ioBufferLocked returns a cached IOBufferMemoryDescriptor-backed buffer of
+// exactly size bytes. The kernel can DMA straight out of these, while ordinary
+// NSMutableData has to be bounced for every request, which is where large bulk
+// transfers fail. Returns 0 when the framework cannot provide one.
+func (c *conn) ioBufferLocked(b *ioBuffer, size int) objc.ID {
+	if b.data != 0 && b.size == size {
+		return b.data
+	}
+	b.release()
+	var nserr objc.ID
+	data := objc.Send[objc.ID](c.iface, sel_ioDataWithCapacity, uintptr(size), unsafe.Pointer(&nserr))
+	if data == 0 {
+		return 0
+	}
+	// The name is not alloc/new/copy, so the buffer is autoreleased and would
+	// go away when the enclosing pool drains.
+	data.Send(sel_retain)
+	b.data = data
+	b.size = size
+	return data
+}
+
+func (b *ioBuffer) release() {
+	if b.data != 0 {
+		b.data.Send(sel_release)
+	}
+	b.data = 0
+	b.size = 0
+}
+
+func (c *conn) ioRequestN(pipe objc.ID, data objc.ID, length int, timeout time.Duration) (int, error) {
 	var transferred uint64
 	var nserr objc.ID
 	ok := objc.Send[bool](pipe, sel_sendIORequest, data, unsafe.Pointer(&transferred), timeout.Seconds(), unsafe.Pointer(&nserr))
@@ -289,9 +374,30 @@ func (c *conn) ioRequestN(pipe objc.ID, data objc.ID, timeout time.Duration) (in
 		if !isTimeout(nserr) {
 			c.clearStall(pipe)
 		}
-		return 0, nsError(nserr)
+		return 0, fmt.Errorf("USB %s, %d bytes: %w", c.pipeLabel(pipe), length, nsError(nserr))
 	}
 	return int(transferred), nil
+}
+
+func (c *conn) pipeLabel(pipe objc.ID) string {
+	switch pipe {
+	case c.bulkOut:
+		return fmt.Sprintf("bulk OUT 0x%02x", c.outAddr)
+	case c.bulkIn:
+		return fmt.Sprintf("bulk IN 0x%02x", c.inAddr)
+	default:
+		return "pipe"
+	}
+}
+
+func copyIntoData(data objc.ID, p []byte) bool {
+	ptr := objc.Send[unsafe.Pointer](data, sel_mutableBytes)
+	if ptr == nil {
+		return false
+	}
+	copy(unsafe.Slice((*byte)(ptr), len(p)), p)
+	runtime.KeepAlive(p)
+	return true
 }
 
 func (c *conn) clearStall(pipe objc.ID) {
@@ -303,17 +409,12 @@ func dataWithBytes(p []byte) (objc.ID, error) {
 	if len(p) == 0 {
 		return 0, nil
 	}
-	data := objc.ID(class_NSMutableData).Send(sel_alloc).Send(sel_initWithLength, uintptr(len(p)))
+	ptr := unsafe.Pointer(unsafe.SliceData(p))
+	data := objc.ID(class_NSMutableData).Send(sel_alloc).Send(sel_initWithBytes, ptr, uintptr(len(p)))
+	runtime.KeepAlive(p)
 	if data == 0 {
 		return 0, fmt.Errorf("allocate USB write buffer")
 	}
-	ptr := objc.Send[unsafe.Pointer](data, sel_mutableBytes)
-	if ptr == nil {
-		data.Send(sel_release)
-		return 0, fmt.Errorf("USB write buffer pointer is nil")
-	}
-	copy(unsafe.Slice((*byte)(ptr), len(p)), p)
-	runtime.KeepAlive(p)
 	return data, nil
 }
 

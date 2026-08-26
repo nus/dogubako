@@ -290,6 +290,10 @@ func (t *seqTransport) WriteStream(header []byte, r io.Reader, size int64, timeo
 	return fmt.Errorf("WriteStream not implemented")
 }
 
+func (t *seqTransport) WriteStreamProgress(header []byte, r io.Reader, size int64, timeout time.Duration, wrote func(int64)) error {
+	return fmt.Errorf("WriteStreamProgress not implemented")
+}
+
 func (t *seqTransport) Close() error { return nil }
 
 func encodeResponse(code uint16, tx uint32, params []uint32) []byte {

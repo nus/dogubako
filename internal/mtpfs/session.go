@@ -20,6 +20,7 @@ type transport interface {
 	Write(p []byte, timeout time.Duration) error
 	Read(max int, timeout time.Duration) ([]byte, error)
 	WriteStream(header []byte, r io.Reader, size int64, timeout time.Duration) error
+	WriteStreamProgress(header []byte, r io.Reader, size int64, timeout time.Duration, wrote func(int64)) error
 	Close() error
 }
 
@@ -207,18 +208,7 @@ func (s *session) sendFile(ctx context.Context, op uint16, r io.Reader, size int
 	binary.LittleEndian.PutUint16(header[6:8], op)
 	binary.LittleEndian.PutUint32(header[8:12], tx)
 	wrote := func(n int64) { addCopyBytes(ctx, n) }
-	var err error
-	if ps, ok := s.t.(interface {
-		WriteStreamProgress([]byte, io.Reader, int64, time.Duration, func(int64)) error
-	}); ok {
-		err = ps.WriteStreamProgress(header, r, size, dataTimeout, wrote)
-	} else {
-		err = s.t.WriteStream(header, r, size, dataTimeout)
-		if err == nil {
-			addCopyBytes(ctx, size)
-		}
-	}
-	if err != nil {
+	if err := s.t.WriteStreamProgress(header, r, size, dataTimeout, wrote); err != nil {
 		return err
 	}
 	h, _, err := s.readContainer(ctx, dataTimeout)
