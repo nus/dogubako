@@ -156,6 +156,19 @@ func TestParseRTP(t *testing.T) {
 	if pkt.PT != 26 || pkt.Seq != 7 || !bytes.Equal(pkt.Payload, []byte{9, 9, 9}) {
 		t.Fatalf("%+v", pkt)
 	}
+	padded := []byte{
+		0xa0, 26, 0x00, 0x01,
+		0, 0, 0, 1,
+		0, 0, 0, 2,
+		9, 9, 0, 2,
+	}
+	pkt, err = parseRTP(padded)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if !bytes.Equal(pkt.Payload, []byte{9, 9}) {
+		t.Fatalf("padded payload = %x", pkt.Payload)
+	}
 }
 
 func TestParseURL(t *testing.T) {

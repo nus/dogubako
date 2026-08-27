@@ -29,7 +29,7 @@ func parseRTP(b []byte) (rtpPacket, error) {
 	}
 	cc := int(b[0] & 0x0f)
 	ext := b[0]&0x10 != 0
-	pad := b[0]&0x80 != 0
+	pad := b[0]&0x20 != 0
 	off := rtpHeaderSize + 4*cc
 	if len(b) < off {
 		return rtpPacket{}, fmt.Errorf("rtp: short CSRC")
