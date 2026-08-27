@@ -105,6 +105,19 @@ ADB サーバーは Android Studio や SDK Platform-Tools などが起動して�
 
 他のツールに切り替えても計測は続きます。
 
+### RTSP プレイヤー
+
+IP カメラなどの RTSP 映像を再生します。**MotionJPEG** と **H.264** に対応します。H.264 の復号は Android 画面ツールと同じで、**macOS は VideoToolbox**、Ubuntu は [OpenH264](https://www.openh264.org/) です。
+
+- RTSP URL を入力して接続（`rtsp://user:pass@host:554/path`。ポート省略時は 554）
+- ライブ映像のプレビュー（ホイールまたは − / + で拡大縮小、ドラッグで移動、ダブルクリックまたは「全体」でフィット）
+- RTSP のやり取り（OPTIONS / DESCRIBE / SETUP / PLAY などの送受信）を一覧と本文で閲覧
+- デコード統計（コーデック、解像度、フレーム数、fps、復号時間、エラー数）
+- ネットワーク統計（受信量、ビットレート、RTP パケット数、欠落、ジッタ）
+- 通信はまず RTP/AVP/TCP（interleaved）を試し、拒否されたときは UDP に切り替えます
+
+Ubuntu の H.264 では、Android 画面と同じく初回だけ Cisco の OpenH264 共有ライブラリを取得することがあります。使いたくないときは `DOGUBAKO_OPENH264=0` です。
+
 ### MTP ファイル（macOS のみ）
 
 USB でつながった MTP 機器（Android のファイル転送モードなど）のファイルを閲覧・コピーします。`libmtp` や `libusb` は使いません。macOS の IOUSBHost を直接呼び出します。USB デバッグは不要です。Ubuntu 版にはこのツールは出ません。
@@ -218,8 +231,9 @@ make test
 
 - `cmd/dogubako` — エントリポイント
 - `internal/cjkembed` — Linux は Noto Sans CJK を埋め込み、macOS はヒラギノ角ゴシックを `/System/Library/Fonts` から開く
-- `internal/app` — シェル（サイドメニューとメインパネル）、画像ツール、画面キャプチャ、Android 画面、Android ファイル、MTP ファイル（macOS）、ストップウォッチ
+- `internal/app` — シェル（サイドメニューとメインパネル）、画像ツール、画面キャプチャ、Android 画面、Android ファイル、RTSP プレイヤー、MTP ファイル（macOS）、ストップウォッチ
 - `internal/adbfs` — ADB プロトコルによるデバイス一覧・画面撮影・ファイル同期（pure Go）
+- `internal/rtsp` — RTSP クライアント、RTP（MotionJPEG / H.264）、SDP、統計（pure Go）
 - `internal/mtpfs` — MTP プロトコルによるデバイス一覧・ファイル同期（pure Go）
 - `internal/usbhost` — macOS の IOUSBHost による USB bulk 転送（purego、Linux では未対応）
 - `internal/h264` — Annex-B 分割と H.264 復号（macOS は VideoToolbox、それ以外は OpenH264）

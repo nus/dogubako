@@ -34,6 +34,7 @@ type Root struct {
 	androidTool    AndroidTool
 	androidShot    AndroidShotTool
 	stopwatchTool  StopwatchTool
+	rtspTool       RTSPTool
 	mtpTool        MTPTool
 
 	model Model
@@ -70,6 +71,7 @@ func (r *Root) WriteStateKey(context *guigui.Context, w *guigui.StateKeyWriter) 
 	w.WriteUint64(r.model.Android().Generation())
 	w.WriteUint64(r.model.AndroidShot().Generation())
 	w.WriteUint64(r.model.Stopwatch().Generation())
+	w.WriteUint64(r.model.RTSP().Generation())
 	w.WriteUint64(r.model.MTP().Generation())
 	w.WriteBool(r.model.Screenshot().HasImage())
 	w.WriteBool(r.pendingCapture != nil)
@@ -78,6 +80,7 @@ func (r *Root) WriteStateKey(context *guigui.Context, w *guigui.StateKeyWriter) 
 	w.WriteBool(r.model.AndroidShot().Live())
 	w.WriteBool(r.model.MTP().Busy())
 	w.WriteBool(r.model.Stopwatch().Running())
+	w.WriteBool(r.model.RTSP().Playing())
 	if r.model.Mode() == ToolStopwatch {
 		w.WriteInt64(r.model.Stopwatch().DisplayTicks())
 	}
@@ -93,6 +96,8 @@ func (r *Root) contentWidget() guigui.Widget {
 		return &r.androidShot
 	case ToolStopwatch:
 		return &r.stopwatchTool
+	case ToolRTSP:
+		return &r.rtspTool
 	case ToolMTP:
 		return &r.mtpTool
 	default:
@@ -218,6 +223,7 @@ func (r *Root) Tick(context *guigui.Context, widgetBounds *guigui.WidgetBounds) 
 	r.drainCapture()
 	r.model.Android().Drain()
 	r.model.AndroidShot().Drain()
+	r.model.RTSP().Drain()
 	r.model.MTP().Drain()
 	if key, args, ok := r.model.MTP().TakeRetryAlert(); ok {
 		dialog.AlertAsync(i18n.T(r.model.Lang(), i18n.AppTitle), i18n.T(r.model.Lang(), key, args...))
@@ -230,6 +236,9 @@ func (r *Root) Tick(context *guigui.Context, widgetBounds *guigui.WidgetBounds) 
 		r.model.AndroidShot().EnsureLive()
 	} else {
 		r.model.AndroidShot().StopLive()
+	}
+	if r.model.Mode() != ToolRTSP {
+		r.model.RTSP().Disconnect()
 	}
 	if files := ebiten.DroppedFiles(); files != nil && r.model.Mode() == ToolImage {
 		_ = r.model.Image().LoadDropped(files)
