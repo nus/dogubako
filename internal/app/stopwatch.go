@@ -12,7 +12,8 @@ import (
 
 var eventStopwatchCopy = guigui.GenerateEventKey()
 
-// StopwatchTool is a start / pause / reset timer. Space toggles running.
+// StopwatchTool is a start / pause / reset timer. Space toggles running;
+// R resets when paused.
 type StopwatchTool struct {
 	guigui.DefaultWidget
 

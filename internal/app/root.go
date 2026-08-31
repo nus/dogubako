@@ -238,9 +238,18 @@ func (r *Root) Tick(context *guigui.Context, widgetBounds *guigui.WidgetBounds) 
 }
 
 func (r *Root) HandleButtonInput(context *guigui.Context, widgetBounds *guigui.WidgetBounds) guigui.HandleInputResult {
-	if r.model.Mode() == ToolStopwatch && !shortcutModifierPressed(context) && inpututil.IsKeyJustPressed(ebiten.KeySpace) {
-		r.model.Stopwatch().Toggle()
-		return guigui.HandleInputByWidget(r)
+	if r.model.Mode() == ToolStopwatch && !shortcutModifierPressed(context) {
+		switch {
+		case inpututil.IsKeyJustPressed(ebiten.KeySpace):
+			r.model.Stopwatch().Toggle()
+			return guigui.HandleInputByWidget(r)
+		case inpututil.IsKeyJustPressed(ebiten.KeyR):
+			sw := r.model.Stopwatch()
+			if !sw.Running() && sw.CanReset() {
+				sw.Reset()
+				return guigui.HandleInputByWidget(r)
+			}
+		}
 	}
 	if !shortcutModifierPressed(context) {
 		return guigui.HandleInputResult{}
