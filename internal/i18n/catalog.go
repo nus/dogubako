@@ -12,6 +12,7 @@ const (
 	ToolAndroid     Key = "tool.android"
 	ToolAndroidShot Key = "tool.android_shot"
 	ToolStopwatch   Key = "tool.stopwatch"
+	ToolRTSP        Key = "tool.rtsp"
 	ToolMTP         Key = "tool.mtp"
 
 	OpenFile       Key = "image.open_file"
@@ -84,6 +85,20 @@ const (
 	AndroidShotLive         Key = "android_shot.live"
 	AndroidShotLiveWait     Key = "android_shot.live_wait"
 	AndroidShotLiveDownload Key = "android_shot.live_download"
+
+	RTSPURL         Key = "rtsp.url"
+	RTSPConnect     Key = "rtsp.connect"
+	RTSPDisconnect  Key = "rtsp.disconnect"
+	RTSPHint        Key = "rtsp.hint"
+	RTSPEmpty       Key = "rtsp.empty"
+	RTSPPreview     Key = "rtsp.preview"
+	RTSPLog         Key = "rtsp.log"
+	RTSPLogEmpty    Key = "rtsp.log_empty"
+	RTSPDecode      Key = "rtsp.decode"
+	RTSPNetwork     Key = "rtsp.network"
+	RTSPPlaceholder Key = "rtsp.placeholder"
+	RTSPDecodeStats Key = "rtsp.decode_stats"
+	RTSPNetStats    Key = "rtsp.net_stats"
 
 	StopwatchStart   Key = "stopwatch.start"
 	StopwatchPause   Key = "stopwatch.pause"
@@ -179,6 +194,12 @@ const (
 	StatusMTPCopyCancelled         Key = "status.mtp_copy_cancelled"
 	StatusMTPNoSelection           Key = "status.mtp_no_selection"
 	StatusMTPSelectOnline          Key = "status.mtp_select_online"
+	StatusRTSPConnecting           Key = "status.rtsp_connecting"
+	StatusRTSPPlaying              Key = "status.rtsp_playing"
+	StatusRTSPStopped              Key = "status.rtsp_stopped"
+	StatusRTSPFailed               Key = "status.rtsp_failed"
+	StatusRTSPInvalidURL           Key = "status.rtsp_invalid_url"
+	StatusRTSPWaiting              Key = "status.rtsp_waiting"
 )
 
 var catalogs = map[Lang]map[Key]string{
@@ -189,6 +210,7 @@ var catalogs = map[Lang]map[Key]string{
 		ToolAndroid:                    "Android ファイル",
 		ToolAndroidShot:                "Android 画面",
 		ToolStopwatch:                  "ストップウォッチ",
+		ToolRTSP:                       "RTSP プレイヤー",
 		ToolMTP:                        "MTP ファイル",
 		OpenFile:                       "ファイルを開く",
 		PasteClipboard:                 "クリップボードから貼り付け",
@@ -258,6 +280,19 @@ var catalogs = map[Lang]map[Key]string{
 		AndroidShotLive:                "ライブ",
 		AndroidShotLiveWait:            "端末の画面を取得しています…",
 		AndroidShotLiveDownload:        "OpenH264 をダウンロードしています… %d%%",
+		RTSPURL:                        "URL",
+		RTSPConnect:                    "接続",
+		RTSPDisconnect:                 "切断",
+		RTSPHint:                       "MotionJPEG と H.264 に対応。H.264 は Android 画面と同じ復号です。",
+		RTSPEmpty:                      "RTSP URL を入力して接続してください。",
+		RTSPPreview:                    "映像",
+		RTSPLog:                        "RTSP やり取り",
+		RTSPLogEmpty:                   "接続すると OPTIONS / DESCRIBE / SETUP / PLAY のやり取りがここに出ます。",
+		RTSPDecode:                     "デコード",
+		RTSPNetwork:                    "ネットワーク",
+		RTSPPlaceholder:                "rtsp://192.168.0.1:554/stream",
+		RTSPDecodeStats:                "コーデック  %s\n解像度  %s\nフレーム  %d（%.1f fps）\n復号時間  %.1f ms\n復号エラー  %d",
+		RTSPNetStats:                   "受信  %s（%s）\nRTP  %d パケット\n欠落  %d\nジッタ  %.1f ms",
 		StopwatchStart:                 "スタート",
 		StopwatchPause:                 "一時停止",
 		StopwatchReset:                 "リセット",
@@ -349,6 +384,12 @@ var catalogs = map[Lang]map[Key]string{
 		StatusMTPCopyCancelled:         "コピーをキャンセルしました",
 		StatusMTPNoSelection:           "コピーするファイルまたはフォルダを選んでください",
 		StatusMTPSelectOnline:          "ストレージまたはフォルダを選んでください",
+		StatusRTSPConnecting:           "接続しています…",
+		StatusRTSPPlaying:              "再生中（%s、%d×%d）",
+		StatusRTSPStopped:              "停止しました",
+		StatusRTSPFailed:               "再生に失敗しました: %v",
+		StatusRTSPInvalidURL:           "RTSP URL を入力してください",
+		StatusRTSPWaiting:              "映像を待っています…",
 	},
 	EN: {
 		AppTitle:                       "Dogubako",
@@ -357,6 +398,7 @@ var catalogs = map[Lang]map[Key]string{
 		ToolAndroid:                    "Android Files",
 		ToolAndroidShot:                "Android Screen",
 		ToolStopwatch:                  "Stopwatch",
+		ToolRTSP:                       "RTSP Player",
 		ToolMTP:                        "MTP Files",
 		OpenFile:                       "Open File",
 		PasteClipboard:                 "Paste from Clipboard",
@@ -426,6 +468,19 @@ var catalogs = map[Lang]map[Key]string{
 		AndroidShotLive:                "Live",
 		AndroidShotLiveWait:            "Fetching the device screen…",
 		AndroidShotLiveDownload:        "Downloading OpenH264… %d%%",
+		RTSPURL:                        "URL",
+		RTSPConnect:                    "Connect",
+		RTSPDisconnect:                 "Disconnect",
+		RTSPHint:                       "MotionJPEG and H.264. H.264 uses the same decoder as Android Screen.",
+		RTSPEmpty:                      "Enter an RTSP URL and connect.",
+		RTSPPreview:                    "Video",
+		RTSPLog:                        "RTSP exchange",
+		RTSPLogEmpty:                   "OPTIONS / DESCRIBE / SETUP / PLAY messages appear here after you connect.",
+		RTSPDecode:                     "Decode",
+		RTSPNetwork:                    "Network",
+		RTSPPlaceholder:                "rtsp://192.168.0.1:554/stream",
+		RTSPDecodeStats:                "Codec  %s\nSize  %s\nFrames  %d (%.1f fps)\nDecode  %.1f ms\nDecode errors  %d",
+		RTSPNetStats:                   "Received  %s (%s)\nRTP  %d packets\nLost  %d\nJitter  %.1f ms",
 		StopwatchStart:                 "Start",
 		StopwatchPause:                 "Pause",
 		StopwatchReset:                 "Reset",
@@ -517,6 +572,12 @@ var catalogs = map[Lang]map[Key]string{
 		StatusMTPCopyCancelled:         "Copy cancelled",
 		StatusMTPNoSelection:           "Select a file or folder to copy",
 		StatusMTPSelectOnline:          "Select a storage or folder",
+		StatusRTSPConnecting:           "Connecting…",
+		StatusRTSPPlaying:              "Playing (%s, %d×%d)",
+		StatusRTSPStopped:              "Stopped",
+		StatusRTSPFailed:               "Playback failed: %v",
+		StatusRTSPInvalidURL:           "Enter an RTSP URL",
+		StatusRTSPWaiting:              "Waiting for video…",
 	},
 }
 

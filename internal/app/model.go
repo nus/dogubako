@@ -22,6 +22,7 @@ const (
 	ToolAndroid     ToolID = "android"
 	ToolAndroidShot ToolID = "android-shot"
 	ToolStopwatch   ToolID = "stopwatch"
+	ToolRTSP        ToolID = "rtsp"
 	ToolMTP         ToolID = "mtp"
 )
 
@@ -36,6 +37,7 @@ var Tools = []Tool{
 	{ID: ToolScreenshot},
 	{ID: ToolAndroid},
 	{ID: ToolAndroidShot},
+	{ID: ToolRTSP},
 	{ID: ToolStopwatch},
 }
 
@@ -56,6 +58,8 @@ func (t Tool) Title(lang i18n.Lang) string {
 		return i18n.T(lang, i18n.ToolAndroidShot)
 	case ToolStopwatch:
 		return i18n.T(lang, i18n.ToolStopwatch)
+	case ToolRTSP:
+		return i18n.T(lang, i18n.ToolRTSP)
 	case ToolMTP:
 		return i18n.T(lang, i18n.ToolMTP)
 	default:
@@ -72,6 +76,7 @@ type Model struct {
 	android     AndroidModel
 	androidShot AndroidShotModel
 	stopwatch   StopwatchModel
+	rtsp        RTSPModel
 	mtp         MTPModel
 }
 
@@ -108,6 +113,9 @@ func (m *Model) SetMode(mode ToolID) {
 	if m.Mode() == ToolAndroidShot && mode != ToolAndroidShot {
 		m.androidShot.StopLive()
 	}
+	if m.Mode() == ToolRTSP && mode != ToolRTSP {
+		m.rtsp.Disconnect()
+	}
 	m.mode = mode
 }
 
@@ -129,6 +137,10 @@ func (m *Model) AndroidShot() *AndroidShotModel {
 
 func (m *Model) Stopwatch() *StopwatchModel {
 	return &m.stopwatch
+}
+
+func (m *Model) RTSP() *RTSPModel {
+	return &m.rtsp
 }
 
 func (m *Model) MTP() *MTPModel {

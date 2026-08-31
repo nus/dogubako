@@ -196,6 +196,13 @@ func TestToolTitle(t *testing.T) {
 	if got := stopwatch.Title(i18n.EN); got != "Stopwatch" {
 		t.Fatalf("en stopwatch = %q", got)
 	}
+	rtspTool := Tool{ID: ToolRTSP}
+	if got := rtspTool.Title(i18n.JA); got != "RTSP プレイヤー" {
+		t.Fatalf("ja rtsp = %q", got)
+	}
+	if got := rtspTool.Title(i18n.EN); got != "RTSP Player" {
+		t.Fatalf("en rtsp = %q", got)
+	}
 }
 
 func TestModelSetLang(t *testing.T) {
