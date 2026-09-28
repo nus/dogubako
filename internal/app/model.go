@@ -67,6 +67,7 @@ func (t Tool) Title(lang i18n.Lang) string {
 type Model struct {
 	lang        i18n.Lang
 	mode        ToolID
+	sidebar     sidebarPref
 	image       ImageModel
 	screenshot  ScreenshotModel
 	android     AndroidModel
@@ -109,6 +110,21 @@ func (m *Model) SetMode(mode ToolID) {
 		m.androidShot.StopLive()
 	}
 	m.mode = mode
+}
+
+// SidebarCollapsed reports whether the left tool menu is folded to a narrow rail.
+func (m *Model) SidebarCollapsed() bool {
+	return m.sidebar.collapsed()
+}
+
+// SetSidebarCollapsed folds or opens the left tool menu and remembers the choice.
+func (m *Model) SetSidebarCollapsed(collapsed bool) {
+	m.sidebar.setCollapsed(collapsed)
+}
+
+// ToggleSidebar folds the left tool menu, or opens it when it is already folded.
+func (m *Model) ToggleSidebar() {
+	m.SetSidebarCollapsed(!m.SidebarCollapsed())
 }
 
 func (m *Model) Image() *ImageModel {
