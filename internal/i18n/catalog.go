@@ -7,6 +7,8 @@ type Key string
 
 const (
 	AppTitle        Key = "app.title"
+	SidebarCollapse Key = "sidebar.collapse"
+	SidebarExpand   Key = "sidebar.expand"
 	ToolImage       Key = "tool.image"
 	ToolScreenshot  Key = "tool.screenshot"
 	ToolAndroid     Key = "tool.android"
@@ -184,6 +186,8 @@ const (
 var catalogs = map[Lang]map[Key]string{
 	JA: {
 		AppTitle:                       "道具箱",
+		SidebarCollapse:                "サイドバーを折りたたむ（%s）",
+		SidebarExpand:                  "サイドバーを開く（%s）",
 		ToolImage:                      "画像",
 		ToolScreenshot:                 "画面キャプチャ",
 		ToolAndroid:                    "Android ファイル",
@@ -352,6 +356,8 @@ var catalogs = map[Lang]map[Key]string{
 	},
 	EN: {
 		AppTitle:                       "Dogubako",
+		SidebarCollapse:                "Collapse sidebar (%s)",
+		SidebarExpand:                  "Expand sidebar (%s)",
 		ToolImage:                      "Image",
 		ToolScreenshot:                 "Screenshot",
 		ToolAndroid:                    "Android Files",

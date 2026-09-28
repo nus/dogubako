@@ -65,6 +65,7 @@ func (r *Root) Env(context *guigui.Context, key guigui.EnvKey, source *guigui.En
 func (r *Root) WriteStateKey(context *guigui.Context, w *guigui.StateKeyWriter) {
 	w.WriteString(string(r.model.Mode()))
 	w.WriteString(string(r.model.Lang()))
+	w.WriteBool(r.model.SidebarCollapsed())
 	w.WriteUint64(r.model.Image().Generation())
 	w.WriteUint64(r.model.Screenshot().Generation())
 	w.WriteUint64(r.model.Android().Generation())
@@ -200,7 +201,7 @@ func (r *Root) Layout(context *guigui.Context, widgetBounds *guigui.WidgetBounds
 	r.layoutItems = append(r.layoutItems,
 		guigui.LinearLayoutItem{
 			Widget: &r.sidebar,
-			Size:   guigui.FixedSize(8 * u),
+			Size:   guigui.FixedSize(sidebarWidth(u, r.model.SidebarCollapsed())),
 		},
 		guigui.LinearLayoutItem{
 			Widget: r.contentWidget(),
@@ -238,6 +239,10 @@ func (r *Root) Tick(context *guigui.Context, widgetBounds *guigui.WidgetBounds) 
 }
 
 func (r *Root) HandleButtonInput(context *guigui.Context, widgetBounds *guigui.WidgetBounds) guigui.HandleInputResult {
+	if shortcutModifierPressed(context) && inpututil.IsKeyJustPressed(ebiten.KeyB) {
+		r.model.ToggleSidebar()
+		return guigui.HandleInputByWidget(r)
+	}
 	if r.model.Mode() == ToolStopwatch && !shortcutModifierPressed(context) {
 		switch {
 		case inpututil.IsKeyJustPressed(ebiten.KeySpace):

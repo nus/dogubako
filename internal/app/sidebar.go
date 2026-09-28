@@ -10,6 +10,13 @@ import (
 	"github.com/nus/dogubako/internal/i18n"
 )
 
+const (
+	// Geometric triangles in the same block as the file-tree marks.
+	// Small triangles (◂/▸, U+25C2/U+25B8) are missing from Inter and Hiragino.
+	sidebarCollapseMark = "◀"
+	sidebarExpandMark   = "▶"
+)
+
 // Sidebar is the left tool-access menu.
 type Sidebar struct {
 	guigui.DefaultWidget
@@ -17,6 +24,17 @@ type Sidebar struct {
 	panel        basicwidget.Panel
 	panelContent sidebarContent
 }
+
+// sidebarWidth is the sidebar's horizontal size.
+// A collapsed sidebar keeps a one-unit toggle plus the content padding.
+func sidebarWidth(u int, collapsed bool) int {
+	if collapsed {
+		return u + 2*sidebarPadding(u)
+	}
+	return 8 * u
+}
+
+func sidebarPadding(u int) int { return u / 4 }
 
 func (s *Sidebar) Build(context *guigui.Context, adder *guigui.ChildAdder) error {
 	adder.AddWidget(&s.panel)
@@ -34,12 +52,41 @@ func (s *Sidebar) Layout(context *guigui.Context, widgetBounds *guigui.WidgetBou
 type sidebarContent struct {
 	guigui.DefaultWidget
 
-	title basicwidget.Text
-	list  basicwidget.List[ToolID]
-	lang  basicwidget.SegmentedControl[i18n.Lang]
+	title  basicwidget.Text
+	toggle sidebarToggle
+	list   basicwidget.List[ToolID]
+	lang   basicwidget.SegmentedControl[i18n.Lang]
 
+	collapsed   bool
 	size        image.Point
 	layoutItems []guigui.LinearLayoutItem
+	headerItems []guigui.LinearLayoutItem
+}
+
+// sidebarToggle is the fold / open button, with a tooltip over the same bounds.
+type sidebarToggle struct {
+	guigui.DefaultWidget
+
+	button basicwidget.Button
+	tip    basicwidget.TooltipArea
+}
+
+func (t *sidebarToggle) configure(text, tip string, onDown func(*guigui.Context)) {
+	t.button.SetText(text)
+	t.button.OnDown(onDown)
+	t.tip.SetText(tip)
+}
+
+func (t *sidebarToggle) Build(context *guigui.Context, adder *guigui.ChildAdder) error {
+	adder.AddWidget(&t.button)
+	adder.AddWidget(&t.tip)
+	return nil
+}
+
+func (t *sidebarToggle) Layout(context *guigui.Context, widgetBounds *guigui.WidgetBounds, layouter *guigui.ChildLayouter) {
+	bounds := widgetBounds.Bounds()
+	layouter.LayoutWidget(&t.button, bounds)
+	layouter.LayoutWidget(&t.tip, bounds)
 }
 
 func (s *sidebarContent) setSize(size image.Point) {
@@ -47,9 +94,7 @@ func (s *sidebarContent) setSize(size image.Point) {
 }
 
 func (s *sidebarContent) Build(context *guigui.Context, adder *guigui.ChildAdder) error {
-	adder.AddWidget(&s.title)
-	adder.AddWidget(&s.list)
-	adder.AddWidget(&s.lang)
+	adder.AddWidget(&s.toggle)
 
 	v, ok := context.Env(s, EnvKeyModel)
 	if !ok {
@@ -57,6 +102,24 @@ func (s *sidebarContent) Build(context *guigui.Context, adder *guigui.ChildAdder
 	}
 	model := v.(*Model)
 	lang := model.Lang()
+	s.collapsed = model.SidebarCollapsed()
+
+	mark := sidebarCollapseMark
+	tipKey := i18n.SidebarCollapse
+	if s.collapsed {
+		mark = sidebarExpandMark
+		tipKey = i18n.SidebarExpand
+	}
+	s.toggle.configure(mark, i18n.T(lang, tipKey, ShortcutLabel(context, "B")), func(*guigui.Context) {
+		model.ToggleSidebar()
+	})
+	if s.collapsed {
+		return nil
+	}
+
+	adder.AddWidget(&s.title)
+	adder.AddWidget(&s.list)
+	adder.AddWidget(&s.lang)
 
 	s.title.SetValue(i18n.T(lang, i18n.AppTitle))
 	setBoldText(&s.title, true)
@@ -99,16 +162,44 @@ func (s *sidebarContent) Build(context *guigui.Context, adder *guigui.ChildAdder
 
 func (s *sidebarContent) layout(context *guigui.Context) guigui.LinearLayout {
 	u := basicwidget.UnitSize(context)
+	pad := sidebarPadding(u)
+	if v, ok := context.Env(s, EnvKeyModel); ok {
+		s.collapsed = v.(*Model).SidebarCollapsed()
+	}
 	s.layoutItems = slices.Delete(s.layoutItems, 0, len(s.layoutItems))
+	if s.collapsed {
+		s.layoutItems = append(s.layoutItems,
+			guigui.LinearLayoutItem{Widget: &s.toggle, Size: guigui.FixedSize(u)},
+		)
+		return guigui.LinearLayout{
+			Direction: guigui.LayoutDirectionVertical,
+			Items:     s.layoutItems,
+			Padding:   guigui.Padding{Top: pad, Bottom: pad, Start: pad, End: pad},
+		}
+	}
+	s.headerItems = slices.Delete(s.headerItems, 0, len(s.headerItems))
+	// The toggle stays at the start so it does not jump when the menu folds.
+	// The matching spacer keeps the title centered.
+	s.headerItems = append(s.headerItems,
+		guigui.LinearLayoutItem{Widget: &s.toggle, Size: guigui.FixedSize(u)},
+		guigui.LinearLayoutItem{Widget: &s.title, Size: guigui.FlexibleSize(1)},
+		guigui.LinearLayoutItem{Size: guigui.FixedSize(u)},
+	)
 	s.layoutItems = append(s.layoutItems,
-		guigui.LinearLayoutItem{Widget: &s.title, Size: guigui.FixedSize(u)},
+		guigui.LinearLayoutItem{
+			Layout: guigui.LinearLayout{
+				Direction: guigui.LayoutDirectionHorizontal,
+				Items:     s.headerItems,
+			},
+			Size: guigui.FixedSize(u),
+		},
 		guigui.LinearLayoutItem{Widget: &s.list, Size: guigui.FlexibleSize(1)},
 		guigui.LinearLayoutItem{Widget: &s.lang, Size: guigui.FixedSize(u)},
 	)
 	return guigui.LinearLayout{
 		Direction: guigui.LayoutDirectionVertical,
 		Items:     s.layoutItems,
-		Padding:   guigui.Padding{Top: u / 4, Bottom: u / 4, Start: u / 4, End: u / 4},
+		Padding:   guigui.Padding{Top: pad, Bottom: pad, Start: pad, End: pad},
 	}
 }
 
