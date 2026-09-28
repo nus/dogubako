@@ -178,10 +178,12 @@ func (s *sidebarContent) layout(context *guigui.Context) guigui.LinearLayout {
 		}
 	}
 	s.headerItems = slices.Delete(s.headerItems, 0, len(s.headerItems))
+	// The toggle stays at the start so it does not jump when the menu folds.
+	// The matching spacer keeps the title centered.
 	s.headerItems = append(s.headerItems,
-		guigui.LinearLayoutItem{Size: guigui.FixedSize(u)},
-		guigui.LinearLayoutItem{Widget: &s.title, Size: guigui.FlexibleSize(1)},
 		guigui.LinearLayoutItem{Widget: &s.toggle, Size: guigui.FixedSize(u)},
+		guigui.LinearLayoutItem{Widget: &s.title, Size: guigui.FlexibleSize(1)},
+		guigui.LinearLayoutItem{Size: guigui.FixedSize(u)},
 	)
 	s.layoutItems = append(s.layoutItems,
 		guigui.LinearLayoutItem{
