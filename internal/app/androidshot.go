@@ -450,10 +450,10 @@ func (t *AndroidShotTool) layoutFilled(context *guigui.Context, widgetBounds *gu
 	}
 	t.toolbarItems = slices.Delete(t.toolbarItems, 0, len(t.toolbarItems))
 	t.toolbarItems = append(t.toolbarItems,
-		guigui.LinearLayoutItem{Widget: &t.fillBtn},
 		guigui.LinearLayoutItem{Widget: &t.liveText},
 		guigui.LinearLayoutItem{Widget: &t.liveToggle},
 		guigui.LinearLayoutItem{Widget: &t.previewLabel, Size: guigui.FlexibleSize(1)},
+		guigui.LinearLayoutItem{Widget: &t.fillBtn},
 		guigui.LinearLayoutItem{Widget: &t.previewZoom},
 		guigui.LinearLayoutItem{Widget: &t.captureBtn},
 	)
