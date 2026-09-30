@@ -86,6 +86,8 @@ const (
 	AndroidShotLive         Key = "android_shot.live"
 	AndroidShotLiveWait     Key = "android_shot.live_wait"
 	AndroidShotLiveDownload Key = "android_shot.live_download"
+	AndroidShotFill         Key = "android_shot.fill"
+	AndroidShotRestore      Key = "android_shot.restore"
 
 	StopwatchStart   Key = "stopwatch.start"
 	StopwatchPause   Key = "stopwatch.pause"
@@ -262,6 +264,8 @@ var catalogs = map[Lang]map[Key]string{
 		AndroidShotLive:                "ライブ",
 		AndroidShotLiveWait:            "端末の画面を取得しています…",
 		AndroidShotLiveDownload:        "OpenH264 をダウンロードしています… %d%%",
+		AndroidShotFill:                "いっぱいに表示",
+		AndroidShotRestore:             "元に戻す",
 		StopwatchStart:                 "スタート",
 		StopwatchPause:                 "一時停止",
 		StopwatchReset:                 "リセット",
@@ -432,6 +436,8 @@ var catalogs = map[Lang]map[Key]string{
 		AndroidShotLive:                "Live",
 		AndroidShotLiveWait:            "Fetching the device screen…",
 		AndroidShotLiveDownload:        "Downloading OpenH264… %d%%",
+		AndroidShotFill:                "Fill area",
+		AndroidShotRestore:             "Restore",
 		StopwatchStart:                 "Start",
 		StopwatchPause:                 "Pause",
 		StopwatchReset:                 "Reset",
