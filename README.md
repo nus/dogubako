@@ -62,6 +62,7 @@ USB デバッグ（または無線デバッグ）が有効な Android 端末の�
 
 - 接続中のデバイス一覧から選択
 - 端末の画面をライブプレビュー（ツールを開くと自動開始。トグルで停止 / 再開）
+- 「いっぱいに表示」でプレビューをこの機能の表示領域いっぱいまで広げる（端末の画面は領域に収まる最大サイズ）。「元に戻す」でデバイス一覧と保存済みリストを戻す
 - ライブはまず `screenrecord` の H.264 を復号します。**macOS は VideoToolbox**、Ubuntu は [OpenH264](https://www.openh264.org/)（Cisco の事前ビルド、`ebitengine/purego` で実行時ロード）です。復号できないときは `screencap` の連写に戻します
 - Ubuntu では OpenH264 Video Codec provided by Cisco Systems, Inc. 初回だけ Cisco の CDN から共有ライブラリをユーザキャッシュへ取得します。使いたくないときは環境変数 `DOGUBAKO_OPENH264=0`、またはキャッシュファイルの削除で無効にできます。macOS のバイナリに OpenH264 は含まれません
 - 遅延（秒）のあと、端末の画面全体を PNG で取得（ライブ中は表示中のフレームを保存）

@@ -36,6 +36,8 @@ type AndroidShotTool struct {
 	liveToggle  basicwidget.Toggle
 	hint        basicwidget.Text
 	captureBtn  basicwidget.Button
+	fillBtn     basicwidget.Button
+	previewFill bool
 
 	listLabel basicwidget.Text
 	fileList  basicwidget.List[string]
@@ -83,6 +85,7 @@ func (t *AndroidShotTool) WriteStateKey(context *guigui.Context, w *guigui.State
 	w.WriteBool(shot.HasImage())
 	w.WriteBool(shot.Busy())
 	w.WriteBool(shot.Live())
+	w.WriteBool(t.previewFill)
 	w.WriteString(shot.Serial())
 	w.WriteInt(shot.DownloadPercent())
 }
@@ -107,25 +110,38 @@ func (t *AndroidShotTool) OnShowFolder(f func(context *guigui.Context)) {
 }
 
 func (t *AndroidShotTool) Build(context *guigui.Context, adder *guigui.ChildAdder) error {
-	adder.AddWidget(&t.deviceLabel)
-	adder.AddWidget(&t.deviceList)
-	adder.AddWidget(&t.refreshBtn)
-	adder.AddWidget(&t.delayText)
-	adder.AddWidget(&t.delayInput)
-	adder.AddWidget(&t.liveText)
-	adder.AddWidget(&t.liveToggle)
-	adder.AddWidget(&t.hint)
-	adder.AddWidget(&t.captureBtn)
-	adder.AddWidget(&t.listLabel)
-	adder.AddWidget(&t.fileList)
-	adder.AddWidget(&t.previewLabel)
-	adder.AddWidget(&t.previewZoom)
-	adder.AddWidget(&t.destLabel)
-	adder.AddWidget(&t.saveAsBtn)
-	adder.AddWidget(&t.copyBtn)
-	adder.AddWidget(&t.sendBtn)
-	adder.AddWidget(&t.folderBtn)
-	adder.AddWidget(&t.status)
+	if t.previewFill {
+		// The live image uses the feature area. Keep only the controls needed
+		// to restore the layout, stop the preview, or capture.
+		adder.AddWidget(&t.fillBtn)
+		adder.AddWidget(&t.liveText)
+		adder.AddWidget(&t.liveToggle)
+		adder.AddWidget(&t.captureBtn)
+		adder.AddWidget(&t.previewLabel)
+		adder.AddWidget(&t.previewZoom)
+		adder.AddWidget(&t.status)
+	} else {
+		adder.AddWidget(&t.deviceLabel)
+		adder.AddWidget(&t.deviceList)
+		adder.AddWidget(&t.refreshBtn)
+		adder.AddWidget(&t.delayText)
+		adder.AddWidget(&t.delayInput)
+		adder.AddWidget(&t.liveText)
+		adder.AddWidget(&t.liveToggle)
+		adder.AddWidget(&t.hint)
+		adder.AddWidget(&t.captureBtn)
+		adder.AddWidget(&t.listLabel)
+		adder.AddWidget(&t.fileList)
+		adder.AddWidget(&t.previewLabel)
+		adder.AddWidget(&t.fillBtn)
+		adder.AddWidget(&t.previewZoom)
+		adder.AddWidget(&t.destLabel)
+		adder.AddWidget(&t.saveAsBtn)
+		adder.AddWidget(&t.copyBtn)
+		adder.AddWidget(&t.sendBtn)
+		adder.AddWidget(&t.folderBtn)
+		adder.AddWidget(&t.status)
+	}
 
 	v, ok := context.Env(t, EnvKeyModel)
 	if !ok {
@@ -193,6 +209,16 @@ func (t *AndroidShotTool) Build(context *guigui.Context, adder *guigui.ChildAdde
 		model.SetLive(value)
 	})
 	context.SetEnabled(&t.liveToggle, (online || live) && !capturing)
+
+	if t.previewFill {
+		t.fillBtn.SetText(i18n.T(lang, i18n.AndroidShotRestore))
+	} else {
+		t.fillBtn.SetText(i18n.T(lang, i18n.AndroidShotFill))
+	}
+	t.fillBtn.OnDown(func(context *guigui.Context) {
+		t.previewFill = !t.previewFill
+		t.preview.ResetZoom()
+	})
 
 	hint := i18n.T(lang, i18n.AndroidShotHint)
 	if a := h264.Attribution(); a != "" {
@@ -323,6 +349,10 @@ func (t *AndroidShotTool) Build(context *guigui.Context, adder *guigui.ChildAdde
 
 func (t *AndroidShotTool) Layout(context *guigui.Context, widgetBounds *guigui.WidgetBounds, layouter *guigui.ChildLayouter) {
 	u := basicwidget.UnitSize(context)
+	if t.previewFill {
+		t.layoutFilled(context, widgetBounds, layouter)
+		return
+	}
 
 	t.toolbarItems = slices.Delete(t.toolbarItems, 0, len(t.toolbarItems))
 	t.toolbarItems = append(t.toolbarItems,
@@ -354,6 +384,7 @@ func (t *AndroidShotTool) Layout(context *guigui.Context, widgetBounds *guigui.W
 	t.prevHeadItems = slices.Delete(t.prevHeadItems, 0, len(t.prevHeadItems))
 	t.prevHeadItems = append(t.prevHeadItems,
 		guigui.LinearLayoutItem{Widget: &t.previewLabel, Size: guigui.FlexibleSize(1)},
+		guigui.LinearLayoutItem{Widget: &t.fillBtn},
 		guigui.LinearLayoutItem{Widget: &t.previewZoom},
 	)
 	t.prevHead = guigui.LinearLayout{Direction: guigui.LayoutDirectionHorizontal, Items: t.prevHeadItems, Gap: u / 4}
@@ -394,6 +425,47 @@ func (t *AndroidShotTool) Layout(context *guigui.Context, widgetBounds *guigui.W
 		guigui.LinearLayoutItem{Size: guigui.FixedSize(u), Layout: &t.toolbar},
 		guigui.LinearLayoutItem{Size: guigui.FlexibleSize(1), Layout: &t.bodyRow},
 		guigui.LinearLayoutItem{Size: guigui.FixedSize(u), Layout: &t.outputRow},
+		guigui.LinearLayoutItem{Widget: &t.status, Size: guigui.FixedSize(u)},
+	)
+	(guigui.LinearLayout{
+		Direction: guigui.LayoutDirectionVertical,
+		Items:     t.layoutItems,
+		Gap:       u / 4,
+		Padding: guigui.Padding{
+			Start:  u / 2,
+			Top:    u / 2,
+			End:    u / 2,
+			Bottom: u / 2,
+		},
+	}).LayoutWidgets(context, widgetBounds.Bounds(), layouter)
+}
+
+// layoutFilled gives the preview the feature area under a single control row.
+// The image itself stays aspect-fitted, so it grows until it meets the area.
+func (t *AndroidShotTool) layoutFilled(context *guigui.Context, widgetBounds *guigui.WidgetBounds, layouter *guigui.ChildLayouter) {
+	u := basicwidget.UnitSize(context)
+	previewContent := guigui.Widget(&t.previewEmpty)
+	if t.showPreview {
+		previewContent = &t.preview
+	}
+	t.toolbarItems = slices.Delete(t.toolbarItems, 0, len(t.toolbarItems))
+	t.toolbarItems = append(t.toolbarItems,
+		guigui.LinearLayoutItem{Widget: &t.fillBtn},
+		guigui.LinearLayoutItem{Widget: &t.liveText},
+		guigui.LinearLayoutItem{Widget: &t.liveToggle},
+		guigui.LinearLayoutItem{Widget: &t.previewLabel, Size: guigui.FlexibleSize(1)},
+		guigui.LinearLayoutItem{Widget: &t.previewZoom},
+		guigui.LinearLayoutItem{Widget: &t.captureBtn},
+	)
+	t.toolbar = guigui.LinearLayout{
+		Direction: guigui.LayoutDirectionHorizontal,
+		Items:     t.toolbarItems,
+		Gap:       u / 4,
+	}
+	t.layoutItems = slices.Delete(t.layoutItems, 0, len(t.layoutItems))
+	t.layoutItems = append(t.layoutItems,
+		guigui.LinearLayoutItem{Size: guigui.FixedSize(u), Layout: &t.toolbar},
+		guigui.LinearLayoutItem{Widget: previewContent, Size: guigui.FlexibleSize(1)},
 		guigui.LinearLayoutItem{Widget: &t.status, Size: guigui.FixedSize(u)},
 	)
 	(guigui.LinearLayout{
