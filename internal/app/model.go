@@ -22,6 +22,7 @@ const (
 	ToolAndroid     ToolID = "android"
 	ToolAndroidShot ToolID = "android-shot"
 	ToolStopwatch   ToolID = "stopwatch"
+	ToolGit         ToolID = "git"
 	ToolMTP         ToolID = "mtp"
 )
 
@@ -37,6 +38,7 @@ var Tools = []Tool{
 	{ID: ToolAndroid},
 	{ID: ToolAndroidShot},
 	{ID: ToolStopwatch},
+	{ID: ToolGit},
 }
 
 func init() {
@@ -56,6 +58,8 @@ func (t Tool) Title(lang i18n.Lang) string {
 		return i18n.T(lang, i18n.ToolAndroidShot)
 	case ToolStopwatch:
 		return i18n.T(lang, i18n.ToolStopwatch)
+	case ToolGit:
+		return i18n.T(lang, i18n.ToolGit)
 	case ToolMTP:
 		return i18n.T(lang, i18n.ToolMTP)
 	default:
@@ -73,6 +77,7 @@ type Model struct {
 	android     AndroidModel
 	androidShot AndroidShotModel
 	stopwatch   StopwatchModel
+	git         GitModel
 	mtp         MTPModel
 }
 
@@ -145,6 +150,11 @@ func (m *Model) AndroidShot() *AndroidShotModel {
 
 func (m *Model) Stopwatch() *StopwatchModel {
 	return &m.stopwatch
+}
+
+func (m *Model) Git() *GitModel {
+	m.git.ensure()
+	return &m.git
 }
 
 func (m *Model) MTP() *MTPModel {
