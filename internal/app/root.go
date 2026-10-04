@@ -34,6 +34,7 @@ type Root struct {
 	androidTool    AndroidTool
 	androidShot    AndroidShotTool
 	stopwatchTool  StopwatchTool
+	gitTool        GitTool
 	mtpTool        MTPTool
 
 	model Model
@@ -46,6 +47,7 @@ type Root struct {
 	pendingAndroidShotSave <-chan dialog.FileResult
 	pendingMTPPull         <-chan dialog.FileResult
 	pendingMTPPush         <-chan dialog.FileResult
+	pendingGitOpen         <-chan dialog.FileResult
 	pendingCapture         <-chan capture.Result
 	captureCancel          context.CancelFunc
 	captureHidden          bool
@@ -71,6 +73,7 @@ func (r *Root) WriteStateKey(context *guigui.Context, w *guigui.StateKeyWriter) 
 	w.WriteUint64(r.model.Android().Generation())
 	w.WriteUint64(r.model.AndroidShot().Generation())
 	w.WriteUint64(r.model.Stopwatch().Generation())
+	w.WriteUint64(r.model.Git().Generation())
 	w.WriteUint64(r.model.MTP().Generation())
 	w.WriteBool(r.model.Screenshot().HasImage())
 	w.WriteBool(r.pendingCapture != nil)
@@ -79,6 +82,7 @@ func (r *Root) WriteStateKey(context *guigui.Context, w *guigui.StateKeyWriter) 
 	w.WriteBool(r.model.AndroidShot().Live())
 	w.WriteBool(r.model.MTP().Busy())
 	w.WriteBool(r.model.Stopwatch().Running())
+	w.WriteBool(r.model.Git().Busy())
 	if r.model.Mode() == ToolStopwatch {
 		w.WriteInt64(r.model.Stopwatch().DisplayTicks())
 	}
@@ -94,6 +98,8 @@ func (r *Root) contentWidget() guigui.Widget {
 		return &r.androidShot
 	case ToolStopwatch:
 		return &r.stopwatchTool
+	case ToolGit:
+		return &r.gitTool
 	case ToolMTP:
 		return &r.mtpTool
 	default:
@@ -173,6 +179,9 @@ func (r *Root) Build(context *guigui.Context, adder *guigui.ChildAdder) error {
 	r.stopwatchTool.OnCopy(func(context *guigui.Context) {
 		r.copyStopwatch()
 	})
+	r.gitTool.OnOpen(func(context *guigui.Context) {
+		r.startGitOpen()
+	})
 	r.mtpTool.OnRefresh(func(context *guigui.Context) {
 		r.model.MTP().Reload()
 	})
@@ -219,6 +228,7 @@ func (r *Root) Tick(context *guigui.Context, widgetBounds *guigui.WidgetBounds) 
 	r.drainCapture()
 	r.model.Android().Drain()
 	r.model.AndroidShot().Drain()
+	r.model.Git().Drain()
 	r.model.MTP().Drain()
 	if key, args, ok := r.model.MTP().TakeRetryAlert(); ok {
 		dialog.AlertAsync(i18n.T(r.model.Lang(), i18n.AppTitle), i18n.T(r.model.Lang(), key, args...))
@@ -234,6 +244,9 @@ func (r *Root) Tick(context *guigui.Context, widgetBounds *guigui.WidgetBounds) 
 	}
 	if files := ebiten.DroppedFiles(); files != nil && r.model.Mode() == ToolImage {
 		_ = r.model.Image().LoadDropped(files)
+	}
+	if r.model.Mode() == ToolGit {
+		r.model.Git().PollStatus()
 	}
 	return nil
 }
@@ -285,6 +298,8 @@ func (r *Root) HandleButtonInput(context *guigui.Context, widgetBounds *guigui.W
 			r.copyStopwatch()
 			return guigui.HandleInputByWidget(r)
 		}
+	case ToolGit:
+		return guigui.HandleInputResult{}
 	case ToolMTP:
 		return guigui.HandleInputResult{}
 	default:
@@ -467,6 +482,20 @@ func (r *Root) drainDialogs() {
 				break
 			}
 			r.model.MTP().StartPush(res.Path)
+		default:
+		}
+	}
+	if r.pendingGitOpen != nil {
+		select {
+		case res := <-r.pendingGitOpen:
+			r.pendingGitOpen = nil
+			if res.Cancelled || res.Err != nil {
+				if res.Err != nil {
+					r.setGitDialogStatus(res.Err)
+				}
+				break
+			}
+			r.model.Git().Open(res.Path)
 		default:
 		}
 	}
@@ -682,6 +711,14 @@ func (r *Root) startAndroidPush(folder bool) {
 	r.pendingAndroidPush = dialog.OpenFileAsync(i18n.T(lang, i18n.DialogOpenAny), nil)
 }
 
+func (r *Root) startGitOpen() {
+	if r.pendingGitOpen != nil || r.model.Git().Busy() {
+		return
+	}
+	lang := r.model.Lang()
+	r.pendingGitOpen = dialog.OpenDirectoryAsync(i18n.T(lang, i18n.DialogOpenFolder))
+}
+
 func (r *Root) startMTPPull() {
 	if r.pendingMTPPull != nil || r.model.MTP().Busy() {
 		return
@@ -709,6 +746,14 @@ func (r *Root) startMTPPush(folder bool) {
 		return
 	}
 	r.pendingMTPPush = dialog.OpenFileAsync(i18n.T(lang, i18n.DialogOpenAny), nil)
+}
+
+func (r *Root) setGitDialogStatus(err error) {
+	if errors.Is(err, dialog.ErrNoFileDialog) {
+		r.model.Git().SetStatus(i18n.StatusNoFileDialog)
+		return
+	}
+	r.model.Git().SetStatus(i18n.StatusGitOpenFailed, err)
 }
 
 func (r *Root) setMTPDialogStatus(err error) {

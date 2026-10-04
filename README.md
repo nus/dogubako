@@ -107,6 +107,18 @@ ADB サーバーは Android Studio や SDK Platform-Tools などが起動して�
 
 他のツールに切り替えても計測は続きます。
 
+### Git
+
+ローカルの Git リポジトリを開いて、履歴とブランチを操作します。読み書きは [go-git](https://github.com/go-git/go-git) v6 で行います。
+
+- コミットグラフ（レーン付き）。コミットをクリックすると画面下部にハッシュ・作者・日時・メッセージを表示。ブランチ名をダブルクリックするとそのブランチに切り替える（remote 追跡ブランチはローカルが無ければ作成）。変更内容は左にファイル一覧、右に色付き diff
+- ブランチ一覧。クリックすると先端のコミットを表示する（切り替えはしない）
+- コミット / amend（「変更をすべて含める」で `git add -A`）
+- fetch / pull / push
+- origin などの remote はチェックを外すとグラフとブランチ一覧から非表示
+
+リポジトリはタブごとに開きます。同じフォルダを再度開くとそのタブに切り替わります。開いているタブは次回起動時も覚えています。
+
 ### MTP ファイル（macOS のみ）
 
 USB でつながった MTP 機器（Android のファイル転送モードなど）のファイルを閲覧・コピーします。`libmtp` や `libusb` は使いません。macOS の IOUSBHost を直接呼び出します。USB デバッグは不要です。Ubuntu 版にはこのツールは出ません。
@@ -220,7 +232,8 @@ make test
 
 - `cmd/dogubako` — エントリポイント
 - `internal/cjkembed` — Linux は Noto Sans CJK を埋め込み、macOS はヒラギノ角ゴシックを `/System/Library/Fonts` から開く
-- `internal/app` — シェル（サイドメニューとメインパネル）、画像ツール、画面キャプチャ、Android 画面、Android ファイル、MTP ファイル（macOS）、ストップウォッチ
+- `internal/app` — シェル（サイドメニューとメインパネル）、画像ツール、画面キャプチャ、Android 画面、Android ファイル、MTP ファイル（macOS）、ストップウォッチ、Git
+- `internal/gitcli` — go-git v6 でログ・グラフ・コミット操作を行う
 - `internal/adbfs` — ADB プロトコルによるデバイス一覧・画面撮影・ファイル同期（pure Go）
 - `internal/mtpfs` — MTP プロトコルによるデバイス一覧・ファイル同期（pure Go）
 - `internal/usbhost` — macOS の IOUSBHost による USB bulk 転送（purego、Linux では未対応）

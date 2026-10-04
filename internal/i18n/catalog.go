@@ -14,6 +14,7 @@ const (
 	ToolAndroid     Key = "tool.android"
 	ToolAndroidShot Key = "tool.android_shot"
 	ToolStopwatch   Key = "tool.stopwatch"
+	ToolGit         Key = "tool.git"
 	ToolMTP         Key = "tool.mtp"
 
 	OpenFile       Key = "image.open_file"
@@ -88,6 +89,50 @@ const (
 	AndroidShotLiveDownload Key = "android_shot.live_download"
 	AndroidShotFill         Key = "android_shot.fill"
 	AndroidShotRestore      Key = "android_shot.restore"
+
+	GitOpen          Key = "git.open"
+	GitNewTab        Key = "git.new_tab"
+	GitReload        Key = "git.reload"
+	GitFetch         Key = "git.fetch"
+	GitPull          Key = "git.pull"
+	GitPush          Key = "git.push"
+	GitCommit        Key = "git.commit"
+	GitGraph         Key = "git.graph"
+	GitAmend         Key = "git.amend"
+	GitCancel        Key = "git.cancel"
+	GitDelete        Key = "git.delete"
+	GitDeleteConfirm Key = "git.delete_confirm"
+	GitRename        Key = "git.rename"
+	GitRenamePrompt  Key = "git.rename_prompt"
+	GitBranches      Key = "git.branches"
+	GitTags          Key = "git.tags"
+	GitCreateTag     Key = "git.create_tag"
+	GitTagPrompt     Key = "git.tag_prompt"
+	GitPushTag       Key = "git.push_tag"
+	GitRemoteDelete  Key = "git.remote_delete"
+	GitTagDeleteAsk  Key = "git.tag_delete_ask"
+	GitTagRemoteAsk  Key = "git.tag_remote_ask"
+	GitDetails       Key = "git.details"
+	GitMessage       Key = "git.message"
+	GitStageAll      Key = "git.stage_all"
+	GitStage         Key = "git.stage"
+	GitUnstage       Key = "git.unstage"
+	GitEmpty         Key = "git.empty"
+	GitNoCommits     Key = "git.no_commits"
+	GitNoRepo        Key = "git.no_repo"
+	GitHint          Key = "git.hint"
+	GitDetached      Key = "git.detached"
+	GitWorkingTree   Key = "git.working_tree"
+	GitUncommitted   Key = "git.uncommitted"
+	GitAheadBehind   Key = "git.ahead_behind"
+	GitRemotes       Key = "git.remotes"
+	GitAuthor        Key = "git.author"
+	GitRefs          Key = "git.refs"
+	GitSHA           Key = "git.sha"
+	GitParents       Key = "git.parents"
+	GitChanges       Key = "git.changes"
+	GitChangeContent Key = "git.change_content"
+	GitNoChanges     Key = "git.no_changes"
 
 	StopwatchStart   Key = "stopwatch.start"
 	StopwatchPause   Key = "stopwatch.pause"
@@ -183,6 +228,47 @@ const (
 	StatusMTPCopyCancelled         Key = "status.mtp_copy_cancelled"
 	StatusMTPNoSelection           Key = "status.mtp_no_selection"
 	StatusMTPSelectOnline          Key = "status.mtp_select_online"
+
+	StatusGitLoading        Key = "status.git_loading"
+	StatusGitOpened         Key = "status.git_opened"
+	StatusGitOpenFailed     Key = "status.git_open_failed"
+	StatusGitWorking        Key = "status.git_working"
+	StatusGitOpFailed       Key = "status.git_op_failed"
+	StatusGitCommitOk       Key = "status.git_commit_ok"
+	StatusGitCommitFailed   Key = "status.git_commit_failed"
+	StatusGitAmendOk        Key = "status.git_amend_ok"
+	StatusGitAmendFailed    Key = "status.git_amend_failed"
+	StatusGitStageOk        Key = "status.git_stage_ok"
+	StatusGitStageFailed    Key = "status.git_stage_failed"
+	StatusGitUnstageOk      Key = "status.git_unstage_ok"
+	StatusGitUnstageFailed  Key = "status.git_unstage_failed"
+	StatusGitFetchOk        Key = "status.git_fetch_ok"
+	StatusGitFetchFailed    Key = "status.git_fetch_failed"
+	StatusGitPullOk         Key = "status.git_pull_ok"
+	StatusGitPullFailed     Key = "status.git_pull_failed"
+	StatusGitPushOk         Key = "status.git_push_ok"
+	StatusGitPushFailed     Key = "status.git_push_failed"
+	StatusGitCheckoutOk     Key = "status.git_checkout_ok"
+	StatusGitCheckoutFailed Key = "status.git_checkout_failed"
+	StatusGitCheckoutDirty  Key = "status.git_checkout_dirty"
+	StatusGitTagSwitchOk    Key = "status.git_tag_switch_ok"
+	StatusGitTagSwitchErr   Key = "status.git_tag_switch_err"
+	StatusGitDeleteOk       Key = "status.git_delete_ok"
+	StatusGitDeleteFailed   Key = "status.git_delete_failed"
+	StatusGitDeleteCurrent  Key = "status.git_delete_current"
+	StatusGitRenameOk       Key = "status.git_rename_ok"
+	StatusGitRenameFailed   Key = "status.git_rename_failed"
+	StatusGitTagOk          Key = "status.git_tag_ok"
+	StatusGitTagFailed      Key = "status.git_tag_failed"
+	StatusGitTagPushFailed  Key = "status.git_tag_push_failed"
+	StatusGitTagDeleted     Key = "status.git_tag_deleted"
+	StatusGitTagDeleteErr   Key = "status.git_tag_delete_err"
+	StatusGitTagPushed      Key = "status.git_tag_pushed"
+	StatusGitTagPushErr     Key = "status.git_tag_push_err"
+	StatusGitTagRemoteOk    Key = "status.git_tag_remote_ok"
+	StatusGitTagRemoteErr   Key = "status.git_tag_remote_err"
+	StatusGitNeedMessage    Key = "status.git_need_message"
+	StatusGitNoChanges      Key = "status.git_no_changes"
 )
 
 var catalogs = map[Lang]map[Key]string{
@@ -195,6 +281,7 @@ var catalogs = map[Lang]map[Key]string{
 		ToolAndroid:                    "Android ファイル",
 		ToolAndroidShot:                "Android 画面",
 		ToolStopwatch:                  "ストップウォッチ",
+		ToolGit:                        "Git",
 		ToolMTP:                        "MTP ファイル",
 		OpenFile:                       "ファイルを開く",
 		PasteClipboard:                 "クリップボードから貼り付け",
@@ -274,6 +361,49 @@ var catalogs = map[Lang]map[Key]string{
 		StopwatchStopped:               "停止中",
 		StopwatchRunning:               "計測中",
 		StopwatchPaused:                "一時停止",
+		GitOpen:                        "リポジトリを開く",
+		GitNewTab:                      "新しいタブ",
+		GitReload:                      "再読み込み",
+		GitFetch:                       "Fetch",
+		GitPull:                        "Pull",
+		GitPush:                        "Push",
+		GitCommit:                      "コミット",
+		GitGraph:                       "Graph",
+		GitAmend:                       "Amend",
+		GitCancel:                      "キャンセル",
+		GitDelete:                      "削除",
+		GitDeleteConfirm:               "ブランチ「%s」を削除しますか？",
+		GitRename:                      "名前を変更",
+		GitRenamePrompt:                "新しいブランチ名",
+		GitBranches:                    "ブランチ",
+		GitTags:                        "タグ",
+		GitCreateTag:                   "タグを作成",
+		GitTagPrompt:                   "タグ名",
+		GitPushTag:                     "リモートにプッシュ",
+		GitRemoteDelete:                "リモートから削除",
+		GitTagDeleteAsk:                "タグ「%s」を削除しますか？",
+		GitTagRemoteAsk:                "リモートからタグ「%s」を削除しますか？",
+		GitDetails:                     "コミット詳細",
+		GitMessage:                     "コミットメッセージ",
+		GitStageAll:                    "変更をすべて含める",
+		GitStage:                       "Stage",
+		GitUnstage:                     "Unstage",
+		GitEmpty:                       "Git リポジトリのフォルダを開いてください。",
+		GitNoCommits:                   "表示するコミットがありません。",
+		GitNoRepo:                      "リポジトリが開かれていません",
+		GitHint:                        "ブランチをクリックすると先端のコミットを表示。グラフのブランチをダブルクリックすると切り替え。タグをダブルクリックすると切り替え。右クリックで名前の変更と削除。コミットをクリックして詳細。チェックを外すと remote をグラフから隠します。",
+		GitDetached:                    "detached HEAD",
+		GitWorkingTree:                 "作業ツリー",
+		GitUncommitted:                 "未コミットの変更",
+		GitAheadBehind:                 "ahead %d / behind %d",
+		GitRemotes:                     "リモート",
+		GitAuthor:                      "作者",
+		GitRefs:                        "参照",
+		GitSHA:                         "SHA",
+		GitParents:                     "親",
+		GitChanges:                     "変更",
+		GitChangeContent:               "変更内容",
+		GitNoChanges:                   "変更はありません。",
 		MTPDevices:                     "デバイス",
 		MTPRefresh:                     "再読み込み",
 		MTPUp:                          "上へ",
@@ -357,6 +487,46 @@ var catalogs = map[Lang]map[Key]string{
 		StatusMTPCopyCancelled:         "コピーをキャンセルしました",
 		StatusMTPNoSelection:           "コピーするファイルまたはフォルダを選んでください",
 		StatusMTPSelectOnline:          "ストレージまたはフォルダを選んでください",
+		StatusGitLoading:               "読み込んでいます…",
+		StatusGitOpened:                "%s を開きました（コミット %d 件）",
+		StatusGitOpenFailed:            "リポジトリを開けません: %v",
+		StatusGitWorking:               "Git を実行しています…",
+		StatusGitOpFailed:              "Git の操作に失敗しました: %v",
+		StatusGitCommitOk:              "コミットしました",
+		StatusGitCommitFailed:          "コミットに失敗しました: %v",
+		StatusGitAmendOk:               "amend しました",
+		StatusGitAmendFailed:           "amend に失敗しました: %v",
+		StatusGitStageOk:               "ステージしました",
+		StatusGitStageFailed:           "ステージに失敗しました: %v",
+		StatusGitUnstageOk:             "アンステージしました",
+		StatusGitUnstageFailed:         "アンステージに失敗しました: %v",
+		StatusGitFetchOk:               "fetch しました",
+		StatusGitFetchFailed:           "fetch に失敗しました: %v",
+		StatusGitPullOk:                "pull しました",
+		StatusGitPullFailed:            "pull に失敗しました: %v",
+		StatusGitPushOk:                "push しました",
+		StatusGitPushFailed:            "push に失敗しました: %v",
+		StatusGitCheckoutOk:            "ブランチを切り替えました",
+		StatusGitCheckoutFailed:        "ブランチの切り替えに失敗しました: %v",
+		StatusGitCheckoutDirty:         "作業ツリーに変更があるため、ブランチを切り替えられません",
+		StatusGitTagSwitchOk:           "タグに切り替えました",
+		StatusGitTagSwitchErr:          "タグへの切り替えに失敗しました: %v",
+		StatusGitDeleteOk:              "ブランチを削除しました",
+		StatusGitDeleteFailed:          "ブランチの削除に失敗しました: %v",
+		StatusGitDeleteCurrent:         "チェックアウト中のブランチは削除できません",
+		StatusGitRenameOk:              "ブランチ名を変更しました",
+		StatusGitRenameFailed:          "ブランチ名の変更に失敗しました: %v",
+		StatusGitTagOk:                 "タグを作成しました",
+		StatusGitTagFailed:             "タグの作成に失敗しました: %v",
+		StatusGitTagPushFailed:         "タグは作成しましたが、リモートへの送信に失敗しました: %v",
+		StatusGitTagDeleted:            "タグを削除しました",
+		StatusGitTagDeleteErr:          "タグの削除に失敗しました: %v",
+		StatusGitTagPushed:             "タグをプッシュしました",
+		StatusGitTagPushErr:            "タグのプッシュに失敗しました: %v",
+		StatusGitTagRemoteOk:           "リモートからタグを削除しました",
+		StatusGitTagRemoteErr:          "リモートからのタグ削除に失敗しました: %v",
+		StatusGitNeedMessage:           "コミットメッセージを入力してください",
+		StatusGitNoChanges:             "コミットする変更がありません",
 	},
 	EN: {
 		AppTitle:                       "Dogubako",
@@ -367,6 +537,7 @@ var catalogs = map[Lang]map[Key]string{
 		ToolAndroid:                    "Android Files",
 		ToolAndroidShot:                "Android Screen",
 		ToolStopwatch:                  "Stopwatch",
+		ToolGit:                        "Git",
 		ToolMTP:                        "MTP Files",
 		OpenFile:                       "Open File",
 		PasteClipboard:                 "Paste from Clipboard",
@@ -446,6 +617,49 @@ var catalogs = map[Lang]map[Key]string{
 		StopwatchStopped:               "Stopped",
 		StopwatchRunning:               "Running",
 		StopwatchPaused:                "Paused",
+		GitOpen:                        "Open Repository",
+		GitNewTab:                      "New Tab",
+		GitReload:                      "Reload",
+		GitFetch:                       "Fetch",
+		GitPull:                        "Pull",
+		GitPush:                        "Push",
+		GitCommit:                      "Commit",
+		GitGraph:                       "Graph",
+		GitAmend:                       "Amend",
+		GitCancel:                      "Cancel",
+		GitDelete:                      "Delete",
+		GitDeleteConfirm:               "Delete branch \"%s\"?",
+		GitRename:                      "Rename",
+		GitRenamePrompt:                "New branch name",
+		GitBranches:                    "Branches",
+		GitTags:                        "Tags",
+		GitCreateTag:                   "Create tag",
+		GitTagPrompt:                   "Tag name",
+		GitPushTag:                     "Push to remote",
+		GitRemoteDelete:                "Delete from remote",
+		GitTagDeleteAsk:                "Delete tag \"%s\"?",
+		GitTagRemoteAsk:                "Delete tag \"%s\" from the remote?",
+		GitDetails:                     "Commit details",
+		GitMessage:                     "Commit message",
+		GitStageAll:                    "Include all changes",
+		GitStage:                       "Stage",
+		GitUnstage:                     "Unstage",
+		GitEmpty:                       "Open a folder that is a Git repository.",
+		GitNoCommits:                   "No commits to show.",
+		GitNoRepo:                      "No repository open",
+		GitHint:                        "Click a branch to show its tip commit. Double-click a branch on the graph to switch. Double-click a tag to switch. Right-click a branch to rename or delete. Click a commit for details. Uncheck a remote to hide it from the graph.",
+		GitDetached:                    "detached HEAD",
+		GitWorkingTree:                 "Working tree",
+		GitUncommitted:                 "Uncommitted changes",
+		GitAheadBehind:                 "ahead %d / behind %d",
+		GitRemotes:                     "Remotes",
+		GitAuthor:                      "Author",
+		GitRefs:                        "Refs",
+		GitSHA:                         "SHA",
+		GitParents:                     "Parents",
+		GitChanges:                     "Changes",
+		GitChangeContent:               "Changes",
+		GitNoChanges:                   "No changes.",
 		MTPDevices:                     "Devices",
 		MTPRefresh:                     "Reload",
 		MTPUp:                          "Up",
@@ -529,6 +743,46 @@ var catalogs = map[Lang]map[Key]string{
 		StatusMTPCopyCancelled:         "Copy cancelled",
 		StatusMTPNoSelection:           "Select a file or folder to copy",
 		StatusMTPSelectOnline:          "Select a storage or folder",
+		StatusGitLoading:               "Loading…",
+		StatusGitOpened:                "Opened %s (%d commits)",
+		StatusGitOpenFailed:            "Could not open the repository: %v",
+		StatusGitWorking:               "Running git…",
+		StatusGitOpFailed:              "Git operation failed: %v",
+		StatusGitCommitOk:              "Committed",
+		StatusGitCommitFailed:          "Commit failed: %v",
+		StatusGitAmendOk:               "Amended",
+		StatusGitAmendFailed:           "Amend failed: %v",
+		StatusGitStageOk:               "Staged",
+		StatusGitStageFailed:           "Could not stage: %v",
+		StatusGitUnstageOk:             "Unstaged",
+		StatusGitUnstageFailed:         "Could not unstage: %v",
+		StatusGitFetchOk:               "Fetched",
+		StatusGitFetchFailed:           "Fetch failed: %v",
+		StatusGitPullOk:                "Pulled",
+		StatusGitPullFailed:            "Pull failed: %v",
+		StatusGitPushOk:                "Pushed",
+		StatusGitPushFailed:            "Push failed: %v",
+		StatusGitCheckoutOk:            "Switched branch",
+		StatusGitCheckoutFailed:        "Could not switch branch: %v",
+		StatusGitCheckoutDirty:         "Cannot switch branch while the working tree has changes",
+		StatusGitTagSwitchOk:           "Switched to the tag",
+		StatusGitTagSwitchErr:          "Could not switch to the tag: %v",
+		StatusGitDeleteOk:              "Deleted branch",
+		StatusGitDeleteFailed:          "Could not delete branch: %v",
+		StatusGitDeleteCurrent:         "Cannot delete the checked-out branch",
+		StatusGitRenameOk:              "Renamed branch",
+		StatusGitRenameFailed:          "Could not rename branch: %v",
+		StatusGitTagOk:                 "Created tag",
+		StatusGitTagFailed:             "Could not create tag: %v",
+		StatusGitTagPushFailed:         "Created the tag, but could not push it: %v",
+		StatusGitTagDeleted:            "Deleted tag",
+		StatusGitTagDeleteErr:          "Could not delete tag: %v",
+		StatusGitTagPushed:             "Pushed tag",
+		StatusGitTagPushErr:            "Could not push tag: %v",
+		StatusGitTagRemoteOk:           "Deleted the tag from the remote",
+		StatusGitTagRemoteErr:          "Could not delete the tag from the remote: %v",
+		StatusGitNeedMessage:           "Enter a commit message",
+		StatusGitNoChanges:             "No changes to commit",
 	},
 }
 
