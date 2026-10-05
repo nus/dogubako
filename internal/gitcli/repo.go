@@ -367,6 +367,21 @@ func (r *Repo) Pull(ctx context.Context) error {
 	return r.run(ctx, "pull", "--ff-only")
 }
 
+// PullRef fetches the remote branch and fast-forwards HEAD onto it.
+func (r *Repo) PullRef(ctx context.Context, ref Ref) error {
+	if err := ctx.Err(); err != nil {
+		return err
+	}
+	if ref.Remote == "" {
+		return fmt.Errorf("no remote")
+	}
+	branch := ref.LocalName()
+	if branch == "" || branch == "HEAD" {
+		return fmt.Errorf("no branch")
+	}
+	return r.run(ctx, "pull", "--ff-only", ref.Remote, branch)
+}
+
 // Push sends the current branch. Sets upstream to origin when missing.
 func (r *Repo) Push(ctx context.Context) error {
 	if err := ctx.Err(); err != nil {

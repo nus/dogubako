@@ -102,6 +102,27 @@ func TestBadgeHitRegions(t *testing.T) {
 	}
 }
 
+func TestLocalBranchByName(t *testing.T) {
+	locals := []gitcli.Ref{
+		{Name: "main", Current: true},
+		{Name: "feature/foo"},
+	}
+	got, ok := localBranchByName(locals, "feature/foo")
+	if !ok || got.Name != "feature/foo" || got.Current {
+		t.Fatalf("nested = %#v ok=%v", got, ok)
+	}
+	got, ok = localBranchByName(locals, "main")
+	if !ok || !got.Current {
+		t.Fatalf("main = %#v ok=%v", got, ok)
+	}
+	if _, ok := localBranchByName(locals, "feature"); ok {
+		t.Fatal("partial name matched")
+	}
+	if _, ok := localBranchByName(locals, ""); ok {
+		t.Fatal("empty name matched")
+	}
+}
+
 func TestBranchSwitchRef(t *testing.T) {
 	local, ok := branchSwitchRef(gitcli.Decoration{Kind: "head", Name: "main origin", HEAD: true}, "abc")
 	if !ok || local.Name != "main" || local.Remote != "" || !local.Current || local.Hash != "abc" {

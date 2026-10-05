@@ -368,7 +368,9 @@ func (t *GitTool) Build(context *guigui.Context, adder *guigui.ChildAdder) error
 		lanes := snap.Lanes
 		for i, row := range rows {
 			r := t.commitRows.At(i)
-			r.Set(row, lanes, row.Commit.Hash == snap.HEAD, lang, model.DoCheckout, onMenu)
+			r.Set(row, lanes, row.Commit.Hash == snap.HEAD, lang, func(ref gitcli.Ref) {
+				t.switchBranch(lang, model, ref)
+			}, onMenu)
 			t.commitItems = append(t.commitItems, basicwidget.ListItem[string]{
 				Content: r,
 				Value:   row.Commit.Hash,
@@ -838,6 +840,43 @@ func (t *GitTool) branchAtCursor(list *basicwidget.List[string], model *GitModel
 			return gitcli.Ref{}, false
 		}
 		return t.refByValue(model, item.Value)
+	}
+	return gitcli.Ref{}, false
+}
+
+// switchBranch checks out ref. A remote branch whose name matches a local
+// branch asks whether to check out that local branch and pull, or cancel.
+func (t *GitTool) switchBranch(lang i18n.Lang, model *GitModel, ref gitcli.Ref) {
+	if ref.Remote != "" {
+		name := ref.LocalName()
+		if name != "" && name != "HEAD" {
+			if local, ok := localBranchByName(model.Snapshot().Locals, name); ok {
+				if !local.Current && model.Snapshot().Status.Dirty() {
+					model.SetStatus(i18n.StatusGitCheckoutDirty)
+					return
+				}
+				remote := ref
+				t.confirm.Ask(
+					i18n.T(lang, i18n.GitCheckoutLocalAsk, name),
+					i18n.T(lang, i18n.GitCheckoutPull),
+					i18n.T(lang, i18n.GitCancel),
+					func() { model.DoCheckoutAndPull(local, remote) },
+				)
+				return
+			}
+		}
+	}
+	model.DoCheckout(ref)
+}
+
+func localBranchByName(locals []gitcli.Ref, name string) (gitcli.Ref, bool) {
+	if name == "" {
+		return gitcli.Ref{}, false
+	}
+	for _, ref := range locals {
+		if ref.Remote == "" && ref.Name == name {
+			return ref, true
+		}
 	}
 	return gitcli.Ref{}, false
 }

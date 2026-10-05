@@ -313,6 +313,11 @@ func (c *gitConfirmContent) Build(context *guigui.Context, adder *guigui.ChildAd
 func (c *gitConfirmContent) Measure(context *guigui.Context, constraints guigui.Constraints) image.Point {
 	u := basicwidget.UnitSize(context)
 	w := 16 * u
+	cancelW := c.cancel.Measure(context, guigui.Constraints{}).X
+	deleteW := c.delete.Measure(context, guigui.Constraints{}).X
+	if need := cancelW + deleteW + u/4 + u; need > w {
+		w = need
+	}
 	msgH := c.message.Measure(context, guigui.FixedWidthConstraints(w-u)).Y
 	btnH := c.delete.Measure(context, guigui.Constraints{}).Y
 	h := msgH + btnH + 2*u
