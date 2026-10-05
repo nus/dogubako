@@ -45,6 +45,7 @@ type GitModel struct {
 	active   int
 	loaded   bool
 	extraGen uint64
+	recent   []string
 }
 
 // gitSession is the state of a single repository tab.

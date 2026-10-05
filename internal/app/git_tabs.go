@@ -2,6 +2,7 @@ package app
 
 import (
 	"path/filepath"
+	"slices"
 	"strings"
 	"time"
 
@@ -45,7 +46,11 @@ func (m *GitModel) EnsureLoaded() {
 		return
 	}
 	m.loaded = true
-	paths, active := loadGitTabs()
+	paths, active, recent := loadGitTabs()
+	m.recent = recent
+	if len(m.recent) == 0 {
+		m.recent = seedGitRecent(paths, active)
+	}
 	if len(paths) == 0 {
 		m.ensure()
 		return
@@ -69,17 +74,25 @@ func (m *GitModel) EnsureLoaded() {
 
 // Open shows path in the tab that already has it, fills the current tab when
 // that tab is empty, or adds a tab and opens the repository there.
+// Switching from an empty tab to one that already has the repository closes
+// the empty tab.
 func (m *GitModel) Open(path string) {
 	path = canonicalPath(path)
 	if path == "" || path == "." {
 		return
 	}
 	m.ensure()
+	m.rememberRepo(path)
 	if i := m.tabIndex(path); i >= 0 {
+		from := m.active
+		closeEmpty := from != i && m.tabs[from].path == "" && !m.tabs[from].Busy()
 		m.SelectTab(i)
 		s := m.tabs[i]
 		if !s.HasRepo() && !s.Busy() {
 			s.open(path)
+		}
+		if closeEmpty {
+			m.CloseTab(from)
 		}
 		return
 	}
@@ -215,7 +228,62 @@ func (m *GitModel) saveTabs() {
 	for i, s := range m.tabs {
 		paths[i] = s.path
 	}
-	_ = saveGitTabs(paths, m.active)
+	_ = saveGitTabs(paths, m.active, m.recent)
+}
+
+// RecentPaths is the most recently opened repositories, newest first.
+func (m *GitModel) RecentPaths() []string {
+	if len(m.recent) == 0 {
+		return nil
+	}
+	return slices.Clone(m.recent)
+}
+
+func (m *GitModel) rememberRepo(path string) {
+	path = canonicalPath(path)
+	if path == "" || path == "." {
+		return
+	}
+	next := make([]string, 0, len(m.recent)+1)
+	next = append(next, path)
+	for _, p := range m.recent {
+		if p == path {
+			continue
+		}
+		next = append(next, p)
+		if len(next) == gitRecentMax {
+			break
+		}
+	}
+	if slices.Equal(m.recent, next) {
+		return
+	}
+	m.recent = next
+	m.extraGen++
+	m.saveTabs()
+}
+
+func (m *GitModel) forgetRecent(path string) {
+	path = canonicalPath(path)
+	if path == "" || path == "." {
+		return
+	}
+	next := make([]string, 0, len(m.recent))
+	for _, p := range m.recent {
+		if p == path {
+			continue
+		}
+		next = append(next, p)
+	}
+	if len(next) == len(m.recent) {
+		return
+	}
+	if len(next) == 0 {
+		next = nil
+	}
+	m.recent = next
+	m.extraGen++
+	m.saveTabs()
 }
 
 func (m *GitModel) dedupeTabs() {

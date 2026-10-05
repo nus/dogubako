@@ -57,6 +57,13 @@ type GitTool struct {
 	graphEmpty  basicwidget.Text
 	showEmpty   bool
 
+	emptyHome   bool
+	showRecent  bool
+	recentTitle basicwidget.Text
+	recentList  basicwidget.List[string]
+	recentRows  guigui.WidgetSlice[*gitRecentRow]
+	recentItems []basicwidget.ListItem[string]
+
 	detail gitDetail
 
 	workTree      basicwidget.Text
@@ -124,6 +131,10 @@ func (t *GitTool) Build(context *guigui.Context, adder *guigui.ChildAdder) error
 
 	t.tabBar.Sync(lang, model)
 	adder.AddWidget(&t.tabBar)
+	t.emptyHome = model.Path() == ""
+	if t.emptyHome {
+		return t.buildEmptyHome(context, adder, lang, model)
+	}
 
 	adder.AddWidget(&t.openBtn)
 	adder.AddWidget(&t.reloadBtn)
@@ -561,6 +572,11 @@ func (t *GitTool) Layout(context *guigui.Context, widgetBounds *guigui.WidgetBou
 	layouter.LayoutWidget(&t.tabBar, image.Rect(bounds.Min.X, bounds.Min.Y, bounds.Max.X, bounds.Min.Y+barH))
 	rest := bounds
 	rest.Min.Y += barH
+	if t.emptyHome {
+		t.layoutEmptyHome(context, rest, layouter, u)
+		t.layoutOverlays(context, layouter)
+		return
+	}
 
 	t.toolbarItems = slices.Delete(t.toolbarItems, 0, len(t.toolbarItems))
 	t.toolbarItems = append(t.toolbarItems,
@@ -731,6 +747,10 @@ func (t *GitTool) Tick(context *guigui.Context, widgetBounds *guigui.WidgetBound
 		return nil
 	}
 	model := v.(*Model).Git()
+	if t.emptyHome {
+		t.openRecentAtCursor(model)
+		return nil
+	}
 	ref, hit := t.branchAtCursor(&t.tagList, model)
 	if !hit {
 		t.tagClicks = gitClickCount{}

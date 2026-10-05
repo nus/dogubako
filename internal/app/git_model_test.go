@@ -376,6 +376,177 @@ func TestGitTabsKeepRepos(t *testing.T) {
 	}
 }
 
+func TestGitRecentRepos(t *testing.T) {
+	requireGitBin(t)
+	dirA := initRepo(t, "a")
+	dirB := initRepo(t, "b")
+
+	cfg := t.TempDir()
+	restore := overrideSidebarConfigDir(func() (string, error) { return cfg, nil })
+	t.Cleanup(restore)
+
+	var m GitModel
+	m.Open(dirA)
+	waitGit(t, &m)
+	m.Open(dirB)
+	waitGit(t, &m)
+	if got := m.RecentPaths(); len(got) != 2 || got[0] != canonicalPath(dirB) || got[1] != canonicalPath(dirA) {
+		t.Fatalf("recent = %v", got)
+	}
+	m.Open(dirA)
+	if got := m.RecentPaths(); len(got) != 2 || got[0] != canonicalPath(dirA) || got[1] != canonicalPath(dirB) {
+		t.Fatalf("reopen recent = %v", got)
+	}
+	m.CloseTab(0)
+	m.CloseTab(0)
+	if m.Path() != "" {
+		t.Fatalf("path = %s", m.Path())
+	}
+	if got := m.RecentPaths(); len(got) != 2 || got[0] != canonicalPath(dirA) {
+		t.Fatalf("after close recent = %v", got)
+	}
+
+	var again GitModel
+	again.EnsureLoaded()
+	waitGit(t, &again)
+	if got := again.RecentPaths(); len(got) != 2 || got[0] != canonicalPath(dirA) || got[1] != canonicalPath(dirB) {
+		t.Fatalf("restored recent = %v", got)
+	}
+}
+
+func TestOpenRecentClosesEmptyTab(t *testing.T) {
+	requireGitBin(t)
+	dirA := initRepo(t, "a")
+	dirB := initRepo(t, "b")
+
+	cfg := t.TempDir()
+	restore := overrideSidebarConfigDir(func() (string, error) { return cfg, nil })
+	t.Cleanup(restore)
+
+	var m GitModel
+	m.Open(dirA)
+	waitGit(t, &m)
+	m.Open(dirB)
+	waitGit(t, &m)
+	if m.TabCount() != 2 {
+		t.Fatalf("tabs = %d", m.TabCount())
+	}
+	m.Open(dirA)
+	if m.TabCount() != 2 || m.ActiveTab() != 0 {
+		t.Fatalf("repo tab switch count=%d active=%d", m.TabCount(), m.ActiveTab())
+	}
+
+	m.NewTab()
+	if m.TabCount() != 3 || m.Path() != "" {
+		t.Fatalf("new tab count=%d path=%q", m.TabCount(), m.Path())
+	}
+	m.Open(dirA)
+	if m.TabCount() != 2 || m.ActiveTab() != 0 || filepath.Base(m.Path()) != filepath.Base(dirA) {
+		t.Fatalf("after recent jump count=%d active=%d path=%s", m.TabCount(), m.ActiveTab(), m.Path())
+	}
+	if filepath.Base(m.tabs[1].path) != filepath.Base(dirB) {
+		t.Fatalf("kept path = %s", m.tabs[1].path)
+	}
+
+	if err := saveGitTabs([]string{"", dirB}, 0, nil); err != nil {
+		t.Fatal(err)
+	}
+	var leading GitModel
+	leading.EnsureLoaded()
+	waitGit(t, &leading)
+	if leading.TabCount() != 2 || leading.Path() != "" {
+		t.Fatalf("leading empty count=%d path=%q", leading.TabCount(), leading.Path())
+	}
+	leading.Open(dirB)
+	if leading.TabCount() != 1 || leading.ActiveTab() != 0 || filepath.Base(leading.Path()) != filepath.Base(dirB) {
+		t.Fatalf("leading close count=%d active=%d path=%s", leading.TabCount(), leading.ActiveTab(), leading.Path())
+	}
+}
+
+func TestGitRecentSeedsFromTabs(t *testing.T) {
+	cfg := t.TempDir()
+	restore := overrideSidebarConfigDir(func() (string, error) { return cfg, nil })
+	t.Cleanup(restore)
+
+	a := filepath.Join(cfg, "a")
+	b := filepath.Join(cfg, "b")
+	if err := os.MkdirAll(a, 0o755); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.MkdirAll(b, 0o755); err != nil {
+		t.Fatal(err)
+	}
+	if err := saveGitTabs([]string{a, b}, 1, nil); err != nil {
+		t.Fatal(err)
+	}
+	var m GitModel
+	m.EnsureLoaded()
+	if got := m.RecentPaths(); len(got) != 2 || got[0] != canonicalPath(b) || got[1] != canonicalPath(a) {
+		t.Fatalf("recent = %v", got)
+	}
+	waitGit(t, &m)
+	if got := m.RecentPaths(); len(got) != 2 || got[0] != canonicalPath(b) || got[1] != canonicalPath(a) {
+		t.Fatalf("recent after load = %v", got)
+	}
+}
+
+func TestGitRecentForget(t *testing.T) {
+	cfg := t.TempDir()
+	restore := overrideSidebarConfigDir(func() (string, error) { return cfg, nil })
+	t.Cleanup(restore)
+
+	a := filepath.Join(cfg, "a")
+	b := filepath.Join(cfg, "b")
+	var m GitModel
+	m.ensure()
+	m.rememberRepo(a)
+	m.rememberRepo(b)
+	m.forgetRecent(a)
+	if got := m.RecentPaths(); len(got) != 1 || got[0] != canonicalPath(b) {
+		t.Fatalf("recent = %v", got)
+	}
+	m.forgetRecent(canonicalPath(b))
+	if m.RecentPaths() != nil {
+		t.Fatalf("recent = %v", m.RecentPaths())
+	}
+	m.forgetRecent(a)
+	if m.RecentPaths() != nil {
+		t.Fatal("forgetting a missing path changed the list")
+	}
+
+	var again GitModel
+	again.EnsureLoaded()
+	if again.RecentPaths() != nil {
+		t.Fatalf("restored = %v", again.RecentPaths())
+	}
+}
+
+func TestGitRecentCap(t *testing.T) {
+	cfg := t.TempDir()
+	restore := overrideSidebarConfigDir(func() (string, error) { return cfg, nil })
+	t.Cleanup(restore)
+
+	var m GitModel
+	m.ensure()
+	var last string
+	for i := 0; i < gitRecentMax+5; i++ {
+		last = filepath.Join(cfg, "repo", strings.Repeat("n", i+1))
+		m.rememberRepo(last)
+	}
+	got := m.RecentPaths()
+	if len(got) != gitRecentMax {
+		t.Fatalf("len = %d", len(got))
+	}
+	if got[0] != canonicalPath(last) {
+		t.Fatalf("front = %s", got[0])
+	}
+	var again GitModel
+	again.EnsureLoaded()
+	if restored := again.RecentPaths(); len(restored) != gitRecentMax || restored[0] != canonicalPath(last) {
+		t.Fatalf("restored = %v", restored)
+	}
+}
+
 func initRepo(t *testing.T, name string) string {
 	t.Helper()
 	dir := t.TempDir()

@@ -91,6 +91,7 @@ const (
 	AndroidShotRestore      Key = "android_shot.restore"
 
 	GitOpen          Key = "git.open"
+	GitRecent        Key = "git.recent"
 	GitNewTab        Key = "git.new_tab"
 	GitReload        Key = "git.reload"
 	GitFetch         Key = "git.fetch"
@@ -362,6 +363,7 @@ var catalogs = map[Lang]map[Key]string{
 		StopwatchRunning:               "計測中",
 		StopwatchPaused:                "一時停止",
 		GitOpen:                        "リポジトリを開く",
+		GitRecent:                      "最近開いたリポジトリ",
 		GitNewTab:                      "新しいタブ",
 		GitReload:                      "再読み込み",
 		GitFetch:                       "Fetch",
@@ -618,6 +620,7 @@ var catalogs = map[Lang]map[Key]string{
 		StopwatchRunning:               "Running",
 		StopwatchPaused:                "Paused",
 		GitOpen:                        "Open Repository",
+		GitRecent:                      "Recent repositories",
 		GitNewTab:                      "New Tab",
 		GitReload:                      "Reload",
 		GitFetch:                       "Fetch",
