@@ -280,6 +280,8 @@ func TestAndroidShotEnsureLiveAndSetMode(t *testing.T) {
 	home := t.TempDir()
 	restore := userdir.Override("linux", home, nil)
 	t.Cleanup(restore)
+	restoreMode := overrideSidebarConfigDir(func() (string, error) { return t.TempDir(), nil })
+	t.Cleanup(restoreMode)
 
 	png := solidPNG(t, 3, 3)
 	fs := adbfs.NewMem(adbfs.Device{Serial: "pixel", State: "device", Model: "Pixel"})

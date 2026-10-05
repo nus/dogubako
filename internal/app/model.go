@@ -70,7 +70,7 @@ func (t Tool) Title(lang i18n.Lang) string {
 // Model is the application-wide state provided to widgets via Env.
 type Model struct {
 	lang        i18n.Lang
-	mode        ToolID
+	mode        modePref
 	sidebar     sidebarPref
 	image       ImageModel
 	screenshot  ScreenshotModel
@@ -104,17 +104,14 @@ func (m *Model) applyLang(lang i18n.Lang, persist bool) {
 }
 
 func (m *Model) Mode() ToolID {
-	if m.mode == "" {
-		return ToolImage
-	}
-	return m.mode
+	return m.mode.current()
 }
 
 func (m *Model) SetMode(mode ToolID) {
 	if m.Mode() == ToolAndroidShot && mode != ToolAndroidShot {
 		m.androidShot.StopLive()
 	}
-	m.mode = mode
+	m.mode.set(mode)
 }
 
 // SidebarCollapsed reports whether the left tool menu is folded to a narrow rail.
