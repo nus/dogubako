@@ -101,19 +101,26 @@ func (g *gitGraphGlyph) Draw(context *guigui.Context, widgetBounds *guigui.Widge
 	if u >= 28 {
 		stroke = 2.5
 	}
-	// A lane change is one straight segment split across two rows. Both halves
-	// meet at the row edge halfway between the lanes, so merge lines connect.
+	nodeR := gitNodeRadius(lw)
+	// A lane change is one rounded elbow on the upper row. It meets the next
+	// row already on the destination lane, so the line does not bend again.
+	for _, e := range g.row.Outgoing {
+		if e.From == e.To {
+			continue
+		}
+		strokeGitBend(dst, laneX(e.From), midY, laneX(e.To), bot, nodeR, stroke, gitEdgeColor(e))
+	}
 	for _, e := range g.row.Incoming {
-		vector.StrokeLine(dst, gitEdgeBoundaryX(laneX, e), top, laneX(e.To), midY, stroke, gitEdgeColor(e), true)
+		vector.StrokeLine(dst, laneX(e.To), top, laneX(e.To), midY, stroke, gitEdgeColor(e), true)
 	}
 	for _, e := range g.row.Outgoing {
-		vector.StrokeLine(dst, laneX(e.From), midY, gitEdgeBoundaryX(laneX, e), bot, stroke, gitEdgeColor(e), true)
+		if e.From != e.To {
+			continue
+		}
+		vector.StrokeLine(dst, laneX(e.From), midY, laneX(e.From), bot, stroke, gitEdgeColor(e), true)
 	}
 	x := laneX(g.row.Lane)
-	r := float32(lw) * 0.28
-	if r < 3 {
-		r = 3
-	}
+	r := nodeR
 	node := gitLaneColor(g.row.Lane)
 	if g.row.Commit.Hash == gitcli.Uncommitted {
 		node = gitUncommittedColor
@@ -133,8 +140,67 @@ func gitEdgeColor(e gitcli.Edge) color.NRGBA {
 	return gitLaneColor(e.To)
 }
 
-func gitEdgeBoundaryX(laneX func(int) float32, e gitcli.Edge) float32 {
-	return (laneX(e.From) + laneX(e.To)) / 2
+func gitNodeRadius(laneWidth int) float32 {
+	r := float32(laneWidth) * 0.28
+	if r < 3 {
+		return 3
+	}
+	return r
+}
+
+// gitBendRadius is the fillet for a shift of dx across a vertical run of dy.
+// Two quarter-circles fit in the shift, and a stem of at least nodeR stays
+// clear of the commit dot.
+func gitBendRadius(dx, dy, nodeR float32) float32 {
+	if dx < 0 {
+		dx = -dx
+	}
+	if dy <= 0 {
+		return 0
+	}
+	rad := dx / 2
+	if room := (dy - nodeR) / 2; rad > room {
+		rad = room
+	}
+	if rad < 1 {
+		return 0
+	}
+	return rad
+}
+
+func strokeGitPath(dst *ebiten.Image, p *vector.Path, stroke float32, clr color.Color) {
+	op := &vector.DrawPathOptions{AntiAlias: true}
+	op.ColorScale.ScaleWithColor(clr)
+	vector.StrokePath(dst, p, &vector.StrokeOptions{Width: stroke}, op)
+}
+
+// strokeGitBend draws one rounded elbow from (x0, y0) to (x1, y1), with y1
+// below y0. The path leaves vertically, turns once onto the horizontal, turns
+// back to vertical, and ends at (x1, y1).
+func strokeGitBend(dst *ebiten.Image, x0, y0, x1, y1, nodeR, stroke float32, clr color.Color) {
+	dx := x1 - x0
+	rad := gitBendRadius(dx, y1-y0, nodeR)
+	if rad == 0 {
+		var p vector.Path
+		p.MoveTo(x0, y0)
+		p.LineTo(x0, y1)
+		p.LineTo(x1, y1)
+		strokeGitPath(dst, &p, stroke, clr)
+		return
+	}
+	dir := float32(1)
+	if dx < 0 {
+		dir = -1
+	}
+	yH := y1 - rad
+	var p vector.Path
+	p.MoveTo(x0, y0)
+	p.LineTo(x0, yH-rad)
+	p.ArcTo(x0, yH, x0+dir*rad, yH, rad)
+	p.LineTo(x1-dir*rad, yH)
+	p.ArcTo(x1, yH, x1, y1, rad)
+	p.LineTo(x1, y1)
+	strokeGitPath(dst, &p, stroke, clr)
 }
 
 func gitMetaCols(u int) (author, hash, date int) {
