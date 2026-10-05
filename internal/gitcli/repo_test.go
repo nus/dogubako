@@ -470,6 +470,52 @@ func TestCheckoutTag(t *testing.T) {
 	}
 }
 
+func TestPullRefFastForward(t *testing.T) {
+	dir := initRepo(t)
+	writeCommit(t, dir, "a.txt", "base")
+	remote := t.TempDir()
+	gitAt(t, remote, "init", "--bare", "-b", "main")
+	gitAt(t, dir, "remote", "add", "origin", remote)
+	gitAt(t, dir, "push", "-u", "origin", "main")
+	gitAt(t, dir, "checkout", "-b", "feature")
+	writeCommit(t, dir, "f.txt", "feature")
+	gitAt(t, dir, "push", "-u", "origin", "feature")
+	gitAt(t, dir, "reset", "--hard", "HEAD~1")
+	gitAt(t, dir, "checkout", "main")
+
+	ctx, cancel := context.WithTimeout(context.Background(), 20*time.Second)
+	defer cancel()
+	repo, err := Open(ctx, dir)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if err := repo.Checkout(ctx, Ref{Name: "feature"}); err != nil {
+		t.Fatal(err)
+	}
+	if err := repo.PullRef(ctx, Ref{Name: "origin/feature", Remote: "origin"}); err != nil {
+		t.Fatal(err)
+	}
+	snap, err := repo.Snapshot(ctx, SnapshotOpts{})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if snap.Branch != "feature" {
+		t.Fatalf("branch = %s", snap.Branch)
+	}
+	if !commitHasDecoration(snap.Commits, "head", "feature") {
+		t.Fatal("expected feature at HEAD")
+	}
+	headSubject := ""
+	for _, c := range snap.Commits {
+		if c.Hash == snap.HEAD {
+			headSubject = c.Subject
+		}
+	}
+	if headSubject != "feature" {
+		t.Fatalf("HEAD subject = %q", headSubject)
+	}
+}
+
 func TestCheckoutSwitch(t *testing.T) {
 	dir := initRepo(t)
 	writeCommit(t, dir, "a.txt", "base")

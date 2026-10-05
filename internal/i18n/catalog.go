@@ -90,50 +90,52 @@ const (
 	AndroidShotFill         Key = "android_shot.fill"
 	AndroidShotRestore      Key = "android_shot.restore"
 
-	GitOpen          Key = "git.open"
-	GitRecent        Key = "git.recent"
-	GitNewTab        Key = "git.new_tab"
-	GitReload        Key = "git.reload"
-	GitFetch         Key = "git.fetch"
-	GitPull          Key = "git.pull"
-	GitPush          Key = "git.push"
-	GitCommit        Key = "git.commit"
-	GitGraph         Key = "git.graph"
-	GitAmend         Key = "git.amend"
-	GitCancel        Key = "git.cancel"
-	GitDelete        Key = "git.delete"
-	GitDeleteConfirm Key = "git.delete_confirm"
-	GitRename        Key = "git.rename"
-	GitRenamePrompt  Key = "git.rename_prompt"
-	GitBranches      Key = "git.branches"
-	GitTags          Key = "git.tags"
-	GitCreateTag     Key = "git.create_tag"
-	GitTagPrompt     Key = "git.tag_prompt"
-	GitPushTag       Key = "git.push_tag"
-	GitRemoteDelete  Key = "git.remote_delete"
-	GitTagDeleteAsk  Key = "git.tag_delete_ask"
-	GitTagRemoteAsk  Key = "git.tag_remote_ask"
-	GitDetails       Key = "git.details"
-	GitMessage       Key = "git.message"
-	GitStageAll      Key = "git.stage_all"
-	GitStage         Key = "git.stage"
-	GitUnstage       Key = "git.unstage"
-	GitEmpty         Key = "git.empty"
-	GitNoCommits     Key = "git.no_commits"
-	GitNoRepo        Key = "git.no_repo"
-	GitHint          Key = "git.hint"
-	GitDetached      Key = "git.detached"
-	GitWorkingTree   Key = "git.working_tree"
-	GitUncommitted   Key = "git.uncommitted"
-	GitAheadBehind   Key = "git.ahead_behind"
-	GitRemotes       Key = "git.remotes"
-	GitAuthor        Key = "git.author"
-	GitRefs          Key = "git.refs"
-	GitSHA           Key = "git.sha"
-	GitParents       Key = "git.parents"
-	GitChanges       Key = "git.changes"
-	GitChangeContent Key = "git.change_content"
-	GitNoChanges     Key = "git.no_changes"
+	GitOpen             Key = "git.open"
+	GitRecent           Key = "git.recent"
+	GitNewTab           Key = "git.new_tab"
+	GitReload           Key = "git.reload"
+	GitFetch            Key = "git.fetch"
+	GitPull             Key = "git.pull"
+	GitPush             Key = "git.push"
+	GitCommit           Key = "git.commit"
+	GitGraph            Key = "git.graph"
+	GitAmend            Key = "git.amend"
+	GitCancel           Key = "git.cancel"
+	GitDelete           Key = "git.delete"
+	GitDeleteConfirm    Key = "git.delete_confirm"
+	GitCheckoutLocalAsk Key = "git.checkout_local_ask"
+	GitCheckoutPull     Key = "git.checkout_pull"
+	GitRename           Key = "git.rename"
+	GitRenamePrompt     Key = "git.rename_prompt"
+	GitBranches         Key = "git.branches"
+	GitTags             Key = "git.tags"
+	GitCreateTag        Key = "git.create_tag"
+	GitTagPrompt        Key = "git.tag_prompt"
+	GitPushTag          Key = "git.push_tag"
+	GitRemoteDelete     Key = "git.remote_delete"
+	GitTagDeleteAsk     Key = "git.tag_delete_ask"
+	GitTagRemoteAsk     Key = "git.tag_remote_ask"
+	GitDetails          Key = "git.details"
+	GitMessage          Key = "git.message"
+	GitStageAll         Key = "git.stage_all"
+	GitStage            Key = "git.stage"
+	GitUnstage          Key = "git.unstage"
+	GitEmpty            Key = "git.empty"
+	GitNoCommits        Key = "git.no_commits"
+	GitNoRepo           Key = "git.no_repo"
+	GitHint             Key = "git.hint"
+	GitDetached         Key = "git.detached"
+	GitWorkingTree      Key = "git.working_tree"
+	GitUncommitted      Key = "git.uncommitted"
+	GitAheadBehind      Key = "git.ahead_behind"
+	GitRemotes          Key = "git.remotes"
+	GitAuthor           Key = "git.author"
+	GitRefs             Key = "git.refs"
+	GitSHA              Key = "git.sha"
+	GitParents          Key = "git.parents"
+	GitChanges          Key = "git.changes"
+	GitChangeContent    Key = "git.change_content"
+	GitNoChanges        Key = "git.no_changes"
 
 	StopwatchStart   Key = "stopwatch.start"
 	StopwatchPause   Key = "stopwatch.pause"
@@ -252,6 +254,7 @@ const (
 	StatusGitCheckoutOk     Key = "status.git_checkout_ok"
 	StatusGitCheckoutFailed Key = "status.git_checkout_failed"
 	StatusGitCheckoutDirty  Key = "status.git_checkout_dirty"
+	StatusGitCheckoutPullOk Key = "status.git_checkout_pull_ok"
 	StatusGitTagSwitchOk    Key = "status.git_tag_switch_ok"
 	StatusGitTagSwitchErr   Key = "status.git_tag_switch_err"
 	StatusGitDeleteOk       Key = "status.git_delete_ok"
@@ -375,6 +378,8 @@ var catalogs = map[Lang]map[Key]string{
 		GitCancel:                      "キャンセル",
 		GitDelete:                      "削除",
 		GitDeleteConfirm:               "ブランチ「%s」を削除しますか？",
+		GitCheckoutLocalAsk:            "ローカルブランチ「%s」が既にあります。切り替えて pull しますか？",
+		GitCheckoutPull:                "切り替えて pull",
 		GitRename:                      "名前を変更",
 		GitRenamePrompt:                "新しいブランチ名",
 		GitBranches:                    "ブランチ",
@@ -511,6 +516,7 @@ var catalogs = map[Lang]map[Key]string{
 		StatusGitCheckoutOk:            "ブランチを切り替えました",
 		StatusGitCheckoutFailed:        "ブランチの切り替えに失敗しました: %v",
 		StatusGitCheckoutDirty:         "作業ツリーに変更があるため、ブランチを切り替えられません",
+		StatusGitCheckoutPullOk:        "切り替えて pull しました",
 		StatusGitTagSwitchOk:           "タグに切り替えました",
 		StatusGitTagSwitchErr:          "タグへの切り替えに失敗しました: %v",
 		StatusGitDeleteOk:              "ブランチを削除しました",
@@ -632,6 +638,8 @@ var catalogs = map[Lang]map[Key]string{
 		GitCancel:                      "Cancel",
 		GitDelete:                      "Delete",
 		GitDeleteConfirm:               "Delete branch \"%s\"?",
+		GitCheckoutLocalAsk:            "Local branch \"%s\" already exists. Check it out and pull?",
+		GitCheckoutPull:                "Check out and pull",
 		GitRename:                      "Rename",
 		GitRenamePrompt:                "New branch name",
 		GitBranches:                    "Branches",
@@ -768,6 +776,7 @@ var catalogs = map[Lang]map[Key]string{
 		StatusGitCheckoutOk:            "Switched branch",
 		StatusGitCheckoutFailed:        "Could not switch branch: %v",
 		StatusGitCheckoutDirty:         "Cannot switch branch while the working tree has changes",
+		StatusGitCheckoutPullOk:        "Checked out and pulled",
 		StatusGitTagSwitchOk:           "Switched to the tag",
 		StatusGitTagSwitchErr:          "Could not switch to the tag: %v",
 		StatusGitDeleteOk:              "Deleted branch",
