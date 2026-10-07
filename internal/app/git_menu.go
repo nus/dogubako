@@ -97,17 +97,21 @@ type gitCommitMenu struct {
 
 	menu basicwidget.PopupMenu[string]
 
-	pos      image.Point
-	hash     string
-	label    string
-	onCreate func(hash string)
+	pos         image.Point
+	hash        string
+	branchLabel string
+	tagLabel    string
+	onBranch    func(hash string)
+	onTag       func(hash string)
 }
 
-func (m *gitCommitMenu) Open(hash string, at image.Point, label string, onCreate func(hash string)) {
+func (m *gitCommitMenu) Open(hash string, at image.Point, branchLabel, tagLabel string, onBranch, onTag func(hash string)) {
 	m.hash = hash
 	m.pos = at
-	m.label = label
-	m.onCreate = onCreate
+	m.branchLabel = branchLabel
+	m.tagLabel = tagLabel
+	m.onBranch = onBranch
+	m.onTag = onTag
 	m.menu.SetOpen(true)
 }
 
@@ -117,14 +121,24 @@ func (m *gitCommitMenu) IsOpen() bool {
 
 func (m *gitCommitMenu) Build(context *guigui.Context, adder *guigui.ChildAdder) error {
 	m.menu.SetItems([]basicwidget.PopupMenuItem[string]{
-		{Text: m.label, Value: "tag"},
+		{Text: m.branchLabel, Value: "branch"},
+		{Text: m.tagLabel, Value: "tag"},
 	})
 	m.menu.OnItemSelected(func(context *guigui.Context, index int) {
 		item, ok := m.menu.ItemByIndex(index)
-		if !ok || item.Value != "tag" || m.onCreate == nil || m.hash == "" {
+		if !ok || m.hash == "" {
 			return
 		}
-		m.onCreate(m.hash)
+		switch item.Value {
+		case "branch":
+			if m.onBranch != nil {
+				m.onBranch(m.hash)
+			}
+		case "tag":
+			if m.onTag != nil {
+				m.onTag(m.hash)
+			}
+		}
 	})
 	if m.menu.IsOpen() {
 		adder.AddWidget(&m.menu)

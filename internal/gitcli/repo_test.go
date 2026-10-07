@@ -574,6 +574,59 @@ func TestStateMatchesSnapshotAndSeesBranch(t *testing.T) {
 	}
 }
 
+func TestCreateBranch(t *testing.T) {
+	dir := initRepo(t)
+	writeCommit(t, dir, "a.txt", "base")
+	base := strings.TrimSpace(gitAt(t, dir, "rev-parse", "HEAD"))
+	writeCommit(t, dir, "b.txt", "next")
+
+	ctx, cancel := context.WithTimeout(context.Background(), 20*time.Second)
+	defer cancel()
+	repo, err := Open(ctx, dir)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if err := repo.CreateBranch(ctx, "topic", base); err != nil {
+		t.Fatal(err)
+	}
+	snap, err := repo.Snapshot(ctx, SnapshotOpts{})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if snap.Branch != "main" || snap.HEAD == base {
+		t.Fatalf("branch=%s head=%s base=%s", snap.Branch, snap.HEAD, base)
+	}
+	var found bool
+	for _, ref := range snap.Locals {
+		if ref.Name != "topic" {
+			continue
+		}
+		found = true
+		if ref.Hash != base || ref.Current {
+			t.Fatalf("topic = %#v", ref)
+		}
+	}
+	if !found {
+		t.Fatal("topic missing")
+	}
+	if err := repo.CreateBranch(ctx, "topic", base); err == nil {
+		t.Fatal("created a duplicate branch")
+	}
+	if err := repo.CreateBranch(ctx, "bad name", base); err == nil {
+		t.Fatal("accepted an invalid name")
+	}
+	if err := repo.CreateBranch(ctx, "other", "deadbeef"); err == nil {
+		t.Fatal("accepted an unknown revision")
+	}
+	again, err := repo.Snapshot(ctx, SnapshotOpts{})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if again.Branch != "main" {
+		t.Fatalf("branch after rejected create = %s", again.Branch)
+	}
+}
+
 func TestRenameBranch(t *testing.T) {
 	dir := initRepo(t)
 	writeCommit(t, dir, "a.txt", "base")
