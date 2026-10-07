@@ -4,6 +4,8 @@ import (
 	"context"
 	"errors"
 	"fmt"
+	"os"
+	"path/filepath"
 	"sort"
 	"strings"
 	"time"
@@ -38,6 +40,19 @@ type gitDetailResult struct {
 	err    error
 }
 
+type gitWorkResult struct {
+	key  string
+	diff string
+	err  error
+}
+
+type gitWorkSlot struct {
+	key     string
+	diff    string
+	err     error
+	pending <-chan gitWorkResult
+}
+
 // GitModel holds one repository per tab. The embedded session is the active tab.
 type GitModel struct {
 	*gitSession
@@ -69,6 +84,8 @@ type gitSession struct {
 	pendingDetail <-chan gitDetailResult
 	pendingStatus <-chan gitStatusResult
 	lastPoll      time.Time
+
+	workSlots [2]gitWorkSlot
 
 	// reveal is a commit hash the graph should scroll into view. Empty means none.
 	reveal string
@@ -220,6 +237,7 @@ func (m *gitSession) Drain() {
 	m.drainLoad()
 	m.drainOp()
 	m.drainDetail()
+	m.drainWork()
 	m.drainStatus()
 }
 
@@ -535,6 +553,101 @@ func (m *gitSession) DoUnstage(paths []string) {
 	m.startOp(i18n.StatusGitUnstageOk, i18n.StatusGitUnstageFailed, func(ctx context.Context, repo *gitcli.Repo) error {
 		return repo.Unstage(ctx, paths)
 	})
+}
+
+// DoApplyPatch stages or unstages the lines described by patch.
+func (m *gitSession) DoApplyPatch(patch string, reverse bool) {
+	if !m.HasRepo() || m.Busy() || strings.TrimSpace(patch) == "" {
+		return
+	}
+	okKey, errKey := i18n.StatusGitStageOk, i18n.StatusGitStageFailed
+	if reverse {
+		okKey, errKey = i18n.StatusGitUnstageOk, i18n.StatusGitUnstageFailed
+	}
+	m.startOp(okKey, errKey, func(ctx context.Context, repo *gitcli.Repo) error {
+		return repo.ApplyIndex(ctx, patch, reverse)
+	})
+}
+
+// WorkDiff returns the patch for path. ready is false while the diff is loading.
+// Staged and unstaged diffs are cached separately.
+func (m *gitSession) WorkDiff(path string, staged bool) (string, bool, error) {
+	path = strings.TrimSpace(path)
+	if path == "" || m.repo == nil {
+		return "", true, nil
+	}
+	slot := &m.workSlots[0]
+	if staged {
+		slot = &m.workSlots[1]
+	}
+	key := m.workDiffKey(path, staged)
+	if slot.key == key {
+		return slot.diff, true, slot.err
+	}
+	if slot.pending == nil {
+		m.startWorkDiff(slot, path, staged, key)
+	}
+	return "", false, nil
+}
+
+func (m *gitSession) workDiffKey(path string, staged bool) string {
+	side := "0"
+	if staged {
+		side = "1"
+	}
+	var b strings.Builder
+	b.WriteString(path)
+	b.WriteByte(0)
+	b.WriteString(side)
+	b.WriteByte(0)
+	for _, e := range m.snap.Status.Entries {
+		b.WriteString(e.Code)
+		b.WriteByte(' ')
+		b.WriteString(e.Path)
+		b.WriteByte('\n')
+	}
+	if info, err := os.Stat(filepath.Join(m.repo.Dir, filepath.FromSlash(path))); err == nil {
+		fmt.Fprintf(&b, "%d %d", info.ModTime().UnixNano(), info.Size())
+	}
+	return b.String()
+}
+
+func (m *gitSession) startWorkDiff(slot *gitWorkSlot, path string, staged bool, key string) {
+	if m.repo == nil {
+		return
+	}
+	ch := make(chan gitWorkResult, 1)
+	slot.pending = ch
+	repo := m.repo
+	go func() {
+		ctx, cancel := context.WithTimeout(context.Background(), gitLoadTimeout)
+		defer cancel()
+		diff, err := repo.DiffWork(ctx, path, staged)
+		ch <- gitWorkResult{key: key, diff: diff, err: err}
+	}()
+}
+
+func (m *gitSession) drainWork() {
+	rebuilt := false
+	for i := range m.workSlots {
+		slot := &m.workSlots[i]
+		if slot.pending == nil {
+			continue
+		}
+		select {
+		case res := <-slot.pending:
+			slot.pending = nil
+			slot.key = res.key
+			slot.diff = res.diff
+			slot.err = res.err
+			rebuilt = true
+		default:
+		}
+	}
+	if rebuilt {
+		m.generation++
+		guigui.RequestRebuild()
+	}
 }
 
 func (m *gitSession) DoCommit() {

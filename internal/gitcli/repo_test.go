@@ -738,6 +738,104 @@ func TestStageUnstage(t *testing.T) {
 	}
 }
 
+func TestStageSelectedLines(t *testing.T) {
+	dir := initRepo(t)
+	if err := os.WriteFile(filepath.Join(dir, "a.txt"), []byte("alpha\nbeta\ngamma\nomega\n"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	gitAt(t, dir, "add", "a.txt")
+	gitAt(t, dir, "commit", "-m", "base")
+	if err := os.WriteFile(filepath.Join(dir, "a.txt"), []byte("alpha\nBETA\ngamma\ndelta\nomega\n"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(filepath.Join(dir, "c.txt"), []byte("one\ntwo\n"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+
+	ctx, cancel := context.WithTimeout(context.Background(), 15*time.Second)
+	defer cancel()
+	repo, err := Open(ctx, dir)
+	if err != nil {
+		t.Fatal(err)
+	}
+	unstaged, err := repo.DiffWork(ctx, "a.txt", false)
+	if err != nil {
+		t.Fatal(err)
+	}
+	start := strings.Index(unstaged, "+delta\n")
+	if start < 0 {
+		t.Fatalf("diff missing delta:\n%s", unstaged)
+	}
+	patch, ok := PatchForLines(unstaged, start, start+len("+delta\n"), false)
+	if !ok {
+		t.Fatal("no patch")
+	}
+	if err := repo.ApplyIndex(ctx, patch, false); err != nil {
+		t.Fatalf("apply %v\n%s", err, patch)
+	}
+	staged, err := repo.DiffWork(ctx, "a.txt", true)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if !strings.Contains(staged, "+delta\n") {
+		t.Fatalf("staged diff:\n%s", staged)
+	}
+	if strings.Contains(staged, "+BETA\n") || strings.Contains(staged, "-beta\n") {
+		t.Fatalf("replacement was staged:\n%s", staged)
+	}
+	body, err := os.ReadFile(filepath.Join(dir, "a.txt"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	if string(body) != "alpha\nBETA\ngamma\ndelta\nomega\n" {
+		t.Fatalf("worktree changed: %q", body)
+	}
+
+	newDiff, err := repo.DiffWork(ctx, "c.txt", false)
+	if err != nil {
+		t.Fatal(err)
+	}
+	start = strings.Index(newDiff, "+one\n")
+	if start < 0 {
+		t.Fatalf("new file diff:\n%s", newDiff)
+	}
+	patch, ok = PatchForLines(newDiff, start, start+len("+one\n"), false)
+	if !ok {
+		t.Fatal("no new-file patch")
+	}
+	if err := repo.ApplyIndex(ctx, patch, false); err != nil {
+		t.Fatalf("apply new %v\n%s", err, patch)
+	}
+	st, err := repo.Status(ctx)
+	if err != nil {
+		t.Fatal(err)
+	}
+	assertEntry(t, st, "c.txt", true, true)
+
+	cached, err := repo.DiffWork(ctx, "a.txt", true)
+	if err != nil {
+		t.Fatal(err)
+	}
+	start = strings.Index(cached, "+delta\n")
+	if start < 0 {
+		t.Fatalf("cached diff:\n%s", cached)
+	}
+	patch, ok = PatchForLines(cached, start, start+len("+delta\n"), true)
+	if !ok {
+		t.Fatal("no unstage patch")
+	}
+	if err := repo.ApplyIndex(ctx, patch, true); err != nil {
+		t.Fatalf("unstage %v\n%s", err, patch)
+	}
+	left, err := repo.DiffWork(ctx, "a.txt", true)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if strings.TrimSpace(left) != "" {
+		t.Fatalf("delta still staged:\n%s", left)
+	}
+}
+
 func assertEntry(t *testing.T, st Status, path string, staged, unstaged bool) {
 	t.Helper()
 	for _, e := range st.Entries {

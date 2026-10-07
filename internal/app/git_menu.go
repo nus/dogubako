@@ -144,6 +144,61 @@ func (m *gitCommitMenu) contentSize(context *guigui.Context) image.Point {
 	return m.menu.Measure(context, guigui.Constraints{})
 }
 
+// gitSelectionMenu stages or unstages the lines selected in the diff.
+type gitSelectionMenu struct {
+	guigui.DefaultWidget
+
+	menu basicwidget.PopupMenu[string]
+
+	pos     image.Point
+	patch   string
+	unstage bool
+	label   string
+	onAct   func(patch string, unstage bool)
+}
+
+func (m *gitSelectionMenu) Open(patch string, unstage bool, at image.Point, label string, onAct func(string, bool)) {
+	m.patch = patch
+	m.unstage = unstage
+	m.pos = at
+	m.label = label
+	m.onAct = onAct
+	m.menu.SetOpen(true)
+}
+
+func (m *gitSelectionMenu) IsOpen() bool {
+	return m.menu.IsOpen()
+}
+
+func (m *gitSelectionMenu) Build(context *guigui.Context, adder *guigui.ChildAdder) error {
+	m.menu.SetItems([]basicwidget.PopupMenuItem[string]{
+		{Text: m.label, Value: "act"},
+	})
+	m.menu.OnItemSelected(func(context *guigui.Context, index int) {
+		item, ok := m.menu.ItemByIndex(index)
+		if !ok || item.Value != "act" || m.onAct == nil || m.patch == "" {
+			return
+		}
+		m.onAct(m.patch, m.unstage)
+	})
+	if m.menu.IsOpen() {
+		adder.AddWidget(&m.menu)
+	}
+	return nil
+}
+
+func (m *gitSelectionMenu) Layout(context *guigui.Context, widgetBounds *guigui.WidgetBounds, layouter *guigui.ChildLayouter) {
+	layouter.LayoutWidget(&m.menu, widgetBounds.Bounds())
+}
+
+func (m *gitSelectionMenu) Measure(context *guigui.Context, constraints guigui.Constraints) image.Point {
+	return image.Point{}
+}
+
+func (m *gitSelectionMenu) contentSize(context *guigui.Context) image.Point {
+	return m.menu.Measure(context, guigui.Constraints{})
+}
+
 // gitTagMenu is the context menu opened by right-clicking a tag.
 type gitTagMenu struct {
 	guigui.DefaultWidget
