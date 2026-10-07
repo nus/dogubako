@@ -129,7 +129,6 @@ const (
 	GitUnstaged         Key = "git.unstaged"
 	GitEmpty            Key = "git.empty"
 	GitNoCommits        Key = "git.no_commits"
-	GitNoRepo           Key = "git.no_repo"
 	GitHint             Key = "git.hint"
 	GitDetached         Key = "git.detached"
 	GitWorkingTree      Key = "git.working_tree"
@@ -411,7 +410,6 @@ var catalogs = map[Lang]map[Key]string{
 		GitUnstaged:                    "未ステージ",
 		GitEmpty:                       "Git リポジトリのフォルダを開いてください。",
 		GitNoCommits:                   "表示するコミットがありません。",
-		GitNoRepo:                      "リポジトリが開かれていません",
 		GitHint:                        "ブランチをクリックすると先端のコミットを表示。グラフのブランチをダブルクリックすると切り替え。タグをダブルクリックすると切り替え。右クリックで名前の変更と削除。コミットをクリックして詳細。",
 		GitDetached:                    "detached HEAD",
 		GitWorkingTree:                 "作業ツリー",
@@ -678,7 +676,6 @@ var catalogs = map[Lang]map[Key]string{
 		GitUnstaged:                    "Unstaged",
 		GitEmpty:                       "Open a folder that is a Git repository.",
 		GitNoCommits:                   "No commits to show.",
-		GitNoRepo:                      "No repository open",
 		GitHint:                        "Click a branch to show its tip commit. Double-click a branch on the graph to switch. Double-click a tag to switch. Right-click a branch to rename or delete. Click a commit for details.",
 		GitDetached:                    "detached HEAD",
 		GitWorkingTree:                 "Working tree",
