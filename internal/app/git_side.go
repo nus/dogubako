@@ -190,7 +190,6 @@ func (b *gitSideBody) Build(context *guigui.Context, adder *guigui.ChildAdder) e
 		lang = appModel.Lang()
 		enabled = model.HasRepo() && !model.Busy()
 	}
-	adder.AddWidget(&t.repoTitle)
 	adder.AddWidget(&t.pathLabel)
 	adder.AddWidget(&t.workspaceLabel)
 	adder.AddWidget(&t.workspaceList)
@@ -322,7 +321,6 @@ func (b *gitSideBody) stack(context *guigui.Context, width, u int) {
 	space := func() {
 		b.items = append(b.items, guigui.LinearLayoutItem{Size: guigui.FixedSize(u / 4)})
 	}
-	add(&t.repoTitle, u)
 	add(&t.pathLabel, u*3/4)
 	add(&t.workspaceLabel, u*3/4)
 	add(&t.workspaceList, gitListHeight(context, &t.workspaceList, width, 2*u))

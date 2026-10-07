@@ -2,7 +2,6 @@ package app
 
 import (
 	"image"
-	"path/filepath"
 	"slices"
 	"strings"
 
@@ -45,7 +44,6 @@ type GitTool struct {
 	workRow        gitWorkspaceRow
 	histRow        gitWorkspaceRow
 
-	repoTitle    basicwidget.Text
 	branchItems  []basicwidget.ListItem[string]
 	branchFold   map[string]bool
 	branchClosed bool
@@ -188,15 +186,6 @@ func (t *GitTool) Build(context *guigui.Context, adder *guigui.ChildAdder) error
 	}
 
 	path := model.Path()
-	repoName := i18n.T(lang, i18n.GitNoRepo)
-	if path != "" {
-		repoName = filepath.Base(path)
-	} else {
-		path = repoName
-	}
-	setBoldText(&t.repoTitle, true)
-	t.repoTitle.SetValue(repoName)
-	t.repoTitle.SetVerticalAlign(basicwidget.VerticalAlignMiddle)
 	t.pathLabel.SetValue(path)
 	t.pathLabel.SetVerticalAlign(basicwidget.VerticalAlignMiddle)
 	t.pathLabel.SetWrapMode(basicwidget.WrapModeNone)
