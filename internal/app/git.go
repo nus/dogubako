@@ -14,9 +14,15 @@ import (
 
 	"github.com/nus/dogubako/internal/gitcli"
 	"github.com/nus/dogubako/internal/i18n"
+	"github.com/nus/dogubako/internal/userdir"
 )
 
 var eventGitOpen = guigui.GenerateEventKey()
+
+const (
+	gitWorkspaceWorking = "working"
+	gitWorkspaceHistory = "history"
+)
 
 // GitTool is a local Git client: graph, branches, and history operations.
 type GitTool struct {
@@ -24,32 +30,34 @@ type GitTool struct {
 
 	tabBar gitTabBar
 
-	openBtn     basicwidget.Button
-	reloadBtn   basicwidget.Button
-	pathLabel   basicwidget.Text
-	modeBtn     basicwidget.Button
-	fetchBtn    basicwidget.Button
-	pullBtn     basicwidget.Button
-	pushBtn     basicwidget.Button
-	branchTitle basicwidget.Text
-	commitBtn   basicwidget.Button
-	amendBtn    basicwidget.Button
-	commitView  bool
+	openBtn    basicwidget.Button
+	pathLabel  basicwidget.Text
+	fetchBtn   basicwidget.Button
+	pullBtn    basicwidget.Button
+	pushBtn    basicwidget.Button
+	commitBtn  basicwidget.Button
+	amendBtn   basicwidget.Button
+	commitView bool
+
+	workspaceLabel basicwidget.Text
+	workspaceList  basicwidget.List[string]
+	workspaceItems []basicwidget.ListItem[string]
+	workRow        gitWorkspaceRow
+	histRow        gitWorkspaceRow
 
 	repoTitle    basicwidget.Text
-	branchLabel  basicwidget.Text
-	tagLabel     basicwidget.Text
-	remotesLabel basicwidget.Text
-	remoteRows   guigui.WidgetSlice[*gitRemoteRow]
-	branchList   basicwidget.List[string]
 	branchItems  []basicwidget.ListItem[string]
-	tagList      basicwidget.List[string]
+	branchFold   map[string]bool
+	branchClosed bool
 	tagItems     []basicwidget.ListItem[string]
 	showTags     bool
+	tagClosed    bool
 	tagClicks    gitClickCount
 	tagClick     string
-	remoteList   basicwidget.List[string]
 	remoteItems  []basicwidget.ListItem[string]
+	remoteFold   map[string]bool
+	remoteClosed bool
+	navSel       string
 
 	commitList  basicwidget.List[string]
 	commitRows  guigui.WidgetSlice[*gitCommitRow]
@@ -72,10 +80,9 @@ type GitTool struct {
 
 	stageBtn    basicwidget.Button
 	unstageBtn  basicwidget.Button
-	changeList  basicwidget.List[string]
-	changeItems []basicwidget.ListItem[string]
-	changeSel   []string
 	showChanges bool
+	diffStaged  bool
+	workPanes   gitWorkPanes
 	msgInput    guigui.WidgetWithSize[*basicwidget.TextInput]
 	status      basicwidget.Text
 	hint        basicwidget.Text
@@ -83,20 +90,23 @@ type GitTool struct {
 	branchMenu gitBranchMenu
 	commitMenu gitCommitMenu
 	tagMenu    gitTagMenu
+	selMenu    gitSelectionMenu
 	confirm    gitConfirm
 	rename     gitRename
 
-	toolbarItems []guigui.LinearLayoutItem
-	leftItems    []guigui.LinearLayoutItem
-	rightItems   []guigui.LinearLayoutItem
-	bodyItems    []guigui.LinearLayoutItem
-	msgItems     []guigui.LinearLayoutItem
-	layoutItems  []guigui.LinearLayoutItem
-	toolbar      guigui.LinearLayout
-	leftCol      guigui.LinearLayout
-	rightCol     guigui.LinearLayout
-	bodyRow      guigui.LinearLayout
-	msgRow       guigui.LinearLayout
+	sidePane  gitSidePane
+	sideSplit gitSideSplit
+	// sideUnits is the left column width in unit sizes. Zero uses the default.
+	sideUnits    float64
+	sideDragging bool
+	bodyBounds   image.Rectangle
+
+	rightItems []guigui.LinearLayoutItem
+	msgItems   []guigui.LinearLayoutItem
+	netItems   []guigui.LinearLayoutItem
+	rightCol   guigui.LinearLayout
+	msgRow     guigui.LinearLayout
+	netRow     guigui.LinearLayout
 }
 
 func (t *GitTool) OnOpen(f func(context *guigui.Context)) {
@@ -129,6 +139,10 @@ func (t *GitTool) Build(context *guigui.Context, adder *guigui.ChildAdder) error
 	has := model.HasRepo()
 	onMenu := func(ref gitcli.Ref) { t.openBranchMenu(lang, model, ref) }
 
+	if t.sideDragging && !ebiten.IsMouseButtonPressed(ebiten.MouseButtonLeft) {
+		t.sideDragging = false
+		t.setSideDragPassthrough(context, false)
+	}
 	t.tabBar.Sync(lang, model)
 	adder.AddWidget(&t.tabBar)
 	t.emptyHome = model.Path() == ""
@@ -136,15 +150,17 @@ func (t *GitTool) Build(context *guigui.Context, adder *guigui.ChildAdder) error
 		return t.buildEmptyHome(context, adder, lang, model)
 	}
 
-	adder.AddWidget(&t.openBtn)
-	adder.AddWidget(&t.reloadBtn)
-	adder.AddWidget(&t.branchTitle)
-	adder.AddWidget(&t.modeBtn)
-	adder.AddWidget(&t.fetchBtn)
-	adder.AddWidget(&t.pullBtn)
-	adder.AddWidget(&t.pushBtn)
+	if !t.commitView {
+		adder.AddWidget(&t.fetchBtn)
+		adder.AddWidget(&t.pullBtn)
+		adder.AddWidget(&t.pushBtn)
+	}
 	adder.AddWidget(&t.status)
 	adder.AddWidget(&t.hint)
+	t.sidePane.setOwner(t)
+	adder.AddWidget(&t.sidePane)
+	t.sideSplit.tool = t
+	adder.AddWidget(&t.sideSplit)
 	t.setWorkTree(lang, model)
 	t.showChanges = model.Snapshot().Status.Dirty()
 	if t.commitView {
@@ -155,41 +171,21 @@ func (t *GitTool) Build(context *guigui.Context, adder *guigui.ChildAdder) error
 			t.workTree.SetSelectable(false)
 		}
 		if t.showChanges {
-			adder.AddWidget(&t.changeList)
+			adder.AddWidget(&t.workPanes)
 		} else {
 			adder.AddWidget(&t.workTree)
 		}
+		adder.AddWidget(&t.msgInput)
 		adder.AddWidget(&t.stageBtn)
 		adder.AddWidget(&t.unstageBtn)
-		adder.AddWidget(&t.msgInput)
 		adder.AddWidget(&t.commitBtn)
 		adder.AddWidget(&t.amendBtn)
 	} else {
-		adder.AddWidget(&t.repoTitle)
-		adder.AddWidget(&t.pathLabel)
-		adder.AddWidget(&t.branchLabel)
-		adder.AddWidget(&t.tagLabel)
-		adder.AddWidget(&t.remotesLabel)
-		adder.AddWidget(&t.branchList)
-		adder.AddWidget(&t.tagList)
-		adder.AddWidget(&t.remoteList)
 		adder.AddWidget(&t.detail)
 		if t.showWorkTree {
 			adder.AddWidget(&t.workTree)
 		}
 	}
-
-	t.openBtn.SetText(i18n.T(lang, i18n.GitOpen))
-	t.openBtn.OnDown(func(context *guigui.Context) {
-		guigui.DispatchEvent(t, eventGitOpen)
-	})
-	context.SetEnabled(&t.openBtn, !busy)
-
-	t.reloadBtn.SetText(i18n.T(lang, i18n.GitReload))
-	t.reloadBtn.OnDown(func(context *guigui.Context) {
-		model.Reload()
-	})
-	context.SetEnabled(&t.reloadBtn, !busy && has)
 
 	path := model.Path()
 	repoName := i18n.T(lang, i18n.GitNoRepo)
@@ -204,39 +200,52 @@ func (t *GitTool) Build(context *guigui.Context, adder *guigui.ChildAdder) error
 	t.pathLabel.SetValue(path)
 	t.pathLabel.SetVerticalAlign(basicwidget.VerticalAlignMiddle)
 	t.pathLabel.SetWrapMode(basicwidget.WrapModeNone)
+	t.pathLabel.SetSelectable(false)
+	repoPath := model.Path()
+	if repoPath == "" {
+		t.pathLabel.SetHotspotRanges(nil)
+	} else {
+		t.pathLabel.SetHotspotRanges([]basicwidget.TextRange{{EndInBytes: len(path)}})
+		t.pathLabel.OnHotspotUp(func(*guigui.Context, basicwidget.TextRange) {
+			if err := userdir.OpenInFileManager(repoPath); err != nil {
+				model.SetStatus(i18n.StatusFolderOpenFailed, err)
+				guigui.RequestRebuild()
+			}
+		})
+	}
+
+	setBoldText(&t.workspaceLabel, true)
+	t.workspaceLabel.SetValue(i18n.T(lang, i18n.GitWorkspace))
+	t.workRow.Set(i18n.T(lang, i18n.GitWorkingCopy), gitWorkspaceIconChanges, t.commitView)
+	t.histRow.Set(i18n.T(lang, i18n.GitHistory), gitWorkspaceIconHistory, !t.commitView)
+	t.workspaceItems = slices.Delete(t.workspaceItems, 0, len(t.workspaceItems))
+	t.workspaceItems = append(t.workspaceItems,
+		basicwidget.ListItem[string]{Content: &t.workRow, Value: gitWorkspaceWorking},
+		basicwidget.ListItem[string]{Content: &t.histRow, Value: gitWorkspaceHistory},
+	)
+	t.workspaceList.SetStyle(basicwidget.ListStyleSidebar)
+	t.workspaceList.SetItemHeight(basicwidget.UnitSize(context))
+	t.workspaceList.SetItems(t.workspaceItems)
+	if t.commitView {
+		t.workspaceList.SelectItemByValue(gitWorkspaceWorking)
+	} else {
+		t.workspaceList.SelectItemByValue(gitWorkspaceHistory)
+	}
+	t.workspaceList.OnItemSelected(func(context *guigui.Context, index int) {
+		item, ok := t.workspaceList.ItemByIndex(index)
+		if !ok {
+			return
+		}
+		commit := item.Value == gitWorkspaceWorking
+		if commit == t.commitView {
+			return
+		}
+		t.commitView = commit
+		guigui.RequestRebuild()
+	})
 
 	snap := model.Snapshot()
-	branchName := i18n.T(lang, i18n.GitNoRepo)
-	if has {
-		if snap.Detached || snap.Branch == "" {
-			branchName = i18n.T(lang, i18n.GitDetached)
-		} else {
-			branchName = snap.Branch
-			st := snap.Status
-			if st.Ahead > 0 || st.Behind > 0 {
-				branchName += "  " + i18n.T(lang, i18n.GitAheadBehind, st.Ahead, st.Behind)
-			}
-		}
-	}
-	setBoldText(&t.branchTitle, true)
-	t.branchTitle.SetValue(branchName)
-	t.branchTitle.SetHorizontalAlign(basicwidget.HorizontalAlignCenter)
-	t.branchTitle.SetVerticalAlign(basicwidget.VerticalAlignMiddle)
-
 	enableNet := model.CanPushPull()
-	if t.commitView {
-		t.modeBtn.SetText(i18n.T(lang, i18n.GitGraph))
-		t.modeBtn.OnDown(func(context *guigui.Context) {
-			t.commitView = false
-			guigui.RequestRebuild()
-		})
-	} else {
-		t.modeBtn.SetText(i18n.T(lang, i18n.GitCommit))
-		t.modeBtn.OnDown(func(context *guigui.Context) {
-			t.commitView = true
-			guigui.RequestRebuild()
-		})
-	}
 	t.fetchBtn.SetText(i18n.T(lang, i18n.GitFetch))
 	t.fetchBtn.OnDown(func(context *guigui.Context) { model.DoFetch() })
 	context.SetEnabled(&t.fetchBtn, enableNet)
@@ -255,50 +264,22 @@ func (t *GitTool) Build(context *guigui.Context, adder *guigui.ChildAdder) error
 	t.amendBtn.OnDown(func(context *guigui.Context) { model.DoAmend() })
 	context.SetEnabled(&t.amendBtn, model.CanAmend())
 
-	setBoldText(&t.branchLabel, true)
-	t.branchLabel.SetValue(i18n.T(lang, i18n.GitBranches))
-	setBoldText(&t.remotesLabel, true)
-	t.remotesLabel.SetValue(i18n.T(lang, i18n.GitRemotes))
-
-	t.remoteRows.SetLen(len(snap.Remotes))
-	for i, rm := range snap.Remotes {
-		row := t.remoteRows.At(i)
-		name := rm.Name
-		row.Set(name, model.RemoteVisible(name), func(visible bool) {
-			model.SetRemoteVisible(name, visible)
-		})
-		if !t.commitView {
-			adder.AddWidget(row)
-		}
-	}
-
 	var mono basicwidget.TextStyle
 	useGitMono(&mono)
 	monoItem := basicwidget.ItemTextStyle{Style: mono}
 
-	t.branchItems = slices.Delete(t.branchItems, 0, len(t.branchItems))
+	branchEntries := make([]gitTreeEntry, 0, len(snap.Locals))
 	for _, ref := range snap.Locals {
-		text := ref.Name
-		if ref.Current {
-			text = "✓ " + text
-		}
-		t.branchItems = append(t.branchItems, basicwidget.ListItem[string]{
-			Text:      text,
-			TextStyle: monoItem,
-			Value:     "local:" + ref.Name,
+		branchEntries = append(branchEntries, gitTreeEntry{
+			Name:    ref.Name,
+			Value:   "local:" + ref.Name,
+			Current: ref.Current,
 		})
 	}
-	t.branchList.SetStyle(basicwidget.ListStyleNormal)
-	t.branchList.SetHighlightVisibleWhenUnfocused(true)
-	t.branchList.SetItems(t.branchItems)
-	t.branchList.OnItemSelected(func(context *guigui.Context, index int) {
-		item, ok := t.branchList.ItemByIndex(index)
-		if !ok {
-			return
-		}
-		t.selectRef(model, item.Value)
-	})
-	context.SetEnabled(&t.branchList, has && !busy)
+	t.branchItems = gitTreeItems(branchEntries, t.branchFold)
+	for i := range t.branchItems {
+		t.branchItems[i].TextStyle = monoItem
+	}
 
 	t.tagItems = slices.Delete(t.tagItems, 0, len(t.tagItems))
 	for _, ref := range snap.Tags {
@@ -309,41 +290,18 @@ func (t *GitTool) Build(context *guigui.Context, adder *guigui.ChildAdder) error
 		})
 	}
 	t.showTags = len(t.tagItems) > 0
-	setBoldText(&t.tagLabel, true)
-	t.tagLabel.SetValue(i18n.T(lang, i18n.GitTags))
-	t.tagList.SetStyle(basicwidget.ListStyleNormal)
-	t.tagList.SetHighlightVisibleWhenUnfocused(true)
-	t.tagList.SetItems(t.tagItems)
-	t.tagList.OnItemSelected(func(context *guigui.Context, index int) {
-		item, ok := t.tagList.ItemByIndex(index)
-		if !ok {
-			return
-		}
-		t.selectRef(model, item.Value)
-	})
-	context.SetEnabled(&t.tagList, has && !busy)
 
-	t.remoteItems = slices.Delete(t.remoteItems, 0, len(t.remoteItems))
+	remoteEntries := make([]gitTreeEntry, 0, len(snap.RemoteBranches))
 	for _, ref := range snap.RemoteBranches {
-		if !model.RemoteVisible(ref.Remote) {
-			continue
-		}
-		t.remoteItems = append(t.remoteItems, basicwidget.ListItem[string]{
-			Text:  "  " + ref.LocalName(),
+		remoteEntries = append(remoteEntries, gitTreeEntry{
+			Name:  ref.Remote + "/" + ref.LocalName(),
 			Value: "remote:" + ref.Name,
 		})
 	}
-	t.remoteList.SetStyle(basicwidget.ListStyleNormal)
-	t.remoteList.SetHighlightVisibleWhenUnfocused(true)
-	t.remoteList.SetItems(t.remoteItems)
-	t.remoteList.OnItemSelected(func(context *guigui.Context, index int) {
-		item, ok := t.remoteList.ItemByIndex(index)
-		if !ok {
-			return
-		}
-		t.selectRef(model, item.Value)
-	})
-	context.SetEnabled(&t.remoteList, has && !busy)
+	t.remoteItems = gitTreeItems(remoteEntries, t.remoteFold)
+	for i := range t.remoteItems {
+		t.remoteItems[i].TextStyle = monoItem
+	}
 
 	rows := snap.Graph
 	t.showEmpty = !has || len(rows) == 0
@@ -419,79 +377,61 @@ func (t *GitTool) Build(context *guigui.Context, adder *guigui.ChildAdder) error
 	adder.AddWidget(&t.branchMenu)
 	adder.AddWidget(&t.commitMenu)
 	adder.AddWidget(&t.tagMenu)
+	adder.AddWidget(&t.selMenu)
 	adder.AddWidget(&t.confirm)
 	adder.AddWidget(&t.rename)
 	return nil
 }
 
 func (t *GitTool) setChangeList(context *guigui.Context, lang i18n.Lang, model *GitModel, entries []gitcli.StatusEntry, enabled bool) {
-	var mono basicwidget.TextStyle
-	useGitMono(&mono)
-	monoItem := basicwidget.ItemTextStyle{Style: mono}
-
-	have := make(map[string]gitcli.StatusEntry, len(entries))
-	t.changeItems = slices.Delete(t.changeItems, 0, len(t.changeItems))
+	var unstagedEntries, stagedEntries []gitcli.StatusEntry
 	for _, e := range entries {
-		have[e.Path] = e
-		t.changeItems = append(t.changeItems, basicwidget.ListItem[string]{
-			Text:      e.String(),
-			TextStyle: monoItem,
-			Value:     e.Path,
-		})
-	}
-	kept := make([]string, 0, len(t.changeSel))
-	for _, p := range t.changeSel {
-		if _, ok := have[p]; ok {
-			kept = append(kept, p)
-		}
-	}
-	t.changeSel = kept
-
-	t.changeList.SetStyle(basicwidget.ListStyleNormal)
-	t.changeList.SetHighlightVisibleWhenUnfocused(true)
-	t.changeList.SetMultiSelection(true)
-	t.changeList.SetItems(t.changeItems)
-	t.changeList.OnItemsSelected(func(context *guigui.Context, indices []int) {
-		paths := make([]string, 0, len(indices))
-		for _, i := range indices {
-			item, ok := t.changeList.ItemByIndex(i)
-			if ok && item.Value != "" {
-				paths = append(paths, item.Value)
-			}
-		}
-		if samePaths(t.changeSel, paths) {
-			return
-		}
-		t.changeSel = paths
-		guigui.RequestRebuild()
-	})
-	if len(t.changeSel) > 0 {
-		t.changeList.SelectItemsByValues(t.changeSel)
-	}
-	context.SetEnabled(&t.changeList, enabled)
-
-	var stagePaths, unstagePaths []string
-	selected := make(map[string]bool, len(t.changeSel))
-	for _, p := range t.changeSel {
-		selected[p] = true
-	}
-	for _, e := range entries {
-		if !selected[e.Path] {
-			continue
-		}
 		if e.Unstaged() {
-			stagePaths = append(stagePaths, e.Path)
+			unstagedEntries = append(unstagedEntries, e)
 		}
 		if e.Staged() {
-			unstagePaths = append(unstagePaths, e.Path)
+			stagedEntries = append(stagedEntries, e)
 		}
 	}
+	onCheck := func(paths []string, checked bool) {
+		if checked {
+			model.DoStage(paths)
+			return
+		}
+		model.DoUnstage(paths)
+	}
+	t.workPanes.unstaged.setFiles(context, unstagedEntries, false, enabled, !t.diffStaged || len(stagedEntries) == 0, func() { t.diffStaged = false }, onCheck)
+	t.workPanes.staged.setFiles(context, stagedEntries, true, enabled, t.diffStaged || len(unstagedEntries) == 0, func() { t.diffStaged = true }, onCheck)
+
+	stagePaths := append([]string(nil), t.workPanes.unstaged.sel...)
+	unstagePaths := append([]string(nil), t.workPanes.staged.sel...)
 	t.stageBtn.SetText(i18n.T(lang, i18n.GitStage))
-	t.stageBtn.OnDown(func(context *guigui.Context) { model.DoStage(stagePaths) })
+	t.stageBtn.OnDown(func(context *guigui.Context) {
+		if _, staged := t.activeWorkTarget(); !staged {
+			if patch, ok, selected := t.linePatch(false); selected {
+				if ok {
+					model.DoApplyPatch(patch, false)
+				}
+				return
+			}
+		}
+		model.DoStage(stagePaths)
+	})
 	context.SetEnabled(&t.stageBtn, enabled && len(stagePaths) > 0)
 	t.unstageBtn.SetText(i18n.T(lang, i18n.GitUnstage))
-	t.unstageBtn.OnDown(func(context *guigui.Context) { model.DoUnstage(unstagePaths) })
+	t.unstageBtn.OnDown(func(context *guigui.Context) {
+		if _, staged := t.activeWorkTarget(); staged {
+			if patch, ok, selected := t.linePatch(true); selected {
+				if ok {
+					model.DoApplyPatch(patch, true)
+				}
+				return
+			}
+		}
+		model.DoUnstage(unstagePaths)
+	})
 	context.SetEnabled(&t.unstageBtn, enabled && len(unstagePaths) > 0)
+	t.setWorkDiff(lang, model)
 }
 
 func samePaths(a, b []string) bool {
@@ -535,6 +475,22 @@ func (t *GitTool) setWorkTree(lang i18n.Lang, model *GitModel) {
 	t.showWorkTree = true
 }
 
+func (t *GitTool) setTreeFold(folded *map[string]bool, value string, expanded bool) {
+	path, ok := strings.CutPrefix(value, gitTreeFolderPrefix)
+	if !ok || path == "" {
+		return
+	}
+	if *folded == nil {
+		*folded = map[string]bool{}
+	}
+	if expanded {
+		delete(*folded, path)
+	} else {
+		(*folded)[path] = true
+	}
+	guigui.RequestRebuild()
+}
+
 func (t *GitTool) selectRef(model *GitModel, value string) {
 	kind, name, ok := strings.Cut(value, ":")
 	if !ok || name == "" {
@@ -544,7 +500,7 @@ func (t *GitTool) selectRef(model *GitModel, value string) {
 	if kind == "local" {
 		for _, ref := range snap.Locals {
 			if ref.Name == name {
-				model.RevealCommit(ref.Hash)
+				t.revealCommit(model, ref.Hash)
 				return
 			}
 		}
@@ -553,7 +509,7 @@ func (t *GitTool) selectRef(model *GitModel, value string) {
 	if kind == "tag" {
 		for _, ref := range snap.Tags {
 			if ref.Name == name {
-				model.RevealCommit(ref.Hash)
+				t.revealCommit(model, ref.Hash)
 				return
 			}
 		}
@@ -561,10 +517,16 @@ func (t *GitTool) selectRef(model *GitModel, value string) {
 	}
 	for _, ref := range snap.RemoteBranches {
 		if ref.Name == name {
-			model.RevealCommit(ref.Hash)
+			t.revealCommit(model, ref.Hash)
 			return
 		}
 	}
+}
+
+// revealCommit shows History and scrolls the graph to hash.
+func (t *GitTool) revealCommit(model *GitModel, hash string) {
+	t.commitView = false
+	model.RevealCommit(hash)
 }
 
 func (t *GitTool) Layout(context *guigui.Context, widgetBounds *guigui.WidgetBounds, layouter *guigui.ChildLayouter) {
@@ -580,55 +542,53 @@ func (t *GitTool) Layout(context *guigui.Context, widgetBounds *guigui.WidgetBou
 		return
 	}
 
-	t.toolbarItems = slices.Delete(t.toolbarItems, 0, len(t.toolbarItems))
-	t.toolbarItems = append(t.toolbarItems,
-		guigui.LinearLayoutItem{Widget: &t.modeBtn},
-		guigui.LinearLayoutItem{Widget: &t.fetchBtn},
-		guigui.LinearLayoutItem{Widget: &t.pullBtn},
-		guigui.LinearLayoutItem{Widget: &t.pushBtn},
-		guigui.LinearLayoutItem{Size: guigui.FlexibleSize(1)},
-		guigui.LinearLayoutItem{Widget: &t.branchTitle},
-		guigui.LinearLayoutItem{Size: guigui.FlexibleSize(1)},
-		guigui.LinearLayoutItem{Widget: &t.openBtn},
-		guigui.LinearLayoutItem{Widget: &t.reloadBtn},
-	)
-	t.toolbar = guigui.LinearLayout{Direction: guigui.LayoutDirectionHorizontal, Items: t.toolbarItems, Gap: u / 4}
-
 	if t.commitView {
-		t.layoutCommit(context, rest, layouter, u)
-		t.layoutOverlays(context, layouter)
-		return
+		t.layoutCommitColumn(u)
+	} else {
+		t.layoutHistoryColumn(u)
 	}
 
-	t.leftItems = slices.Delete(t.leftItems, 0, len(t.leftItems))
-	t.leftItems = append(t.leftItems,
-		guigui.LinearLayoutItem{Widget: &t.repoTitle, Size: guigui.FixedSize(u)},
-		guigui.LinearLayoutItem{Widget: &t.pathLabel, Size: guigui.FixedSize(u * 3 / 4)},
-		guigui.LinearLayoutItem{Widget: &t.branchLabel, Size: guigui.FixedSize(u * 3 / 4)},
-		guigui.LinearLayoutItem{Widget: &t.branchList, Size: guigui.FlexibleSize(3)},
-	)
-	if t.showTags {
-		t.leftItems = append(t.leftItems,
-			guigui.LinearLayoutItem{Widget: &t.tagLabel, Size: guigui.FixedSize(u * 3 / 4)},
-			guigui.LinearLayoutItem{Widget: &t.tagList, Size: guigui.FlexibleSize(1)},
-		)
+	inner := image.Rect(rest.Min.X+u/2, rest.Min.Y+u/4, rest.Max.X-u/2, rest.Max.Y-u/2)
+	if inner.Max.X < inner.Min.X {
+		inner.Max.X = inner.Min.X
 	}
-	t.leftItems = append(t.leftItems,
-		guigui.LinearLayoutItem{Widget: &t.remotesLabel, Size: guigui.FixedSize(u * 3 / 4)},
-	)
-	for i := 0; i < t.remoteRows.Len(); i++ {
-		t.leftItems = append(t.leftItems, guigui.LinearLayoutItem{Widget: t.remoteRows.At(i), Size: guigui.FixedSize(u)})
+	if inner.Max.Y < inner.Min.Y {
+		inner.Max.Y = inner.Min.Y
 	}
-	t.leftItems = append(t.leftItems, guigui.LinearLayoutItem{Widget: &t.remoteList, Size: guigui.FlexibleSize(1)})
-	t.leftCol = guigui.LinearLayout{Direction: guigui.LayoutDirectionVertical, Items: t.leftItems, Gap: u / 8}
+	t.bodyBounds = inner
+	splitW := gitWorkSplitWidth(u)
+	pref := gitSideDefaultUnits * u
+	if t.sideUnits > 0 {
+		pref = int(t.sideUnits*float64(u) + 0.5)
+	}
+	sideW := gitSideWidth(inner.Dx(), splitW, pref, 6*u, 16*u)
+	sideR := image.Rect(inner.Min.X, inner.Min.Y, inner.Min.X+sideW, inner.Max.Y)
+	splitR := image.Rect(sideR.Max.X, inner.Min.Y, sideR.Max.X+splitW, inner.Max.Y)
+	rightR := image.Rect(splitR.Max.X, inner.Min.Y, inner.Max.X, inner.Max.Y)
+	layouter.LayoutWidget(&t.sidePane, sideR)
+	layouter.LayoutWidget(&t.sideSplit, splitR)
+	t.rightCol.LayoutWidgets(context, rightR, layouter)
+	t.layoutOverlays(context, layouter)
+}
 
+func (t *GitTool) layoutHistoryColumn(u int) {
 	graphBody := guigui.Widget(&t.graphEmpty)
 	if !t.showEmpty {
 		graphBody = &t.commitList
 	}
 
+	t.netItems = slices.Delete(t.netItems, 0, len(t.netItems))
+	t.netItems = append(t.netItems,
+		guigui.LinearLayoutItem{Widget: &t.fetchBtn},
+		guigui.LinearLayoutItem{Widget: &t.pullBtn},
+		guigui.LinearLayoutItem{Widget: &t.pushBtn},
+		guigui.LinearLayoutItem{Size: guigui.FlexibleSize(1)},
+	)
+	t.netRow = guigui.LinearLayout{Direction: guigui.LayoutDirectionHorizontal, Items: t.netItems, Gap: u / 4}
+
 	t.rightItems = slices.Delete(t.rightItems, 0, len(t.rightItems))
 	t.rightItems = append(t.rightItems,
+		guigui.LinearLayoutItem{Size: guigui.FixedSize(u), Layout: &t.netRow},
 		guigui.LinearLayoutItem{Widget: graphBody, Size: guigui.FlexibleSize(3)},
 		guigui.LinearLayoutItem{Widget: &t.detail, Size: guigui.FlexibleSize(2)},
 	)
@@ -647,29 +607,9 @@ func (t *GitTool) Layout(context *guigui.Context, widgetBounds *guigui.WidgetBou
 		guigui.LinearLayoutItem{Widget: &t.hint, Size: guigui.FixedSize(u * 3 / 4)},
 	)
 	t.rightCol = guigui.LinearLayout{Direction: guigui.LayoutDirectionVertical, Items: t.rightItems, Gap: u / 6}
-
-	t.bodyItems = slices.Delete(t.bodyItems, 0, len(t.bodyItems))
-	t.bodyItems = append(t.bodyItems,
-		guigui.LinearLayoutItem{Size: guigui.FixedSize(9 * u), Layout: &t.leftCol},
-		guigui.LinearLayoutItem{Size: guigui.FlexibleSize(1), Layout: &t.rightCol},
-	)
-	t.bodyRow = guigui.LinearLayout{Direction: guigui.LayoutDirectionHorizontal, Items: t.bodyItems, Gap: u / 2}
-
-	t.layoutItems = slices.Delete(t.layoutItems, 0, len(t.layoutItems))
-	t.layoutItems = append(t.layoutItems,
-		guigui.LinearLayoutItem{Size: guigui.FixedSize(u), Layout: &t.toolbar},
-		guigui.LinearLayoutItem{Size: guigui.FlexibleSize(1), Layout: &t.bodyRow},
-	)
-	(guigui.LinearLayout{
-		Direction: guigui.LayoutDirectionVertical,
-		Items:     t.layoutItems,
-		Gap:       u / 6,
-		Padding:   guigui.Padding{Start: u / 2, Top: u / 4, End: u / 2, Bottom: u / 2},
-	}).LayoutWidgets(context, rest, layouter)
-	t.layoutOverlays(context, layouter)
 }
 
-func (t *GitTool) layoutCommit(context *guigui.Context, bounds image.Rectangle, layouter *guigui.ChildLayouter, u int) {
+func (t *GitTool) layoutCommitColumn(u int) {
 	t.msgInput.SetIntrinsicSize()
 	t.msgItems = slices.Delete(t.msgItems, 0, len(t.msgItems))
 	t.msgItems = append(t.msgItems,
@@ -681,31 +621,19 @@ func (t *GitTool) layoutCommit(context *guigui.Context, bounds image.Rectangle, 
 	)
 	t.msgRow = guigui.LinearLayout{Direction: guigui.LayoutDirectionHorizontal, Items: t.msgItems, Gap: u / 4}
 
-	changes := guigui.Widget(&t.workTree)
-	if t.showChanges {
-		changes = &t.changeList
-	}
 	t.rightItems = slices.Delete(t.rightItems, 0, len(t.rightItems))
+	if t.showChanges {
+		t.rightItems = append(t.rightItems, guigui.LinearLayoutItem{Widget: &t.workPanes, Size: guigui.FlexibleSize(3)})
+	} else {
+		t.rightItems = append(t.rightItems, guigui.LinearLayoutItem{Widget: &t.workTree, Size: guigui.FlexibleSize(3)})
+	}
 	t.rightItems = append(t.rightItems,
-		guigui.LinearLayoutItem{Widget: changes, Size: guigui.FlexibleSize(2)},
 		guigui.LinearLayoutItem{Widget: &t.msgInput, Size: guigui.FlexibleSize(1)},
 		guigui.LinearLayoutItem{Size: guigui.FixedSize(u), Layout: &t.msgRow},
 		guigui.LinearLayoutItem{Widget: &t.status, Size: guigui.FixedSize(u * 3 / 4)},
 		guigui.LinearLayoutItem{Widget: &t.hint, Size: guigui.FixedSize(u * 3 / 4)},
 	)
 	t.rightCol = guigui.LinearLayout{Direction: guigui.LayoutDirectionVertical, Items: t.rightItems, Gap: u / 6}
-
-	t.layoutItems = slices.Delete(t.layoutItems, 0, len(t.layoutItems))
-	t.layoutItems = append(t.layoutItems,
-		guigui.LinearLayoutItem{Size: guigui.FixedSize(u), Layout: &t.toolbar},
-		guigui.LinearLayoutItem{Size: guigui.FlexibleSize(1), Layout: &t.rightCol},
-	)
-	(guigui.LinearLayout{
-		Direction: guigui.LayoutDirectionVertical,
-		Items:     t.layoutItems,
-		Gap:       u / 6,
-		Padding:   guigui.Padding{Start: u / 2, Top: u / 4, End: u / 2, Bottom: u / 2},
-	}).LayoutWidgets(context, bounds, layouter)
 }
 
 func (t *GitTool) layoutOverlays(context *guigui.Context, layouter *guigui.ChildLayouter) {
@@ -718,6 +646,11 @@ func (t *GitTool) layoutOverlays(context *guigui.Context, layouter *guigui.Child
 		s := t.commitMenu.contentSize(context)
 		p := t.commitMenu.pos
 		layouter.LayoutWidget(&t.commitMenu, image.Rectangle{Min: p, Max: p.Add(s)})
+	}
+	if t.selMenu.IsOpen() {
+		s := t.selMenu.contentSize(context)
+		p := t.selMenu.pos
+		layouter.LayoutWidget(&t.selMenu, image.Rectangle{Min: p, Max: p.Add(s)})
 	}
 	if t.tagMenu.IsOpen() {
 		s := t.tagMenu.contentSize(context)
@@ -738,10 +671,15 @@ func (t *GitTool) layoutOverlays(context *guigui.Context, layouter *guigui.Child
 }
 
 func (t *GitTool) Tick(context *guigui.Context, widgetBounds *guigui.WidgetBounds) error {
+	if t.sideDragging && !ebiten.IsMouseButtonPressed(ebiten.MouseButtonLeft) {
+		t.sideDragging = false
+		t.setSideDragPassthrough(context, false)
+		guigui.RequestRebuild()
+	}
 	if !inpututil.IsMouseButtonJustPressed(ebiten.MouseButtonLeft) {
 		return nil
 	}
-	if t.rename.IsOpen() || t.confirm.IsOpen() || t.tagMenu.IsOpen() || t.branchMenu.IsOpen() || t.commitMenu.IsOpen() {
+	if t.rename.IsOpen() || t.confirm.IsOpen() || t.tagMenu.IsOpen() || t.branchMenu.IsOpen() || t.commitMenu.IsOpen() || t.selMenu.IsOpen() {
 		return nil
 	}
 	v, ok := context.Env(t, EnvKeyModel)
@@ -753,7 +691,7 @@ func (t *GitTool) Tick(context *guigui.Context, widgetBounds *guigui.WidgetBound
 		t.openRecentAtCursor(model)
 		return nil
 	}
-	ref, hit := t.branchAtCursor(&t.tagList, model)
+	ref, hit := t.refAtRows(&t.sidePane.body.tagRows, model)
 	if !hit {
 		t.tagClicks = gitClickCount{}
 		t.tagClick = ""
@@ -769,7 +707,17 @@ func (t *GitTool) Tick(context *guigui.Context, widgetBounds *guigui.WidgetBound
 	return nil
 }
 
+func (t *GitTool) CursorShape(context *guigui.Context, widgetBounds *guigui.WidgetBounds) (ebiten.CursorShapeType, bool) {
+	if t.sideDragging {
+		return ebiten.CursorShapeEWResize, true
+	}
+	return 0, false
+}
+
 func (t *GitTool) HandlePointingInput(context *guigui.Context, widgetBounds *guigui.WidgetBounds) guigui.HandleInputResult {
+	if t.sideDragging {
+		return t.dragSideSplit(context)
+	}
 	if !inpututil.IsMouseButtonJustPressed(ebiten.MouseButtonRight) {
 		return guigui.HandleInputResult{}
 	}
@@ -779,21 +727,23 @@ func (t *GitTool) HandlePointingInput(context *guigui.Context, widgetBounds *gui
 	}
 	appModel := v.(*Model)
 	model := appModel.Git()
-	if ref, ok := t.branchAtCursor(&t.branchList, model); ok {
+	if ref, ok := t.refAtRows(&t.sidePane.body.branchRows, model); ok {
 		t.openBranchMenu(appModel.Lang(), model, ref)
 		return guigui.HandleInputByWidget(t)
 	}
-	if ref, ok := t.branchAtCursor(&t.remoteList, model); ok {
+	if ref, ok := t.refAtRows(&t.sidePane.body.remoteRows, model); ok {
 		t.openBranchMenu(appModel.Lang(), model, ref)
 		return guigui.HandleInputByWidget(t)
 	}
-	if ref, ok := t.branchAtCursor(&t.tagList, model); ok {
+	if ref, ok := t.refAtRows(&t.sidePane.body.tagRows, model); ok {
 		t.openTagMenu(appModel.Lang(), model, ref)
 		return guigui.HandleInputByWidget(t)
 	}
-	if hash, ok := t.commitAtCursor(); ok {
-		t.openCommitMenu(appModel.Lang(), model, hash)
-		return guigui.HandleInputByWidget(t)
+	if !t.commitView {
+		if hash, ok := t.commitAtCursor(); ok {
+			t.openCommitMenu(appModel.Lang(), model, hash)
+			return guigui.HandleInputByWidget(t)
+		}
 	}
 	return guigui.HandleInputResult{}
 }
@@ -813,6 +763,32 @@ func (t *GitTool) commitAtCursor() (string, bool) {
 	return "", false
 }
 
+func (t *GitTool) openLineMenu(context *guigui.Context, start, end int) bool {
+	v, ok := context.Env(t, EnvKeyModel)
+	if !ok || end <= start {
+		return false
+	}
+	appModel := v.(*Model)
+	model := appModel.Git()
+	if !model.HasRepo() || model.Busy() || t.workPanes.diff.Text() == "" {
+		return false
+	}
+	_, staged := t.activeWorkTarget()
+	patch, ok := gitcli.PatchForLines(t.workPanes.diff.Text(), start, end, staged)
+	if !ok {
+		return false
+	}
+	lang := appModel.Lang()
+	label := i18n.T(lang, i18n.GitStageLines)
+	if staged {
+		label = i18n.T(lang, i18n.GitUnstageLines)
+	}
+	t.selMenu.Open(patch, staged, image.Pt(ebiten.CursorPosition()), label, func(patch string, unstage bool) {
+		model.DoApplyPatch(patch, unstage)
+	})
+	return true
+}
+
 func (t *GitTool) openCommitMenu(lang i18n.Lang, model *GitModel, hash string) {
 	if hash == "" || hash == gitcli.Uncommitted || !model.HasRepo() || model.Busy() {
 		return
@@ -829,17 +805,14 @@ func (t *GitTool) openCommitMenu(lang i18n.Lang, model *GitModel, hash string) {
 	})
 }
 
-func (t *GitTool) branchAtCursor(list *basicwidget.List[string], model *GitModel) (gitcli.Ref, bool) {
+func (t *GitTool) refAtRows(rows *guigui.WidgetSlice[*gitNavRow], model *GitModel) (gitcli.Ref, bool) {
 	c := image.Pt(ebiten.CursorPosition())
-	for i := 0; i < list.ItemCount(); i++ {
-		if !c.In(list.ItemBounds(i)) {
+	for i := 0; i < rows.Len(); i++ {
+		row := rows.At(i)
+		if !c.In(row.bounds) {
 			continue
 		}
-		item, ok := list.ItemByIndex(i)
-		if !ok {
-			return gitcli.Ref{}, false
-		}
-		return t.refByValue(model, item.Value)
+		return t.refByValue(model, row.value)
 	}
 	return gitcli.Ref{}, false
 }
@@ -967,53 +940,4 @@ func (t *GitTool) openBranchMenu(lang i18n.Lang, model *GitModel, ref gitcli.Ref
 			func() { model.DoDeleteBranch(ref) },
 		)
 	})
-}
-
-type gitRemoteRow struct {
-	guigui.DefaultWidget
-
-	check basicwidget.Checkbox
-	label basicwidget.Text
-
-	layoutItems []guigui.LinearLayoutItem
-}
-
-func (r *gitRemoteRow) Set(name string, visible bool, on func(bool)) {
-	r.label.SetValue(name)
-	r.check.SetValue(visible)
-	r.check.OnValueChanged(func(context *guigui.Context, value bool) {
-		if on != nil {
-			on(value)
-		}
-	})
-}
-
-func (r *gitRemoteRow) Build(context *guigui.Context, adder *guigui.ChildAdder) error {
-	adder.AddWidget(&r.check)
-	adder.AddWidget(&r.label)
-	r.label.SetVerticalAlign(basicwidget.VerticalAlignMiddle)
-	return nil
-}
-
-func (r *gitRemoteRow) Layout(context *guigui.Context, widgetBounds *guigui.WidgetBounds, layouter *guigui.ChildLayouter) {
-	u := basicwidget.UnitSize(context)
-	r.layoutItems = slices.Delete(r.layoutItems, 0, len(r.layoutItems))
-	r.layoutItems = append(r.layoutItems,
-		guigui.LinearLayoutItem{Widget: &r.check, Size: guigui.FixedSize(u)},
-		guigui.LinearLayoutItem{Widget: &r.label, Size: guigui.FlexibleSize(1)},
-	)
-	(guigui.LinearLayout{
-		Direction: guigui.LayoutDirectionHorizontal,
-		Items:     r.layoutItems,
-		Gap:       u / 8,
-	}).LayoutWidgets(context, widgetBounds.Bounds(), layouter)
-}
-
-func (r *gitRemoteRow) Measure(context *guigui.Context, constraints guigui.Constraints) image.Point {
-	u := basicwidget.UnitSize(context)
-	s := image.Pt(6*u, u)
-	if w, ok := constraints.FixedWidth(); ok {
-		s.X = w
-	}
-	return s
 }

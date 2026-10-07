@@ -107,6 +107,9 @@ const (
 	GitCheckoutPull     Key = "git.checkout_pull"
 	GitRename           Key = "git.rename"
 	GitRenamePrompt     Key = "git.rename_prompt"
+	GitWorkspace        Key = "git.workspace"
+	GitWorkingCopy      Key = "git.working_copy"
+	GitHistory          Key = "git.history"
 	GitBranches         Key = "git.branches"
 	GitTags             Key = "git.tags"
 	GitCreateTag        Key = "git.create_tag"
@@ -120,6 +123,10 @@ const (
 	GitStageAll         Key = "git.stage_all"
 	GitStage            Key = "git.stage"
 	GitUnstage          Key = "git.unstage"
+	GitStageLines       Key = "git.stage_lines"
+	GitUnstageLines     Key = "git.unstage_lines"
+	GitStaged           Key = "git.staged"
+	GitUnstaged         Key = "git.unstaged"
 	GitEmpty            Key = "git.empty"
 	GitNoCommits        Key = "git.no_commits"
 	GitNoRepo           Key = "git.no_repo"
@@ -382,6 +389,9 @@ var catalogs = map[Lang]map[Key]string{
 		GitCheckoutPull:                "切り替えて pull",
 		GitRename:                      "名前を変更",
 		GitRenamePrompt:                "新しいブランチ名",
+		GitWorkspace:                   "ワークスペース",
+		GitWorkingCopy:                 "変更",
+		GitHistory:                     "履歴",
 		GitBranches:                    "ブランチ",
 		GitTags:                        "タグ",
 		GitCreateTag:                   "タグを作成",
@@ -395,10 +405,14 @@ var catalogs = map[Lang]map[Key]string{
 		GitStageAll:                    "変更をすべて含める",
 		GitStage:                       "Stage",
 		GitUnstage:                     "Unstage",
+		GitStageLines:                  "選択行を Stage",
+		GitUnstageLines:                "選択行を Unstage",
+		GitStaged:                      "ステージ済み",
+		GitUnstaged:                    "未ステージ",
 		GitEmpty:                       "Git リポジトリのフォルダを開いてください。",
 		GitNoCommits:                   "表示するコミットがありません。",
 		GitNoRepo:                      "リポジトリが開かれていません",
-		GitHint:                        "ブランチをクリックすると先端のコミットを表示。グラフのブランチをダブルクリックすると切り替え。タグをダブルクリックすると切り替え。右クリックで名前の変更と削除。コミットをクリックして詳細。チェックを外すと remote をグラフから隠します。",
+		GitHint:                        "ブランチをクリックすると先端のコミットを表示。グラフのブランチをダブルクリックすると切り替え。タグをダブルクリックすると切り替え。右クリックで名前の変更と削除。コミットをクリックして詳細。",
 		GitDetached:                    "detached HEAD",
 		GitWorkingTree:                 "作業ツリー",
 		GitUncommitted:                 "未コミットの変更",
@@ -642,6 +656,9 @@ var catalogs = map[Lang]map[Key]string{
 		GitCheckoutPull:                "Check out and pull",
 		GitRename:                      "Rename",
 		GitRenamePrompt:                "New branch name",
+		GitWorkspace:                   "Workspace",
+		GitWorkingCopy:                 "Changes",
+		GitHistory:                     "History",
 		GitBranches:                    "Branches",
 		GitTags:                        "Tags",
 		GitCreateTag:                   "Create tag",
@@ -655,10 +672,14 @@ var catalogs = map[Lang]map[Key]string{
 		GitStageAll:                    "Include all changes",
 		GitStage:                       "Stage",
 		GitUnstage:                     "Unstage",
+		GitStageLines:                  "Stage selected lines",
+		GitUnstageLines:                "Unstage selected lines",
+		GitStaged:                      "Staged",
+		GitUnstaged:                    "Unstaged",
 		GitEmpty:                       "Open a folder that is a Git repository.",
 		GitNoCommits:                   "No commits to show.",
 		GitNoRepo:                      "No repository open",
-		GitHint:                        "Click a branch to show its tip commit. Double-click a branch on the graph to switch. Double-click a tag to switch. Right-click a branch to rename or delete. Click a commit for details. Uncheck a remote to hide it from the graph.",
+		GitHint:                        "Click a branch to show its tip commit. Double-click a branch on the graph to switch. Double-click a tag to switch. Right-click a branch to rename or delete. Click a commit for details.",
 		GitDetached:                    "detached HEAD",
 		GitWorkingTree:                 "Working tree",
 		GitUncommitted:                 "Uncommitted changes",

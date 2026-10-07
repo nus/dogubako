@@ -331,6 +331,96 @@ func (r *Repo) Unstage(ctx context.Context, paths []string) error {
 	return r.run(ctx, args...)
 }
 
+// DiffWork returns the patch for path. staged reads the index; otherwise the worktree.
+// An untracked file is diffed against /dev/null.
+func (r *Repo) DiffWork(ctx context.Context, path string, staged bool) (string, error) {
+	path = strings.TrimSpace(path)
+	if path == "" {
+		return "", nil
+	}
+	args := []string{"diff", "--no-color", "--patch"}
+	if staged {
+		args = append(args, "--cached")
+	}
+	args = append(args, "--", path)
+	out, err := r.diffOutput(ctx, args...)
+	if err != nil || staged || strings.TrimSpace(out) != "" {
+		return out, err
+	}
+	if _, statErr := os.Stat(filepath.Join(r.Dir, filepath.FromSlash(path))); statErr != nil {
+		return "", nil
+	}
+	return r.diffOutput(ctx, "diff", "--no-color", "--no-index", "--patch", "--", "/dev/null", path)
+}
+
+// ApplyIndex applies patch to the index and leaves the worktree as it is.
+// reverse undoes a staged patch.
+func (r *Repo) ApplyIndex(ctx context.Context, patch string, reverse bool) error {
+	if err := ctx.Err(); err != nil {
+		return err
+	}
+	if strings.TrimSpace(patch) == "" {
+		return fmt.Errorf("empty patch")
+	}
+	if !strings.HasSuffix(patch, "\n") {
+		patch += "\n"
+	}
+	args := []string{"apply", "--cached", "--recount", "--unidiff-zero", "--whitespace=nowarn"}
+	if reverse {
+		args = append(args, "--reverse")
+	}
+	args = append(args, "-")
+	cmd := gitCmd(ctx, r.Dir, args...)
+	cmd.Stdin = strings.NewReader(patch)
+	var stderr bytes.Buffer
+	cmd.Stdout = &stderr
+	cmd.Stderr = &stderr
+	if err := cmd.Run(); err != nil {
+		if ctx.Err() != nil {
+			return ctx.Err()
+		}
+		msg := strings.TrimSpace(stderr.String())
+		if msg == "" {
+			return err
+		}
+		return errors.New(msg)
+	}
+	return nil
+}
+
+func (r *Repo) diffOutput(ctx context.Context, args ...string) (string, error) {
+	if err := ctx.Err(); err != nil {
+		return "", err
+	}
+	cmd := gitCmd(ctx, r.Dir, args...)
+	var stdout, stderr bytes.Buffer
+	cmd.Stdout = &stdout
+	cmd.Stderr = &stderr
+	err := cmd.Run()
+	if err == nil || exitCode(err) == 1 {
+		return stdout.String(), nil
+	}
+	if ctx.Err() != nil {
+		return "", ctx.Err()
+	}
+	msg := strings.TrimSpace(stderr.String())
+	if msg == "" {
+		msg = strings.TrimSpace(stdout.String())
+	}
+	if msg == "" {
+		return "", err
+	}
+	return "", errors.New(msg)
+}
+
+func exitCode(err error) int {
+	var ee *exec.ExitError
+	if errors.As(err, &ee) {
+		return ee.ExitCode()
+	}
+	return -1
+}
+
 // Fetch downloads objects from every remote.
 func (r *Repo) Fetch(ctx context.Context) error {
 	if err := ctx.Err(); err != nil {
