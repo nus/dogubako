@@ -869,10 +869,6 @@ func (t *GitTool) switchBranch(lang i18n.Lang, model *GitModel, ref gitcli.Ref) 
 		name := ref.LocalName()
 		if name != "" && name != "HEAD" {
 			if local, ok := localBranchByName(model.Snapshot().Locals, name); ok {
-				if !local.Current && model.Snapshot().Status.Dirty() {
-					model.SetStatus(i18n.StatusGitCheckoutDirty)
-					return
-				}
 				remote := ref
 				t.confirm.Ask(
 					i18n.T(lang, i18n.GitCheckoutLocalAsk, name),
