@@ -29,9 +29,10 @@ type gitLoadResult struct {
 }
 
 type gitOpResult struct {
-	okKey  i18n.Key
-	errKey i18n.Key
-	err    error
+	okKey      i18n.Key
+	errKey     i18n.Key
+	err        error
+	clearDraft bool
 }
 
 type gitDetailResult struct {
@@ -427,6 +428,9 @@ func (m *gitSession) drainOp() {
 				m.SetStatus(key, res.err)
 			}
 		} else {
+			if res.clearDraft {
+				m.SetDraft("")
+			}
 			m.SetStatus(res.okKey)
 			m.reload()
 		}
@@ -529,6 +533,10 @@ func (m *gitSession) CanPushPull() bool {
 }
 
 func (m *gitSession) startOp(ok, fail i18n.Key, fn func(ctx context.Context, repo *gitcli.Repo) error) {
+	m.startOpResult(ok, fail, false, fn)
+}
+
+func (m *gitSession) startOpResult(ok, fail i18n.Key, clearDraft bool, fn func(ctx context.Context, repo *gitcli.Repo) error) {
 	if m.Busy() || m.repo == nil {
 		return
 	}
@@ -541,7 +549,7 @@ func (m *gitSession) startOp(ok, fail i18n.Key, fn func(ctx context.Context, rep
 		ctx, cancel := context.WithTimeout(context.Background(), gitOpTimeout)
 		defer cancel()
 		err := fn(ctx, repo)
-		ch <- gitOpResult{okKey: ok, errKey: fail, err: err}
+		ch <- gitOpResult{okKey: ok, errKey: fail, err: err, clearDraft: clearDraft}
 	}()
 }
 
@@ -671,7 +679,7 @@ func (m *gitSession) DoCommit() {
 	}
 	msg := m.draft
 	stage := m.StageAll()
-	m.startOp(i18n.StatusGitCommitOk, i18n.StatusGitCommitFailed, func(ctx context.Context, repo *gitcli.Repo) error {
+	m.startOpResult(i18n.StatusGitCommitOk, i18n.StatusGitCommitFailed, true, func(ctx context.Context, repo *gitcli.Repo) error {
 		return repo.Commit(ctx, msg, stage, false)
 	})
 }

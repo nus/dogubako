@@ -236,6 +236,9 @@ func TestGitModelOpenCommitAmend(t *testing.T) {
 	if len(m.Snapshot().Commits) != 2 {
 		t.Fatalf("commits = %d status=%s", len(m.Snapshot().Commits), m.StatusText(i18n.EN))
 	}
+	if m.Draft() != "" {
+		t.Fatalf("draft = %q", m.Draft())
+	}
 	m.SetDraft("second amended")
 	m.DoAmend()
 	waitGit(t, &m)
