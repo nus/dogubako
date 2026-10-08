@@ -354,12 +354,15 @@ func TestSnapshotHidesRemoteRefs(t *testing.T) {
 	}
 }
 
-func TestCheckoutDirtyKeepsBranch(t *testing.T) {
+func TestCheckoutCarriesLocalChanges(t *testing.T) {
 	dir := initRepo(t)
 	writeCommit(t, dir, "a.txt", "base")
 	gitAt(t, dir, "checkout", "-b", "feature")
 	writeCommit(t, dir, "f.txt", "feat")
 	gitAt(t, dir, "checkout", "main")
+	if err := os.WriteFile(filepath.Join(dir, "a.txt"), []byte("base\nedited\n"), 0o644); err != nil {
+		t.Fatal(err)
+	}
 	if err := os.WriteFile(filepath.Join(dir, "dirty.txt"), []byte("x\n"), 0o644); err != nil {
 		t.Fatal(err)
 	}
@@ -370,8 +373,50 @@ func TestCheckoutDirtyKeepsBranch(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	if err := repo.Checkout(ctx, Ref{Name: "feature"}); !errors.Is(err, ErrLocalChanges) {
+	if err := repo.Checkout(ctx, Ref{Name: "feature"}); err != nil {
 		t.Fatalf("checkout err = %v", err)
+	}
+	snap, err := repo.Snapshot(ctx, SnapshotOpts{})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if snap.Branch != "feature" || snap.Detached || !snap.Status.Dirty() {
+		t.Fatalf("branch = %s detached=%v dirty=%v", snap.Branch, snap.Detached, snap.Status.Dirty())
+	}
+	edited, err := os.ReadFile(filepath.Join(dir, "a.txt"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	if string(edited) != "base\nedited\n" {
+		t.Fatalf("a.txt = %q", edited)
+	}
+	if _, err := os.Stat(filepath.Join(dir, "dirty.txt")); err != nil {
+		t.Fatal(err)
+	}
+}
+
+func TestCheckoutOverwriteKeepsBranch(t *testing.T) {
+	dir := initRepo(t)
+	writeCommit(t, dir, "a.txt", "base")
+	gitAt(t, dir, "checkout", "-b", "feature")
+	writeCommit(t, dir, "a.txt", "feature")
+	gitAt(t, dir, "checkout", "main")
+	if err := os.WriteFile(filepath.Join(dir, "a.txt"), []byte("local\n"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+
+	ctx, cancel := context.WithTimeout(context.Background(), 20*time.Second)
+	defer cancel()
+	repo, err := Open(ctx, dir)
+	if err != nil {
+		t.Fatal(err)
+	}
+	checkoutErr := repo.Checkout(ctx, Ref{Name: "feature"})
+	if !errors.Is(checkoutErr, ErrLocalChanges) {
+		t.Fatalf("checkout err = %v", checkoutErr)
+	}
+	if !strings.Contains(checkoutErr.Error(), "a.txt") {
+		t.Fatalf("checkout err = %v", checkoutErr)
 	}
 	snap, err := repo.Snapshot(ctx, SnapshotOpts{})
 	if err != nil {
@@ -397,6 +442,31 @@ func TestCheckoutDirtyKeepsBranch(t *testing.T) {
 	}
 	if !found {
 		t.Fatal("missing uncommitted node")
+	}
+	body, err := os.ReadFile(filepath.Join(dir, "a.txt"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	if string(body) != "local\n" {
+		t.Fatalf("a.txt = %q", body)
+	}
+}
+
+func TestCheckoutWouldOverwriteMessage(t *testing.T) {
+	cases := []struct {
+		msg  string
+		want bool
+	}{
+		{"error: Your local changes to the following files would be overwritten by checkout:\n\ta.txt", true},
+		{"error: The following untracked working tree files would be overwritten by checkout:\n\ta.txt", true},
+		{"error: 次のファイルへのローカルの変更はチェックアウトで上書きされます:\n\ta.txt", true},
+		{"error: 以下の追跡されていない作業ツリーのファイルは、チェックアウトで上書きされます:\n\ta.txt", true},
+		{"fatal: invalid reference: missing", false},
+	}
+	for _, tc := range cases {
+		if got := checkoutWouldOverwrite(errors.New(tc.msg)); got != tc.want {
+			t.Fatalf("%q: got %v", tc.msg, got)
+		}
 	}
 }
 

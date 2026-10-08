@@ -837,16 +837,16 @@ func (m *gitSession) DoCheckout(ref gitcli.Ref) {
 	if !m.HasRepo() || m.Busy() || ref.Current || ref.Name == "" {
 		return
 	}
-	if m.snap.Status.Dirty() {
-		m.SetStatus(i18n.StatusGitCheckoutDirty)
-		return
-	}
 	okKey, errKey := i18n.StatusGitCheckoutOk, i18n.StatusGitCheckoutFailed
 	if ref.IsTag() {
 		okKey, errKey = i18n.StatusGitTagSwitchOk, i18n.StatusGitTagSwitchErr
 	}
 	m.startOp(okKey, errKey, func(ctx context.Context, repo *gitcli.Repo) error {
-		return repo.Checkout(ctx, ref)
+		err := repo.Checkout(ctx, ref)
+		if errors.Is(err, gitcli.ErrLocalChanges) {
+			return statusError{key: i18n.StatusGitCheckoutDirty, err: err}
+		}
+		return err
 	})
 }
 
@@ -854,10 +854,6 @@ func (m *gitSession) DoCheckout(ref gitcli.Ref) {
 // from the remote branch the user asked to switch to.
 func (m *gitSession) DoCheckoutAndPull(local, remote gitcli.Ref) {
 	if !m.HasRepo() || m.Busy() || local.Name == "" || local.Remote != "" || remote.Remote == "" {
-		return
-	}
-	if !local.Current && m.snap.Status.Dirty() {
-		m.SetStatus(i18n.StatusGitCheckoutDirty)
 		return
 	}
 	switched := !local.Current
@@ -868,6 +864,9 @@ func (m *gitSession) DoCheckoutAndPull(local, remote gitcli.Ref) {
 	m.startOp(okKey, i18n.StatusGitCheckoutFailed, func(ctx context.Context, repo *gitcli.Repo) error {
 		if switched {
 			if err := repo.Checkout(ctx, local); err != nil {
+				if errors.Is(err, gitcli.ErrLocalChanges) {
+					return statusError{key: i18n.StatusGitCheckoutDirty, err: err}
+				}
 				return err
 			}
 		}

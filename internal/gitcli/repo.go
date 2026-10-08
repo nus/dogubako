@@ -697,21 +697,20 @@ func (r *Repo) RenameBranch(ctx context.Context, ref Ref, newName string) error 
 	return r.run(ctx, "branch", "-m", "--", ref.Name, newName)
 }
 
-// ErrLocalChanges is returned when checkout is refused because the worktree
-// is dirty, including untracked files. HEAD is left unchanged.
+// ErrLocalChanges is returned when checkout is refused because switching would
+// overwrite local changes. HEAD is left unchanged. Changes that do not overlap
+// the target are carried over.
 var ErrLocalChanges = errors.New("local changes would be overwritten by checkout")
+
+// localChangesError keeps git's message and matches ErrLocalChanges.
+type localChangesError struct{ error }
+
+func (localChangesError) Unwrap() error { return ErrLocalChanges }
 
 // Checkout switches to a local branch, or creates a local branch from a remote.
 func (r *Repo) Checkout(ctx context.Context, ref Ref) error {
 	if err := ctx.Err(); err != nil {
 		return err
-	}
-	st, err := r.status(ctx)
-	if err != nil {
-		return err
-	}
-	if st.Dirty() {
-		return ErrLocalChanges
 	}
 	if ref.IsTag() {
 		name := ref.Name
@@ -721,13 +720,13 @@ func (r *Repo) Checkout(ctx context.Context, ref Ref) error {
 		if name == "" {
 			return fmt.Errorf("no tag")
 		}
-		return r.run(ctx, "checkout", "--detach", name)
+		return r.switchTo(ctx, "checkout", "--detach", name)
 	}
 	if ref.Remote == "" {
 		if ref.Name == "" {
 			return fmt.Errorf("no branch")
 		}
-		return r.run(ctx, "switch", "--", ref.Name)
+		return r.switchTo(ctx, "switch", "--", ref.Name)
 	}
 	local := ref.LocalName()
 	if local == "" || local == "HEAD" {
@@ -738,13 +737,33 @@ func (r *Repo) Checkout(ctx context.Context, ref Ref) error {
 		return err
 	}
 	if exists {
-		return r.run(ctx, "switch", "--", local)
+		return r.switchTo(ctx, "switch", "--", local)
 	}
 	track := ref.Name
 	if !strings.Contains(track, "/") {
 		track = ref.Remote + "/" + local
 	}
-	return r.run(ctx, "switch", "-c", local, "--track", track)
+	return r.switchTo(ctx, "switch", "-c", local, "--track", track)
+}
+
+func (r *Repo) switchTo(ctx context.Context, args ...string) error {
+	err := r.run(ctx, args...)
+	if checkoutWouldOverwrite(err) {
+		return localChangesError{err}
+	}
+	return err
+}
+
+func checkoutWouldOverwrite(err error) bool {
+	if err == nil {
+		return false
+	}
+	msg := err.Error()
+	if strings.Contains(msg, "would be overwritten by checkout") {
+		return true
+	}
+	// Japanese git (po/ja.po) uses these words for the same refusal.
+	return strings.Contains(msg, "上書き") && strings.Contains(msg, "チェックアウト")
 }
 
 func (r *Repo) hasRef(ctx context.Context, ref string) (bool, error) {
