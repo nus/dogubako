@@ -620,6 +620,35 @@ func (r *Repo) DeleteBranch(ctx context.Context, ref Ref) error {
 	return r.run(ctx, "branch", "-D", "-r", "--", ref.Name)
 }
 
+// CreateBranch adds a local branch at hash. HEAD stays where it is.
+func (r *Repo) CreateBranch(ctx context.Context, name, hash string) error {
+	if err := ctx.Err(); err != nil {
+		return err
+	}
+	name = strings.TrimSpace(name)
+	if name == "" {
+		return fmt.Errorf("invalid branch name")
+	}
+	if err := r.run(ctx, "check-ref-format", "--branch", name); err != nil {
+		if ctx.Err() != nil {
+			return ctx.Err()
+		}
+		return fmt.Errorf("invalid branch name")
+	}
+	hash = strings.TrimSpace(hash)
+	if hash == "" || hash == Uncommitted {
+		return fmt.Errorf("unknown revision")
+	}
+	resolved, err := r.output(ctx, "rev-parse", "--verify", "--quiet", hash+"^{commit}")
+	if err != nil {
+		if ctx.Err() != nil {
+			return ctx.Err()
+		}
+		return fmt.Errorf("unknown revision %s", hash)
+	}
+	return r.run(ctx, "branch", "--", name, strings.TrimSpace(resolved))
+}
+
 // RenameBranch renames a local branch. The checked-out branch can be renamed,
 // and HEAD follows it. Remote-tracking branches are left unchanged.
 func (r *Repo) RenameBranch(ctx context.Context, ref Ref, newName string) error {

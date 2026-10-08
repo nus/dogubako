@@ -107,6 +107,8 @@ const (
 	GitCheckoutPull     Key = "git.checkout_pull"
 	GitRename           Key = "git.rename"
 	GitRenamePrompt     Key = "git.rename_prompt"
+	GitCreateBranch     Key = "git.create_branch"
+	GitBranchPrompt     Key = "git.branch_prompt"
 	GitWorkspace        Key = "git.workspace"
 	GitWorkingCopy      Key = "git.working_copy"
 	GitHistory          Key = "git.history"
@@ -268,6 +270,8 @@ const (
 	StatusGitDeleteCurrent  Key = "status.git_delete_current"
 	StatusGitRenameOk       Key = "status.git_rename_ok"
 	StatusGitRenameFailed   Key = "status.git_rename_failed"
+	StatusGitBranchOk       Key = "status.git_branch_ok"
+	StatusGitBranchFailed   Key = "status.git_branch_failed"
 	StatusGitTagOk          Key = "status.git_tag_ok"
 	StatusGitTagFailed      Key = "status.git_tag_failed"
 	StatusGitTagPushFailed  Key = "status.git_tag_push_failed"
@@ -388,6 +392,8 @@ var catalogs = map[Lang]map[Key]string{
 		GitCheckoutPull:                "切り替えて pull",
 		GitRename:                      "名前を変更",
 		GitRenamePrompt:                "新しいブランチ名",
+		GitCreateBranch:                "ブランチを作成",
+		GitBranchPrompt:                "ブランチ名",
 		GitWorkspace:                   "ワークスペース",
 		GitWorkingCopy:                 "変更",
 		GitHistory:                     "履歴",
@@ -410,7 +416,7 @@ var catalogs = map[Lang]map[Key]string{
 		GitUnstaged:                    "未ステージ",
 		GitEmpty:                       "Git リポジトリのフォルダを開いてください。",
 		GitNoCommits:                   "表示するコミットがありません。",
-		GitHint:                        "ブランチをクリックすると先端のコミットを表示。グラフのブランチをダブルクリックすると切り替え。タグをダブルクリックすると切り替え。右クリックで名前の変更と削除。コミットをクリックして詳細。",
+		GitHint:                        "ブランチをクリックすると先端のコミットを表示。グラフのブランチをダブルクリックすると切り替え。タグをダブルクリックすると切り替え。右クリックで名前の変更と削除。コミットを右クリックしてブランチやタグを作成。コミットをクリックして詳細。",
 		GitDetached:                    "detached HEAD",
 		GitWorkingTree:                 "作業ツリー",
 		GitUncommitted:                 "未コミットの変更",
@@ -536,6 +542,8 @@ var catalogs = map[Lang]map[Key]string{
 		StatusGitDeleteCurrent:         "チェックアウト中のブランチは削除できません",
 		StatusGitRenameOk:              "ブランチ名を変更しました",
 		StatusGitRenameFailed:          "ブランチ名の変更に失敗しました: %v",
+		StatusGitBranchOk:              "ブランチを作成しました",
+		StatusGitBranchFailed:          "ブランチの作成に失敗しました: %v",
 		StatusGitTagOk:                 "タグを作成しました",
 		StatusGitTagFailed:             "タグの作成に失敗しました: %v",
 		StatusGitTagPushFailed:         "タグは作成しましたが、リモートへの送信に失敗しました: %v",
@@ -654,6 +662,8 @@ var catalogs = map[Lang]map[Key]string{
 		GitCheckoutPull:                "Check out and pull",
 		GitRename:                      "Rename",
 		GitRenamePrompt:                "New branch name",
+		GitCreateBranch:                "Create branch",
+		GitBranchPrompt:                "Branch name",
 		GitWorkspace:                   "Workspace",
 		GitWorkingCopy:                 "Changes",
 		GitHistory:                     "History",
@@ -676,7 +686,7 @@ var catalogs = map[Lang]map[Key]string{
 		GitUnstaged:                    "Unstaged",
 		GitEmpty:                       "Open a folder that is a Git repository.",
 		GitNoCommits:                   "No commits to show.",
-		GitHint:                        "Click a branch to show its tip commit. Double-click a branch on the graph to switch. Double-click a tag to switch. Right-click a branch to rename or delete. Click a commit for details.",
+		GitHint:                        "Click a branch to show its tip commit. Double-click a branch on the graph to switch. Double-click a tag to switch. Right-click a branch to rename or delete. Right-click a commit to create a branch or tag. Click a commit for details.",
 		GitDetached:                    "detached HEAD",
 		GitWorkingTree:                 "Working tree",
 		GitUncommitted:                 "Uncommitted changes",
@@ -802,6 +812,8 @@ var catalogs = map[Lang]map[Key]string{
 		StatusGitDeleteCurrent:         "Cannot delete the checked-out branch",
 		StatusGitRenameOk:              "Renamed branch",
 		StatusGitRenameFailed:          "Could not rename branch: %v",
+		StatusGitBranchOk:              "Created branch",
+		StatusGitBranchFailed:          "Could not create branch: %v",
 		StatusGitTagOk:                 "Created tag",
 		StatusGitTagFailed:             "Could not create tag: %v",
 		StatusGitTagPushFailed:         "Created the tag, but could not push it: %v",

@@ -783,15 +783,28 @@ func (t *GitTool) openCommitMenu(lang i18n.Lang, model *GitModel, hash string) {
 		return
 	}
 	model.SelectCommit(hash)
-	t.commitMenu.Open(hash, image.Pt(ebiten.CursorPosition()), i18n.T(lang, i18n.GitCreateTag), func(hash string) {
-		t.rename.AskTag(
-			i18n.T(lang, i18n.GitTagPrompt),
-			i18n.T(lang, i18n.GitPushTag),
-			i18n.T(lang, i18n.GitCreateTag),
-			i18n.T(lang, i18n.GitCancel),
-			func(name string, push bool) { model.DoCreateTag(hash, name, push) },
-		)
-	})
+	t.commitMenu.Open(hash, image.Pt(ebiten.CursorPosition()),
+		i18n.T(lang, i18n.GitCreateBranch),
+		i18n.T(lang, i18n.GitCreateTag),
+		func(hash string) {
+			t.rename.Ask(
+				i18n.T(lang, i18n.GitBranchPrompt),
+				"",
+				i18n.T(lang, i18n.GitCreateBranch),
+				i18n.T(lang, i18n.GitCancel),
+				func(name string) { model.DoCreateBranch(hash, name) },
+			)
+		},
+		func(hash string) {
+			t.rename.AskTag(
+				i18n.T(lang, i18n.GitTagPrompt),
+				i18n.T(lang, i18n.GitPushTag),
+				i18n.T(lang, i18n.GitCreateTag),
+				i18n.T(lang, i18n.GitCancel),
+				func(name string, push bool) { model.DoCreateTag(hash, name, push) },
+			)
+		},
+	)
 }
 
 func (t *GitTool) refAtRows(rows *guigui.WidgetSlice[*gitNavRow], model *GitModel) (gitcli.Ref, bool) {

@@ -776,6 +776,19 @@ type statusError struct {
 func (e statusError) Error() string { return e.err.Error() }
 func (e statusError) Unwrap() error { return e.err }
 
+func (m *gitSession) DoCreateBranch(hash, name string) {
+	if !m.HasRepo() || m.Busy() || hash == "" || hash == gitcli.Uncommitted {
+		return
+	}
+	name = strings.TrimSpace(name)
+	if name == "" {
+		return
+	}
+	m.startOp(i18n.StatusGitBranchOk, i18n.StatusGitBranchFailed, func(ctx context.Context, repo *gitcli.Repo) error {
+		return repo.CreateBranch(ctx, name, hash)
+	})
+}
+
 func (m *gitSession) DoRenameBranch(ref gitcli.Ref, name string) {
 	if !m.HasRepo() || m.Busy() || ref.Name == "" || ref.Remote != "" {
 		return
