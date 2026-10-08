@@ -61,6 +61,8 @@ type GitModel struct {
 	loaded   bool
 	extraGen uint64
 	recent   []string
+	ssh      sshPick
+	sshGen   uint64
 }
 
 // gitSession is the state of a single repository tab.
@@ -246,7 +248,11 @@ func (m *gitSession) PollStatus() {
 		return
 	}
 	now := time.Now()
-	if now.Sub(m.lastPoll) < time.Second {
+	interval := time.Second
+	if m.repo.IsRemote() {
+		interval = 3 * time.Second
+	}
+	if now.Sub(m.lastPoll) < interval {
 		return
 	}
 	m.lastPoll = now
@@ -357,7 +363,11 @@ func (m *gitSession) drainLoad() {
 			return
 		}
 		m.repo = res.repo
-		m.path = canonicalPath(res.repo.Dir)
+		if res.repo.IsRemote() {
+			m.path = res.repo.Key()
+		} else {
+			m.path = canonicalPath(res.repo.Dir)
+		}
 		if m.owner != nil {
 			m.owner.saveTabs()
 		}

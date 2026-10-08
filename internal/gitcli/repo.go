@@ -7,11 +7,14 @@ import (
 	"fmt"
 	"os"
 	"os/exec"
+	"path"
 	"path/filepath"
 	"sort"
 	"strconv"
 	"strings"
 	"time"
+
+	"github.com/nus/dogubako/internal/sshremote"
 )
 
 const (
@@ -20,31 +23,54 @@ const (
 )
 
 // Repo is a git working tree. Operations run the git binary in Dir.
+// Dest is an ssh destination when the tree is on another host. Port is set
+// only for an explicit destination, not for a Host alias from ssh config.
 type Repo struct {
-	Dir string
+	Dir  string
+	Dest string
+	Port string
 }
 
-// Open resolves path to a work tree root.
-func Open(ctx context.Context, path string) (*Repo, error) {
+func (r *Repo) loc() Loc {
+	return Loc{Dest: r.Dest, Port: r.Port, Dir: r.Dir}
+}
+
+// Key identifies the repository for tabs and the recent list.
+func (r *Repo) Key() string { return r.loc().Key() }
+
+// IsRemote reports whether git runs over ssh.
+func (r *Repo) IsRemote() bool { return r.Dest != "" }
+
+// Open resolves path to a work tree root. path may be a local directory or a remote Loc key.
+func Open(ctx context.Context, repoPath string) (*Repo, error) {
 	if err := ctx.Err(); err != nil {
 		return nil, err
 	}
-	path = strings.TrimSpace(path)
-	if path == "" {
+	loc := ParseLoc(repoPath)
+	if !loc.IsRemote() {
+		loc.Dir = strings.TrimSpace(repoPath)
+	}
+	if strings.TrimSpace(loc.Dir) == "" {
 		return nil, fmt.Errorf("not a git repository")
 	}
-	inside, err := gitOutput(ctx, path, "rev-parse", "--is-inside-work-tree")
+	inside, err := gitOutput(ctx, loc, "rev-parse", "--is-inside-work-tree")
 	if err != nil || strings.TrimSpace(inside) != "true" {
 		if err == nil {
 			err = fmt.Errorf("not a work tree")
 		}
 		return nil, fmt.Errorf("not a git repository: %w", err)
 	}
-	top, err := gitOutput(ctx, path, "rev-parse", "--show-toplevel")
+	top, err := gitOutput(ctx, loc, "rev-parse", "--show-toplevel")
 	if err != nil {
 		return nil, fmt.Errorf("not a git repository: %w", err)
 	}
-	return &Repo{Dir: filepath.Clean(strings.TrimSpace(top))}, nil
+	top = strings.TrimSpace(top)
+	if loc.IsRemote() {
+		top = path.Clean(top)
+	} else {
+		top = filepath.Clean(top)
+	}
+	return &Repo{Dir: top, Dest: loc.Dest, Port: loc.Port}, nil
 }
 
 // SnapshotOpts selects which refs seed the commit graph.
@@ -347,7 +373,7 @@ func (r *Repo) DiffWork(ctx context.Context, path string, staged bool) (string, 
 	if err != nil || staged || strings.TrimSpace(out) != "" {
 		return out, err
 	}
-	if _, statErr := os.Stat(filepath.Join(r.Dir, filepath.FromSlash(path))); statErr != nil {
+	if !r.exists(ctx, path) {
 		return "", nil
 	}
 	return r.diffOutput(ctx, "diff", "--no-color", "--no-index", "--patch", "--", "/dev/null", path)
@@ -370,7 +396,7 @@ func (r *Repo) ApplyIndex(ctx context.Context, patch string, reverse bool) error
 		args = append(args, "--reverse")
 	}
 	args = append(args, "-")
-	cmd := gitCmd(ctx, r.Dir, args...)
+	cmd := gitCmd(ctx, r.loc(), args...)
 	cmd.Stdin = strings.NewReader(patch)
 	var stderr bytes.Buffer
 	cmd.Stdout = &stderr
@@ -392,7 +418,7 @@ func (r *Repo) diffOutput(ctx context.Context, args ...string) (string, error) {
 	if err := ctx.Err(); err != nil {
 		return "", err
 	}
-	cmd := gitCmd(ctx, r.Dir, args...)
+	cmd := gitCmd(ctx, r.loc(), args...)
 	var stdout, stderr bytes.Buffer
 	cmd.Stdout = &stdout
 	cmd.Stderr = &stderr
@@ -1035,7 +1061,22 @@ func splitLines(s string) []string {
 }
 
 func (r *Repo) output(ctx context.Context, args ...string) (string, error) {
-	return gitOutput(ctx, r.Dir, args...)
+	return gitOutput(ctx, r.loc(), args...)
+}
+
+func (r *Repo) exists(ctx context.Context, rel string) bool {
+	rel = strings.TrimSpace(filepath.ToSlash(rel))
+	if rel == "" {
+		return false
+	}
+	if !r.IsRemote() {
+		_, err := os.Stat(filepath.Join(r.Dir, filepath.FromSlash(rel)))
+		return err == nil
+	}
+	abs := path.Join(r.Dir, rel)
+	remote := "sh -c " + sshremote.Quote("test -e "+sshremote.Quote(abs))
+	cmd := sshremote.Command(ctx, sshremote.Target{Dest: r.Dest, Port: r.Port}, remote)
+	return cmd.Run() == nil
 }
 
 func (r *Repo) run(ctx context.Context, args ...string) error {
@@ -1043,11 +1084,11 @@ func (r *Repo) run(ctx context.Context, args ...string) error {
 	return err
 }
 
-func gitOutput(ctx context.Context, dir string, args ...string) (string, error) {
+func gitOutput(ctx context.Context, loc Loc, args ...string) (string, error) {
 	if err := ctx.Err(); err != nil {
 		return "", err
 	}
-	cmd := gitCmd(ctx, dir, args...)
+	cmd := gitCmd(ctx, loc, args...)
 	var stdout, stderr bytes.Buffer
 	cmd.Stdout = &stdout
 	cmd.Stderr = &stderr
@@ -1068,18 +1109,29 @@ func gitOutput(ctx context.Context, dir string, args ...string) (string, error) 
 	return stdout.String(), nil
 }
 
-func gitCmd(ctx context.Context, dir string, args ...string) *exec.Cmd {
+func gitCmd(ctx context.Context, loc Loc, args ...string) *exec.Cmd {
 	full := make([]string, 0, len(args)+6)
 	full = append(full, "--no-pager", "-c", "core.quotePath=false", "-c", "log.showSignature=false")
-	if dir != "" {
-		full = append(full, "-C", dir)
+	if loc.Dir != "" {
+		full = append(full, "-C", loc.Dir)
 	}
 	full = append(full, args...)
-	cmd := exec.CommandContext(ctx, "git", full...)
-	cmd.Env = append(os.Environ(),
-		"GIT_TERMINAL_PROMPT=0",
-		"GIT_EDITOR=true",
-		"GIT_SEQUENCE_EDITOR=true",
-	)
-	return cmd
+	if loc.Dest == "" {
+		cmd := exec.CommandContext(ctx, "git", full...)
+		cmd.Env = append(os.Environ(),
+			"GIT_TERMINAL_PROMPT=0",
+			"GIT_EDITOR=true",
+			"GIT_SEQUENCE_EDITOR=true",
+		)
+		return cmd
+	}
+	// sh -c keeps the command POSIX when the remote login shell is not sh.
+	var b strings.Builder
+	b.WriteString("env GIT_TERMINAL_PROMPT=0 GIT_EDITOR=true GIT_SEQUENCE_EDITOR=true git")
+	for _, a := range full {
+		b.WriteByte(' ')
+		b.WriteString(sshremote.Quote(a))
+	}
+	remote := "sh -c " + sshremote.Quote(b.String())
+	return sshremote.Command(ctx, sshremote.Target{Dest: loc.Dest, Port: loc.Port}, remote)
 }

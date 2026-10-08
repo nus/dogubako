@@ -23,7 +23,8 @@ const (
 	gitWorkspaceHistory = "history"
 )
 
-// GitTool is a local Git client: graph, branches, and history operations.
+// GitTool is a Git client: graph, branches, and history operations.
+// Repositories may be local or on an SSH host.
 type GitTool struct {
 	guigui.DefaultWidget
 
@@ -69,6 +70,33 @@ type GitTool struct {
 	recentList  basicwidget.List[string]
 	recentRows  guigui.WidgetSlice[*gitRecentRow]
 	recentItems []basicwidget.ListItem[string]
+
+	sshPick       bool
+	sshBtn        basicwidget.Button
+	sshHostsTitle basicwidget.Text
+	sshHostList   basicwidget.List[string]
+	sshHostItems  []basicwidget.ListItem[string]
+	sshNoHosts    basicwidget.Text
+	sshShowHosts  bool
+	sshDestLabel  basicwidget.Text
+	sshDestInput  basicwidget.TextInput
+	sshPortLabel  basicwidget.Text
+	sshPortInput  basicwidget.TextInput
+	sshConnectBtn basicwidget.Button
+	sshCancelBtn  basicwidget.Button
+	sshTarget     basicwidget.Text
+	sshPathInput  basicwidget.TextInput
+	sshUpBtn      basicwidget.Button
+	sshDirList    basicwidget.List[string]
+	sshDirItems   []basicwidget.ListItem[string]
+	sshOpenDirBtn basicwidget.Button
+	sshBackBtn    basicwidget.Button
+	sshStatus     basicwidget.Text
+	sshStatusOn   bool
+	sshWas        bool
+	sshSeenGen    uint64
+	sshDirShown   string
+	sshConnected  bool
 
 	detail gitDetail
 
@@ -144,6 +172,12 @@ func (t *GitTool) Build(context *guigui.Context, adder *guigui.ChildAdder) error
 	t.tabBar.Sync(lang, model)
 	adder.AddWidget(&t.tabBar)
 	t.emptyHome = model.Path() == ""
+	t.sshPick = t.emptyHome && model.SSHActive()
+	if t.sshPick {
+		return t.buildSSH(context, adder, lang, model)
+	}
+	t.sshWas = false
+	t.sshDirShown = ""
 	if t.emptyHome {
 		return t.buildEmptyHome(context, adder, lang, model)
 	}
@@ -185,16 +219,17 @@ func (t *GitTool) Build(context *guigui.Context, adder *guigui.ChildAdder) error
 		}
 	}
 
-	path := model.Path()
-	t.pathLabel.SetValue(path)
+	repoPath := model.Path()
+	loc := gitcli.ParseLoc(repoPath)
+	shown := loc.Display()
+	t.pathLabel.SetValue(shown)
 	t.pathLabel.SetVerticalAlign(basicwidget.VerticalAlignMiddle)
 	t.pathLabel.SetWrapMode(basicwidget.WrapModeNone)
 	t.pathLabel.SetSelectable(false)
-	repoPath := model.Path()
-	if repoPath == "" {
+	if repoPath == "" || loc.IsRemote() {
 		t.pathLabel.SetHotspotRanges(nil)
 	} else {
-		t.pathLabel.SetHotspotRanges([]basicwidget.TextRange{{EndInBytes: len(path)}})
+		t.pathLabel.SetHotspotRanges([]basicwidget.TextRange{{EndInBytes: len(shown)}})
 		t.pathLabel.OnHotspotUp(func(*guigui.Context, basicwidget.TextRange) {
 			if err := userdir.OpenInFileManager(repoPath); err != nil {
 				model.SetStatus(i18n.StatusFolderOpenFailed, err)
@@ -525,6 +560,11 @@ func (t *GitTool) Layout(context *guigui.Context, widgetBounds *guigui.WidgetBou
 	layouter.LayoutWidget(&t.tabBar, image.Rect(bounds.Min.X, bounds.Min.Y, bounds.Max.X, bounds.Min.Y+barH))
 	rest := bounds
 	rest.Min.Y += barH
+	if t.sshPick {
+		t.layoutSSH(context, rest, layouter, u)
+		t.layoutOverlays(context, layouter)
+		return
+	}
 	if t.emptyHome {
 		t.layoutEmptyHome(context, rest, layouter, u)
 		t.layoutOverlays(context, layouter)
@@ -676,6 +716,9 @@ func (t *GitTool) Tick(context *guigui.Context, widgetBounds *guigui.WidgetBound
 		return nil
 	}
 	model := v.(*Model).Git()
+	if t.sshPick {
+		return nil
+	}
 	if t.emptyHome {
 		t.openRecentAtCursor(model)
 		return nil
