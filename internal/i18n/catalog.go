@@ -91,6 +91,23 @@ const (
 	AndroidShotRestore      Key = "android_shot.restore"
 
 	GitOpen             Key = "git.open"
+	GitSSH              Key = "git.ssh"
+	GitSSHHosts         Key = "git.ssh_hosts"
+	GitSSHNoHosts       Key = "git.ssh_no_hosts"
+	GitSSHDest          Key = "git.ssh_dest"
+	GitSSHPort          Key = "git.ssh_port"
+	GitSSHConnect       Key = "git.ssh_connect"
+	GitSSHPickDir       Key = "git.ssh_pick_dir"
+	GitSSHUp            Key = "git.ssh_up"
+	GitSSHOpenHere      Key = "git.ssh_open_here"
+	GitSSHBack          Key = "git.ssh_back"
+	GitSSHConnecting    Key = "git.ssh_connecting"
+	GitSSHEmptyDir      Key = "git.ssh_empty_dir"
+	GitSSHRepoMark      Key = "git.ssh_repo_mark"
+	GitSSHBadDest       Key = "git.ssh_bad_dest"
+	GitSSHBadPort       Key = "git.ssh_bad_port"
+	GitSSHBadDir        Key = "git.ssh_bad_dir"
+	GitSSHFailed        Key = "git.ssh_failed"
 	GitRecent           Key = "git.recent"
 	GitNewTab           Key = "git.new_tab"
 	GitReload           Key = "git.reload"
@@ -376,6 +393,23 @@ var catalogs = map[Lang]map[Key]string{
 		StopwatchRunning:               "計測中",
 		StopwatchPaused:                "一時停止",
 		GitOpen:                        "リポジトリを開く",
+		GitSSH:                         "SSH で開く",
+		GitSSHHosts:                    "SSH config のホスト",
+		GitSSHNoHosts:                  "SSH config にホストがありません。接続先を入力してください。",
+		GitSSHDest:                     "接続先",
+		GitSSHPort:                     "ポート",
+		GitSSHConnect:                  "接続",
+		GitSSHPickDir:                  "ディレクトリ",
+		GitSSHUp:                       "上へ",
+		GitSSHOpenHere:                 "このディレクトリを開く",
+		GitSSHBack:                     "接続先に戻る",
+		GitSSHConnecting:               "接続しています…",
+		GitSSHEmptyDir:                 "サブディレクトリはありません",
+		GitSSHRepoMark:                 "Git リポジトリです",
+		GitSSHBadDest:                  "接続先が正しくありません",
+		GitSSHBadPort:                  "ポートが正しくありません",
+		GitSSHBadDir:                   "ディレクトリは絶対パスで指定してください",
+		GitSSHFailed:                   "SSH に接続できません: %v",
 		GitRecent:                      "最近開いたリポジトリ",
 		GitNewTab:                      "新しいタブ",
 		GitReload:                      "再読み込み",
@@ -646,6 +680,23 @@ var catalogs = map[Lang]map[Key]string{
 		StopwatchRunning:               "Running",
 		StopwatchPaused:                "Paused",
 		GitOpen:                        "Open Repository",
+		GitSSH:                         "Open via SSH",
+		GitSSHHosts:                    "Hosts in SSH config",
+		GitSSHNoHosts:                  "No hosts in SSH config. Enter a destination.",
+		GitSSHDest:                     "Destination",
+		GitSSHPort:                     "Port",
+		GitSSHConnect:                  "Connect",
+		GitSSHPickDir:                  "Directory",
+		GitSSHUp:                       "Up",
+		GitSSHOpenHere:                 "Open This Directory",
+		GitSSHBack:                     "Back to Destination",
+		GitSSHConnecting:               "Connecting…",
+		GitSSHEmptyDir:                 "No subdirectories",
+		GitSSHRepoMark:                 "This is a Git repository",
+		GitSSHBadDest:                  "Enter a valid destination",
+		GitSSHBadPort:                  "Enter a valid port",
+		GitSSHBadDir:                   "Enter an absolute directory path",
+		GitSSHFailed:                   "Could not connect over SSH: %v",
 		GitRecent:                      "Recent repositories",
 		GitNewTab:                      "New Tab",
 		GitReload:                      "Reload",

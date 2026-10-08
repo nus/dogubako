@@ -2,7 +2,6 @@ package app
 
 import (
 	"image"
-	"path/filepath"
 
 	"github.com/hajimehoshi/ebiten/v2"
 	"github.com/hajimehoshi/ebiten/v2/inpututil"
@@ -11,6 +10,7 @@ import (
 	"github.com/guigui-gui/guigui"
 	"github.com/guigui-gui/guigui/basicwidget"
 
+	"github.com/nus/dogubako/internal/gitcli"
 	"github.com/nus/dogubako/internal/i18n"
 )
 
@@ -24,6 +24,13 @@ func (t *GitTool) buildEmptyHome(context *guigui.Context, adder *guigui.ChildAdd
 	})
 	context.SetEnabled(&t.openBtn, !busy)
 	adder.AddWidget(&t.openBtn)
+
+	t.sshBtn.SetText(i18n.T(lang, i18n.GitSSH))
+	t.sshBtn.OnDown(func(context *guigui.Context) {
+		model.BeginSSH()
+	})
+	context.SetEnabled(&t.sshBtn, !busy)
+	adder.AddWidget(&t.sshBtn)
 
 	paths := model.RecentPaths()
 	t.showRecent = len(paths) > 0
@@ -67,6 +74,7 @@ func (t *GitTool) layoutEmptyHome(context *guigui.Context, bounds image.Rectangl
 		maxW = bounds.Dx()
 	}
 	btn := t.openBtn.Measure(context, guigui.Constraints{})
+	ssh := t.sshBtn.Measure(context, guigui.Constraints{})
 	gap := u / 2
 
 	var titleH, listH, listW int
@@ -95,13 +103,13 @@ func (t *GitTool) layoutEmptyHome(context *guigui.Context, bounds image.Rectangl
 		listH = t.recentList.Measure(context, guigui.FixedWidthConstraints(listW)).Y
 	}
 
-	total := btn.Y
+	total := btn.Y + gap + ssh.Y
 	room := bounds.Dy() - pad
 	if room < u {
 		room = bounds.Dy()
 	}
 	if t.showRecent {
-		overhead := titleH + gap + gap + btn.Y
+		overhead := titleH + gap + gap + btn.Y + gap + ssh.Y
 		maxList := room - overhead
 		if maxList < 2*u {
 			maxList = 2 * u
@@ -128,6 +136,12 @@ func (t *GitTool) layoutEmptyHome(context *guigui.Context, bounds image.Rectangl
 		bx = bounds.Min.X
 	}
 	layouter.LayoutWidget(&t.openBtn, image.Rect(bx, y, bx+btn.X, y+btn.Y))
+	y += btn.Y + gap
+	sx := bounds.Min.X + (bounds.Dx()-ssh.X)/2
+	if sx < bounds.Min.X {
+		sx = bounds.Min.X
+	}
+	layouter.LayoutWidget(&t.sshBtn, image.Rect(sx, y, sx+ssh.X, y+ssh.Y))
 }
 
 func (t *GitTool) openRecentAtCursor(model *GitModel) {
@@ -164,13 +178,14 @@ type gitRecentRow struct {
 }
 
 func (r *gitRecentRow) Set(repoPath string) {
+	loc := gitcli.ParseLoc(repoPath)
 	setBoldText(&r.name, true)
-	r.name.SetValue(filepath.Base(repoPath))
+	r.name.SetValue(repoFolder(repoPath))
 	r.name.SetVerticalAlign(basicwidget.VerticalAlignMiddle)
 	r.name.SetWrapMode(basicwidget.WrapModeNone)
 	r.name.SetEllipsisString("…")
 	r.name.SetSelectable(false)
-	r.path.SetValue(repoPath)
+	r.path.SetValue(loc.Display())
 	r.path.SetOpacity(0.62)
 	r.path.SetVerticalAlign(basicwidget.VerticalAlignMiddle)
 	r.path.SetWrapMode(basicwidget.WrapModeNone)

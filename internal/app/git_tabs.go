@@ -1,12 +1,14 @@
 package app
 
 import (
-	"path/filepath"
+	"path"
 	"slices"
 	"strings"
 	"time"
 
 	"github.com/guigui-gui/guigui"
+
+	"github.com/nus/dogubako/internal/gitcli"
 )
 
 func (m *GitModel) ensure() {
@@ -38,6 +40,7 @@ func (m *GitModel) Drain() {
 	for _, s := range m.tabs {
 		s.Drain()
 	}
+	m.drainSSH()
 	m.dedupeTabs()
 }
 
@@ -119,24 +122,32 @@ func (m *GitModel) TabLabel(index int) string {
 	if index < 0 || index >= len(m.tabs) {
 		return ""
 	}
-	path := m.tabs[index].path
-	if path == "" {
+	repoPath := m.tabs[index].path
+	if repoPath == "" {
 		return ""
 	}
-	base := filepath.Base(path)
+	base := repoFolder(repoPath)
 	for i, other := range m.tabs {
 		if i == index || other.path == "" {
 			continue
 		}
-		if filepath.Base(other.path) == base {
-			parent := filepath.Base(filepath.Dir(path))
-			if parent != "" && parent != "." && parent != string(filepath.Separator) {
+		if repoFolder(other.path) == base {
+			parent := repoParent(repoPath)
+			if parent != "" && parent != "." && parent != "/" {
 				return parent + "/" + base
 			}
 			break
 		}
 	}
 	return base
+}
+
+func repoFolder(repoPath string) string {
+	return path.Base(gitcli.ParseLoc(repoPath).Dir)
+}
+
+func repoParent(repoPath string) string {
+	return path.Base(path.Dir(gitcli.ParseLoc(repoPath).Dir))
 }
 
 func (m *GitModel) SelectTab(index int) {

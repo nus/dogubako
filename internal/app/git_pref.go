@@ -5,6 +5,8 @@ import (
 	"os"
 	"path/filepath"
 	"strings"
+
+	"github.com/nus/dogubako/internal/gitcli"
 )
 
 const gitRecentMax = 12
@@ -142,6 +144,12 @@ func canonicalPath(path string) string {
 	path = strings.TrimSpace(path)
 	if path == "" {
 		return ""
+	}
+	if loc := gitcli.ParseLoc(path); loc.IsRemote() {
+		if loc.Dir == "" || loc.Dir == "." {
+			return ""
+		}
+		return loc.Key()
 	}
 	path = filepath.Clean(path)
 	resolved, err := filepath.EvalSymlinks(path)
