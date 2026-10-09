@@ -443,6 +443,7 @@ func (r *gitRename) Ask(prompt, initial, okText, cancelText string, onOK func(na
 	r.content.onOK = onOK
 	r.content.showPush = false
 	r.content.onOKPush = nil
+	r.content.focusInput = true
 	r.content.input.SetValue(initial)
 	r.popup.SetOpen(true)
 }
@@ -457,6 +458,7 @@ func (r *gitRename) AskTag(prompt, pushLabel, okText, cancelText string, onOK fu
 	r.content.showPush = true
 	r.content.pushLabel = pushLabel
 	r.content.onOKPush = onOK
+	r.content.focusInput = true
 	r.content.push.SetValue(false)
 	r.content.input.SetValue("")
 	r.popup.SetOpen(true)
@@ -513,10 +515,20 @@ type gitRenameContent struct {
 	pushHit     image.Rectangle
 	pushPressed bool
 	onOKPush    func(name string, push bool)
+	// focusInput is set when the dialog opens and consumed by Tick, once the
+	// text field is in the widget tree and can take focus.
+	focusInput bool
 
 	rowItems    []guigui.LinearLayoutItem
 	pushItems   []guigui.LinearLayoutItem
 	layoutItems []guigui.LinearLayoutItem
+}
+
+func (c *gitRenameContent) close() {
+	c.focusInput = false
+	if c.popup != nil {
+		c.popup.SetOpen(false)
+	}
 }
 
 func (c *gitRenameContent) submit() {
@@ -524,17 +536,26 @@ func (c *gitRenameContent) submit() {
 	if name == "" || name == c.initial {
 		return
 	}
+	c.focusInput = false
 	if c.showPush {
 		push := c.push.Value()
 		ok := c.onOKPush
-		c.popup.SetOpen(false)
+		c.onOK = nil
+		c.onOKPush = nil
+		if c.popup != nil {
+			c.popup.SetOpen(false)
+		}
 		if ok != nil {
 			ok(name, push)
 		}
 		return
 	}
 	ok := c.onOK
-	c.popup.SetOpen(false)
+	c.onOK = nil
+	c.onOKPush = nil
+	if c.popup != nil {
+		c.popup.SetOpen(false)
+	}
 	if ok != nil {
 		ok(name)
 	}
@@ -558,7 +579,7 @@ func (c *gitRenameContent) Build(context *guigui.Context, adder *guigui.ChildAdd
 		c.pushText.SetVerticalAlign(basicwidget.VerticalAlignMiddle)
 		c.pushText.SetSelectable(false)
 	}
-	// Enter confirms. A focus loss, including a click outside the dialog, does not.
+	// Enter in the field confirms. A focus loss, including a click outside, does not.
 	c.input.OnValueChanged(func(context *guigui.Context, text string, committed bool) {
 		if committed && inpututil.IsKeyJustPressed(ebiten.KeyEnter) {
 			c.submit()
@@ -566,9 +587,13 @@ func (c *gitRenameContent) Build(context *guigui.Context, adder *guigui.ChildAdd
 		guigui.RequestRebuild()
 	})
 
+	// Keys reach this dialog before the text field is focused, and while focus
+	// sits on another control inside it.
+	context.SetButtonInputReceptive(c, true)
+
 	c.cancel.SetText(c.cancelText)
 	c.cancel.OnDown(func(context *guigui.Context) {
-		c.popup.SetOpen(false)
+		c.close()
 	})
 	c.ok.SetText(c.okText)
 	c.ok.SetType(basicwidget.ButtonTypePrimary)
@@ -697,11 +722,41 @@ func (c *gitRenameContent) Layout(context *guigui.Context, widgetBounds *guigui.
 	}
 }
 
+func (c *gitRenameContent) Tick(context *guigui.Context, widgetBounds *guigui.WidgetBounds) error {
+	if !c.focusInput {
+		return nil
+	}
+	c.focusInput = false
+	if c.popup == nil || !c.popup.IsOpen() {
+		return nil
+	}
+	c.input.SelectAll()
+	context.SetFocused(&c.input, true)
+	return nil
+}
+
+func (c *gitRenameContent) HandleButtonInput(context *guigui.Context, widgetBounds *guigui.WidgetBounds) guigui.HandleInputResult {
+	if c.popup == nil || !c.popup.IsOpen() {
+		return guigui.HandleInputResult{}
+	}
+	if inpututil.IsKeyJustPressed(ebiten.KeyEscape) {
+		c.close()
+		return guigui.HandleInputByWidget(c)
+	}
+	// Enter in the text field commits there and submits via OnValueChanged.
+	// This covers Enter before that field is focused, and the numpad key.
+	if inpututil.IsKeyJustPressed(ebiten.KeyEnter) || inpututil.IsKeyJustPressed(ebiten.KeyNumpadEnter) {
+		c.submit()
+		return guigui.HandleInputByWidget(c)
+	}
+	return guigui.HandleInputResult{}
+}
+
 func (c *gitRenameContent) HandlePointingInput(context *guigui.Context, widgetBounds *guigui.WidgetBounds) guigui.HandleInputResult {
 	cursor := image.Pt(ebiten.CursorPosition())
 	outside := inpututil.IsMouseButtonJustPressed(ebiten.MouseButtonLeft) || inpututil.IsMouseButtonJustPressed(ebiten.MouseButtonRight)
 	if outside && c.popup != nil && c.popup.IsOpen() && !cursor.In(widgetBounds.Bounds()) {
-		c.popup.SetOpen(false)
+		c.close()
 		return guigui.HandleInputByWidget(c)
 	}
 	if !c.showPush || c.pushHit.Empty() {
