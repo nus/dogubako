@@ -12,7 +12,17 @@ import (
 // can be reverse-applied onto the index. Otherwise the patch stages lines
 // from an unstaged diff onto the index.
 func PatchForLines(diff string, selStart, selEnd int, unstage bool) (string, bool) {
-	if selEnd <= selStart || strings.TrimSpace(diff) == "" {
+	if selEnd <= selStart {
+		return "", false
+	}
+	return PatchForRanges(diff, [][2]int{{selStart, selEnd}}, unstage)
+}
+
+// PatchForRanges builds a patch from the added and removed lines whose byte
+// ranges overlap any of ranges. ranges may be disjoint. unstage selects lines
+// from a staged diff so the patch can be reverse-applied onto the index.
+func PatchForRanges(diff string, ranges [][2]int, unstage bool) (string, bool) {
+	if len(ranges) == 0 || strings.TrimSpace(diff) == "" {
 		return "", false
 	}
 	sections := parseDiffSections(diff)
@@ -25,7 +35,7 @@ func PatchForLines(diff string, selStart, selEnd int, unstage bool) (string, boo
 		var hunks []string
 		oldN, newN := 0, 0
 		for _, h := range sec.hunks {
-			body, o, n, ok := filterHunk(h, selStart, selEnd, unstage)
+			body, o, n, ok := filterHunk(h, ranges, unstage)
 			if !ok {
 				continue
 			}
@@ -216,7 +226,7 @@ func classifyDiffLine(text string) (byte, string) {
 	}
 }
 
-func filterHunk(h diffHunk, selStart, selEnd int, unstage bool) (string, int, int, bool) {
+func filterHunk(h diffHunk, ranges [][2]int, unstage bool) (string, int, int, bool) {
 	var b strings.Builder
 	oldN, newN := 0, 0
 	changed := false
@@ -229,7 +239,7 @@ func filterHunk(h diffHunk, selStart, selEnd int, unstage bool) (string, int, in
 			}
 			continue
 		}
-		selected := ln.start < selEnd && ln.end > selStart
+		selected := lineOverlapsRanges(ln.start, ln.end, ranges)
 		emit, include := filterDiffKind(ln.kind, selected, unstage)
 		if !include {
 			prev = false
@@ -256,6 +266,15 @@ func filterHunk(h diffHunk, selStart, selEnd int, unstage bool) (string, int, in
 		return "", 0, 0, false
 	}
 	return b.String(), oldN, newN, true
+}
+
+func lineOverlapsRanges(start, end int, ranges [][2]int) bool {
+	for _, r := range ranges {
+		if start < r[1] && end > r[0] {
+			return true
+		}
+	}
+	return false
 }
 
 func filterDiffKind(kind byte, selected, unstage bool) (byte, bool) {

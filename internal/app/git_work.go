@@ -504,12 +504,15 @@ type gitWorkDiff struct {
 	guigui.DefaultWidget
 
 	panel basicwidget.Panel
-	text  gitDiffText
+	mode  gitDiffModeBar
+	view  gitDiffView
 	note  basicwidget.Text
 
 	body  string
 	empty string
 	shown string
+	split bool
+	show  bool
 }
 
 func (d *gitWorkDiff) Set(body, empty, shown string) {
@@ -518,28 +521,39 @@ func (d *gitWorkDiff) Set(body, empty, shown string) {
 	if shown != d.shown {
 		d.shown = shown
 		d.panel.ForceSetScrollOffset(0, 0)
+		d.view.ResetScroll()
 	}
+}
+
+func (d *gitWorkDiff) SetSplit(lang i18n.Lang, split bool, onSplit func(bool)) {
+	d.mode.Set(lang, split, onSplit)
+	if split == d.split {
+		return
+	}
+	d.split = split
+	d.view.ResetScroll()
 }
 
 func (d *gitWorkDiff) Text() string {
 	return d.body
 }
 
-func (d *gitWorkDiff) Selection() (int, int) {
-	return d.text.Selection()
+func (d *gitWorkDiff) Patch(unstage bool) (string, bool, bool) {
+	if d.body == "" {
+		return "", false, false
+	}
+	return d.view.Patch(unstage)
 }
 
 func (d *gitWorkDiff) SetLineMenu(f func(context *guigui.Context, start, end int) bool) {
-	d.text.onMenu = f
+	d.view.SetLineMenu(f)
 }
 
 func (d *gitWorkDiff) Build(context *guigui.Context, adder *guigui.ChildAdder) error {
-	adder.AddWidget(&d.panel)
-	d.panel.SetAutoBorder(false)
-	d.panel.SetBorders(basicwidget.PanelBorders{})
-	d.panel.SetBackgroundStyle(basicwidget.PanelBackgroundStyleNone)
-	d.panel.SetContentConstraints(basicwidget.PanelContentConstraintsNone)
-	if d.body == "" {
+	d.show = d.body != ""
+	if !d.show {
+		adder.AddWidget(&d.panel)
+		configureDiffPanel(&d.panel)
 		d.note.SetValue(d.empty)
 		d.note.SetMultiline(true)
 		d.note.SetWrapMode(basicwidget.WrapModeNormal)
@@ -547,21 +561,35 @@ func (d *gitWorkDiff) Build(context *guigui.Context, adder *guigui.ChildAdder) e
 		d.panel.SetContent(&d.note)
 		return nil
 	}
-	d.panel.SetContent(&d.text)
-	d.text.SetMultiline(true)
-	d.text.SetWrapMode(basicwidget.WrapModeNone)
-	d.text.SetSelectable(true)
-	d.text.SetEditable(false)
-	d.text.SetSelectionVisibleWhenUnfocused(true)
-	setGitDiffFont(&d.text.Text)
-	d.text.SetValue(d.body)
-	styles := styleDiff(d.body, context.ColorMode() == ebiten.ColorModeDark)
-	d.text.SetOverrideStyles(&styles, false)
+	adder.AddWidget(&d.mode)
+	adder.AddWidget(&d.view)
+	d.view.Set(d.body, context.ColorMode() == ebiten.ColorModeDark, d.split)
 	return nil
 }
 
 func (d *gitWorkDiff) Layout(context *guigui.Context, widgetBounds *guigui.WidgetBounds, layouter *guigui.ChildLayouter) {
-	layouter.LayoutWidget(&d.panel, widgetBounds.Bounds())
+	bounds := widgetBounds.Bounds()
+	if !d.show {
+		layouter.LayoutWidget(&d.panel, bounds)
+		return
+	}
+	u := basicwidget.UnitSize(context)
+	mode := d.mode.Measure(context, guigui.Constraints{})
+	headerH := mode.Y
+	if headerH <= 0 {
+		headerH = u
+	}
+	modeW := mode.X
+	if modeW > bounds.Dx() {
+		modeW = bounds.Dx()
+	}
+	gap := u / 8
+	layouter.LayoutWidget(&d.mode, image.Rect(bounds.Max.X-modeW, bounds.Min.Y, bounds.Max.X, bounds.Min.Y+headerH))
+	body := image.Rect(bounds.Min.X, bounds.Min.Y+headerH+gap, bounds.Max.X, bounds.Max.Y)
+	if body.Min.Y > body.Max.Y {
+		body.Min.Y = body.Max.Y
+	}
+	layouter.LayoutWidget(&d.view, body)
 }
 
 func (d *gitWorkDiff) Measure(context *guigui.Context, constraints guigui.Constraints) image.Point {
@@ -587,6 +615,7 @@ func (t *GitTool) setWorkDiff(lang i18n.Lang, model *GitModel) {
 		shown = path + "\x00staged"
 	}
 	t.workPanes.diff.Set(body, empty, shown)
+	t.workPanes.diff.SetSplit(lang, t.diffSplit, t.setDiffSplit)
 	t.workPanes.diff.SetLineMenu(func(context *guigui.Context, start, end int) bool {
 		return t.openLineMenu(context, start, end)
 	})
@@ -665,10 +694,5 @@ func (t *GitTool) workDiffText(lang i18n.Lang, model *GitModel, path string, sta
 // linePatch reports a patch for the selection in the diff column.
 // selected is true when the user has a non-empty selection.
 func (t *GitTool) linePatch(unstage bool) (string, bool, bool) {
-	start, end := t.workPanes.diff.Selection()
-	if end <= start || t.workPanes.diff.Text() == "" {
-		return "", false, false
-	}
-	patch, ok := gitcli.PatchForLines(t.workPanes.diff.Text(), start, end, unstage)
-	return patch, ok, true
+	return t.workPanes.diff.Patch(unstage)
 }

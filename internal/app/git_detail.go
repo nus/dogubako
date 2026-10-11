@@ -30,7 +30,7 @@ type gitDetail struct {
 	tabRow      guigui.LinearLayout
 }
 
-func (d *gitDetail) Set(lang i18n.Lang, model *GitModel, onMenu func(gitcli.Ref)) {
+func (d *gitDetail) Set(lang i18n.Lang, model *GitModel, onMenu func(gitcli.Ref), split bool, onSplit func(bool)) {
 	hash := ""
 	if model.HasRepo() {
 		hash = model.Detail().Hash
@@ -50,7 +50,7 @@ func (d *gitDetail) Set(lang i18n.Lang, model *GitModel, onMenu func(gitcli.Ref)
 		d.changesBtn.SetType(basicwidget.ButtonTypePrimary)
 	}
 	d.body.Set(lang, model, onMenu)
-	d.changes.Set(lang, model)
+	d.changes.Set(lang, model, split, onSplit)
 }
 
 func (d *gitDetail) selectTab(tab int) {

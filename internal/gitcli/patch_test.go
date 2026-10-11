@@ -104,6 +104,21 @@ func TestPatchForLinesPartialNewFile(t *testing.T) {
 	}
 }
 
+func TestPatchForRangesSkipsGap(t *testing.T) {
+	b0, b1 := lineSpan(t, sampleDiff, "-beta\n")
+	d0, d1 := lineSpan(t, sampleDiff, "+delta\n")
+	got, ok := PatchForRanges(sampleDiff, [][2]int{{b0, b1}, {d0, d1}}, false)
+	if !ok {
+		t.Fatal("expected a patch")
+	}
+	if !strings.Contains(got, "-beta\n") || !strings.Contains(got, "+delta\n") {
+		t.Fatalf("patch:\n%s", got)
+	}
+	if strings.Contains(got, "+BETA\n") || strings.Contains(got, "-BETA\n") {
+		t.Fatalf("gap line included:\n%s", got)
+	}
+}
+
 func lineSpan(t *testing.T, diff, fragment string) (int, int) {
 	t.Helper()
 	i := strings.Index(diff, fragment)

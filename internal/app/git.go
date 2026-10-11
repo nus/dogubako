@@ -108,6 +108,7 @@ type GitTool struct {
 	unstageBtn  basicwidget.Button
 	showChanges bool
 	diffStaged  bool
+	diffSplit   bool
 	workPanes   gitWorkPanes
 	msgInput    guigui.WidgetWithSize[*basicwidget.TextInput]
 	status      basicwidget.Text
@@ -379,7 +380,7 @@ func (t *GitTool) Build(context *guigui.Context, adder *guigui.ChildAdder) error
 		context.SetEnabled(&t.commitList, !busy)
 	}
 
-	t.detail.Set(lang, model, onMenu)
+	t.detail.Set(lang, model, onMenu, t.diffSplit, t.setDiffSplit)
 
 	t.setChangeList(context, lang, model, snap.Status.Entries, has && !busy)
 
@@ -795,6 +796,14 @@ func (t *GitTool) commitAtCursor() (string, bool) {
 	return "", false
 }
 
+func (t *GitTool) setDiffSplit(split bool) {
+	if t.diffSplit == split {
+		return
+	}
+	t.diffSplit = split
+	guigui.RequestRebuild()
+}
+
 func (t *GitTool) openLineMenu(context *guigui.Context, start, end int) bool {
 	v, ok := context.Env(t, EnvKeyModel)
 	if !ok || end <= start {
@@ -806,8 +815,8 @@ func (t *GitTool) openLineMenu(context *guigui.Context, start, end int) bool {
 		return false
 	}
 	_, staged := t.activeWorkTarget()
-	patch, ok := gitcli.PatchForLines(t.workPanes.diff.Text(), start, end, staged)
-	if !ok {
+	patch, ok, selected := t.workPanes.diff.Patch(staged)
+	if !selected || !ok {
 		return false
 	}
 	lang := appModel.Lang()
