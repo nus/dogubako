@@ -35,6 +35,7 @@ type gitCommitExpand struct {
 	seen        string
 	file        string
 	lanes       int
+	graphUnits  float64
 	loading     bool
 	showFiles   bool
 	metaValue   string
@@ -178,7 +179,7 @@ func (e *gitCommitExpand) Layout(context *guigui.Context, widgetBounds *guigui.W
 	if n < 1 {
 		n = 1
 	}
-	graphW := n*gitLaneWidth(u) + u/4
+	graphW := gitGraphColWidth(b.Dx(), u, n, e.graphUnits)
 	gap := u / 6
 	layouter.LayoutWidget(&e.bridge, image.Rect(b.Min.X, b.Min.Y, b.Min.X+graphW, b.Max.Y))
 
@@ -639,14 +640,24 @@ func diffStatColors(dark bool) (add, del color.NRGBA) {
 
 // gitHistStack is the history column body: the commit graph, and the diff
 // of the file chosen in the open commit. A horizontal splitter sets their heights.
+// Vertical splitters set the graph, title, author, commit-id, and date widths.
 type gitHistStack struct {
 	guigui.DefaultWidget
 
-	tool     *GitTool
-	graph    guigui.Widget
-	diff     gitWorkDiff
-	split    gitHistSplit
-	showDiff bool
+	tool        *GitTool
+	graph       guigui.Widget
+	header      gitCommitHeader
+	diff        gitWorkDiff
+	split       gitHistSplit
+	graphSplit  gitGraphSplit
+	authorSplit gitMetaSplit
+	hashSplit   gitMetaSplit
+	dateSplit   gitMetaSplit
+	showDiff    bool
+}
+
+func (s *gitHistStack) showGraphSplit() bool {
+	return s.tool != nil && s.tool.graphLanes > 0 && s.graph == &s.tool.commitList
 }
 
 func (s *gitHistStack) Build(context *guigui.Context, adder *guigui.ChildAdder) error {
@@ -654,15 +665,38 @@ func (s *gitHistStack) Build(context *guigui.Context, adder *guigui.ChildAdder) 
 		s.tool.histDragging = false
 		s.tool.setHistDragPassthrough(context, false)
 	}
+	if s.tool != nil && s.tool.graphDragging && !ebiten.IsMouseButtonPressed(ebiten.MouseButtonLeft) {
+		s.tool.graphDragging = false
+		s.tool.setGraphDragPassthrough(context, false)
+	}
+	if s.tool != nil && s.tool.metaDrag != 0 && !ebiten.IsMouseButtonPressed(ebiten.MouseButtonLeft) {
+		s.tool.metaDrag = 0
+		s.tool.setGraphDragPassthrough(context, false)
+	}
 	if s.graph != nil {
 		adder.AddWidget(s.graph)
 	}
-	if !s.showDiff {
-		return nil
+	if s.showDiff {
+		s.split.tool = s.tool
+		adder.AddWidget(&s.diff)
+		adder.AddWidget(&s.split)
 	}
-	s.split.tool = s.tool
-	adder.AddWidget(&s.diff)
-	adder.AddWidget(&s.split)
+	if s.showGraphSplit() {
+		s.header.tool = s.tool
+		context.SetClipChildren(&s.header, true)
+		adder.AddWidget(&s.header)
+		s.graphSplit.tool = s.tool
+		adder.AddWidget(&s.graphSplit)
+		s.authorSplit.tool = s.tool
+		s.authorSplit.kind = gitMetaDragAuthor
+		adder.AddWidget(&s.authorSplit)
+		s.hashSplit.tool = s.tool
+		s.hashSplit.kind = gitMetaDragHash
+		adder.AddWidget(&s.hashSplit)
+		s.dateSplit.tool = s.tool
+		s.dateSplit.kind = gitMetaDragDate
+		adder.AddWidget(&s.dateSplit)
+	}
 	return nil
 }
 
@@ -674,33 +708,72 @@ func (s *gitHistStack) Layout(context *guigui.Context, widgetBounds *guigui.Widg
 	if s.graph == nil {
 		return
 	}
+	graphB := b
 	if !s.showDiff {
 		if s.tool != nil {
 			s.tool.histGraph = b
 		}
 		layouter.LayoutWidget(s.graph, b)
+	} else {
+		u := basicwidget.UnitSize(context)
+		splitH := gitWorkSplitWidth(u)
+		minPane := gitHistMinPane(u)
+		frac := 0.0
+		if s.tool != nil {
+			frac = s.tool.histFrac
+		}
+		graphH := gitHistGraphHeight(b.Dy(), splitH, frac, minPane, minPane)
+		graphB = image.Rect(b.Min.X, b.Min.Y, b.Max.X, b.Min.Y+graphH)
+		if s.tool != nil {
+			s.tool.histGraph = graphB
+		}
+		splitB := image.Rect(b.Min.X, graphB.Max.Y, b.Max.X, graphB.Max.Y+splitH)
+		diffB := image.Rect(b.Min.X, splitB.Max.Y, b.Max.X, b.Max.Y)
+		if diffB.Min.Y > diffB.Max.Y {
+			diffB.Min.Y = diffB.Max.Y
+		}
+		layouter.LayoutWidget(s.graph, graphB)
+		layouter.LayoutWidget(&s.split, splitB)
+		layouter.LayoutWidget(&s.diff, diffB)
+	}
+	s.layoutGraphSplit(context, graphB, layouter)
+}
+
+// layoutGraphSplit places the draggable edges of the graph and the text columns.
+// List items are inset by the corner radius, and the graph column starts there.
+func (s *gitHistStack) layoutGraphSplit(context *guigui.Context, graphB image.Rectangle, layouter *guigui.ChildLayouter) {
+	if s.tool == nil || !s.showGraphSplit() {
 		return
 	}
 	u := basicwidget.UnitSize(context)
-	splitH := gitWorkSplitWidth(u)
-	minPane := gitHistMinPane(u)
-	frac := 0.0
-	if s.tool != nil {
-		frac = s.tool.histFrac
+	inset := basicwidget.RoundedCornerRadius(context)
+	rowW := graphB.Dx() - 2*inset
+	if rowW < 1 {
+		return
 	}
-	graphH := gitHistGraphHeight(b.Dy(), splitH, frac, minPane, minPane)
-	graphB := image.Rect(b.Min.X, b.Min.Y, b.Max.X, b.Min.Y+graphH)
-	if s.tool != nil {
-		s.tool.histGraph = graphB
+	rowLeft := graphB.Min.X + inset
+	rowRight := graphB.Max.X - inset
+	graphW := gitGraphColWidth(rowW, u, s.tool.graphLanes, s.tool.graphUnits)
+	splitW := gitWorkSplitWidth(u)
+	headerB := image.Rect(graphB.Min.X, graphB.Min.Y, graphB.Max.X, graphB.Min.Y+gitCommitHeaderHeight(u))
+	if headerB.Max.Y > graphB.Max.Y {
+		headerB.Max.Y = graphB.Max.Y
 	}
-	splitB := image.Rect(b.Min.X, graphB.Max.Y, b.Max.X, graphB.Max.Y+splitH)
-	diffB := image.Rect(b.Min.X, splitB.Max.Y, b.Max.X, b.Max.Y)
-	if diffB.Min.Y > diffB.Max.Y {
-		diffB.Min.Y = diffB.Max.Y
+	layouter.LayoutWidget(&s.header, headerB)
+	splitB := gitColSplitRect(rowLeft+graphW, splitW, headerB.Min.Y, headerB.Max.Y, graphB.Min.X, graphB.Max.X)
+	s.tool.graphSplitBounds = splitB
+	layouter.LayoutWidget(&s.graphSplit, splitB)
+
+	authorW, hashW, dateW := gitMetaColWidths(rowW, u, graphW, s.tool.authorUnits, s.tool.hashUnits, s.tool.dateUnits)
+	subjectR, authorR, hashR := gitMetaSplitEdges(rowRight, gitCommitColGap(u), authorW, hashW, dateW)
+	place := func(edge int, dst *image.Rectangle, widget guigui.Widget) {
+		r := gitColSplitRect(edge, splitW, headerB.Min.Y, headerB.Max.Y, graphB.Min.X, graphB.Max.X)
+		*dst = r
+		layouter.LayoutWidget(widget, r)
 	}
-	layouter.LayoutWidget(s.graph, graphB)
-	layouter.LayoutWidget(&s.split, splitB)
-	layouter.LayoutWidget(&s.diff, diffB)
+	place(subjectR, &s.tool.authorSplitBounds, &s.authorSplit)
+	place(authorR, &s.tool.hashSplitBounds, &s.hashSplit)
+	place(hashR, &s.tool.dateSplitBounds, &s.dateSplit)
 }
 
 func (s *gitHistStack) Measure(context *guigui.Context, constraints guigui.Constraints) image.Point {
@@ -716,13 +789,25 @@ func (s *gitHistStack) Measure(context *guigui.Context, constraints guigui.Const
 }
 
 func (s *gitHistStack) HandlePointingInput(context *guigui.Context, widgetBounds *guigui.WidgetBounds) guigui.HandleInputResult {
-	if s.tool == nil || !s.tool.histDragging {
+	if s.tool == nil {
 		return guigui.HandleInputResult{}
 	}
-	return s.tool.dragHistSplit(context)
+	if s.tool.graphDragging {
+		return s.tool.dragGraphSplit(context)
+	}
+	if s.tool.metaDrag != 0 {
+		return s.tool.dragMetaSplit(context, s.tool.metaDrag)
+	}
+	if s.tool.histDragging {
+		return s.tool.dragHistSplit(context)
+	}
+	return guigui.HandleInputResult{}
 }
 
 func (s *gitHistStack) CursorShape(context *guigui.Context, widgetBounds *guigui.WidgetBounds) (ebiten.CursorShapeType, bool) {
+	if s.tool != nil && (s.tool.graphDragging || s.tool.metaDrag != 0) {
+		return ebiten.CursorShapeEWResize, true
+	}
 	if s.tool != nil && s.tool.histDragging {
 		return ebiten.CursorShapeNSResize, true
 	}
