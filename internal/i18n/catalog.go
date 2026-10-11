@@ -160,6 +160,8 @@ const (
 	GitParents          Key = "git.parents"
 	GitChanges          Key = "git.changes"
 	GitChangeContent    Key = "git.change_content"
+	GitDiffCompact      Key = "git.diff_compact"
+	GitDiffSplit        Key = "git.diff_split"
 	GitNoChanges        Key = "git.no_changes"
 
 	StopwatchStart   Key = "stopwatch.start"
@@ -462,6 +464,8 @@ var catalogs = map[Lang]map[Key]string{
 		GitParents:                     "親",
 		GitChanges:                     "変更",
 		GitChangeContent:               "変更内容",
+		GitDiffCompact:                 "コンパクト",
+		GitDiffSplit:                   "分割",
 		GitNoChanges:                   "変更はありません。",
 		MTPDevices:                     "デバイス",
 		MTPRefresh:                     "再読み込み",
@@ -749,6 +753,8 @@ var catalogs = map[Lang]map[Key]string{
 		GitParents:                     "Parents",
 		GitChanges:                     "Changes",
 		GitChangeContent:               "Changes",
+		GitDiffCompact:                 "Compact",
+		GitDiffSplit:                   "Split",
 		GitNoChanges:                   "No changes.",
 		MTPDevices:                     "Devices",
 		MTPRefresh:                     "Reload",

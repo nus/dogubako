@@ -1,6 +1,7 @@
 package app
 
 import (
+	"fmt"
 	"image/color"
 	"strings"
 	"testing"
@@ -73,6 +74,201 @@ func TestStyleDiffColors(t *testing.T) {
 	ctx, uniform := styles.ColorInRange(0, len(" ctx\n"), color.NRGBA{})
 	if !uniform || ctx != (color.NRGBA{}) {
 		t.Fatalf("context line color = %v uniform=%v", ctx, uniform)
+	}
+}
+
+func TestDiffGutter(t *testing.T) {
+	const edit = "" +
+		"diff --git a/a.txt b/a.txt\n" +
+		"index 111..222 100644\n" +
+		"--- a/a.txt\n" +
+		"+++ b/a.txt\n" +
+		"@@ -10,4 +10,4 @@\n" +
+		" ctx\n" +
+		"-old\n" +
+		"+new\n" +
+		" end\n"
+	want := strings.Join([]string{
+		gutterCols("", ""),
+		gutterCols("", ""),
+		gutterCols("", ""),
+		gutterCols("", ""),
+		gutterCols("", ""),
+		gutterCols("10", "10"),
+		gutterCols("11", ""),
+		gutterCols("", "11"),
+		gutterCols("12", "12"),
+	}, "\n") + "\n"
+	assertGutter(t, edit, want)
+
+	const fresh = "@@ -0,0 +1,2 @@\n+one\n+two\n"
+	assertGutter(t, fresh, strings.Join([]string{
+		gutterCols("", ""),
+		gutterCols("", "1"),
+		gutterCols("", "2"),
+	}, "\n")+"\n")
+
+	const gone = "@@ -8,2 +0,0 @@\n-one\n-two\n"
+	assertGutter(t, gone, strings.Join([]string{
+		gutterCols("", ""),
+		gutterCols("8", ""),
+		gutterCols("9", ""),
+	}, "\n")+"\n")
+
+	const two = "" +
+		"@@ -1,1 +1,1 @@\n" +
+		"-a\n" +
+		"+b\n" +
+		"@@ -30,1 +40,1 @@\n" +
+		" c\n"
+	assertGutter(t, two, strings.Join([]string{
+		gutterCols("", ""),
+		gutterCols("1", ""),
+		gutterCols("", "1"),
+		gutterCols("", ""),
+		gutterCols("30", "40"),
+	}, "\n")+"\n")
+
+	const marker = "@@ -1 +1 @@\n-a\n\\ No newline at end of file\n"
+	assertGutter(t, marker, strings.Join([]string{
+		gutterCols("", ""),
+		gutterCols("1", ""),
+		gutterCols("", ""),
+	}, "\n")+"\n")
+
+	const open = "@@ -1 +1 @@\n-a\n+b"
+	assertGutter(t, open, gutterCols("", "")+"\n"+gutterCols("1", "")+"\n"+gutterCols("", "1"))
+
+	const files = "" +
+		"@@ -1 +1 @@\n" +
+		"-a\n" +
+		"+b\n" +
+		"diff --git a/b b/b\n" +
+		"--- a/b\n" +
+		"+++ b/b\n" +
+		"@@ -3 +3 @@\n" +
+		"-c\n" +
+		"+d\n"
+	assertGutter(t, files, strings.Join([]string{
+		gutterCols("", ""),
+		gutterCols("1", ""),
+		gutterCols("", "1"),
+		gutterCols("", ""),
+		gutterCols("", ""),
+		gutterCols("", ""),
+		gutterCols("", ""),
+		gutterCols("3", ""),
+		gutterCols("", "3"),
+	}, "\n")+"\n")
+
+	wide := "@@ -9999,1 +10000,1 @@\n-a\n+b\n"
+	got := diffGutter(wide)
+	wantWide := strings.Join([]string{
+		fmt.Sprintf(" %5s %5s ", "", ""),
+		fmt.Sprintf(" %5s %5s ", "9999", ""),
+		fmt.Sprintf(" %5s %5s ", "", "10000"),
+	}, "\n") + "\n"
+	if got != wantWide {
+		t.Fatalf("wide gutter:\n%s", got)
+	}
+
+	binary := "diff --git a/b.jpg b/b.jpg\nBinary files a/b.jpg and b/b.jpg differ\n"
+	if diffGutter(binary) != "" {
+		t.Fatal("binary diff should have no line numbers")
+	}
+	if diffGutter("") != "" {
+		t.Fatal("empty diff should have no line numbers")
+	}
+}
+
+func TestSplitDiffPairsChanges(t *testing.T) {
+	diff := "" +
+		"diff --git a/a.txt b/a.txt\n" +
+		"@@ -10,3 +10,4 @@\n" +
+		" ctx\n" +
+		"-old\n" +
+		"+new\n" +
+		"+extra\n" +
+		" end\n"
+	doc := splitDiff(diff)
+	left := splitLines(doc.leftBody)
+	right := splitLines(doc.rightBody)
+	if len(left) != len(right) {
+		t.Fatalf("rows left %d right %d", len(left), len(right))
+	}
+	wantLeft := []string{"diff --git a/a.txt b/a.txt", "@@ -10,3 +10,4 @@", "ctx", "old", "", "end"}
+	wantRight := []string{"diff --git a/a.txt b/a.txt", "@@ -10,3 +10,4 @@", "ctx", "new", "extra", "end"}
+	if strings.Join(left, "\n") != strings.Join(wantLeft, "\n") || strings.Join(right, "\n") != strings.Join(wantRight, "\n") {
+		t.Fatalf("left %q\nright %q", left, right)
+	}
+	if string(doc.leftKinds) != "m@ -\x00 " || string(doc.rightKinds) != "m@ ++ " {
+		t.Fatalf("kinds left %q right %q", doc.leftKinds, doc.rightKinds)
+	}
+	leftNums := splitLines(doc.leftNum)
+	rightNums := splitLines(doc.rightNum)
+	if leftNums[3] != gutterNum("11") || rightNums[3] != gutterNum("11") || rightNums[4] != gutterNum("12") || leftNums[4] != gutterNum("") {
+		t.Fatalf("nums left %q right %q", leftNums, rightNums)
+	}
+
+	src := lineRange(diff, "-old\n")
+	if doc.leftSpans[3].srcStart != src[0] || doc.leftSpans[3].srcEnd != src[1] {
+		t.Fatalf("old span = %+v want %v", doc.leftSpans[3], src)
+	}
+	if doc.rightSpans[4].srcStart != lineRange(diff, "+extra\n")[0] {
+		t.Fatal("extra span does not point at the added line")
+	}
+	if doc.rightSpans[3].srcEnd <= doc.leftSpans[3].srcEnd {
+		t.Fatal("paired addition should follow the deletion in the source")
+	}
+}
+
+func TestSplitDiffNewAndDeleted(t *testing.T) {
+	added := splitDiff("@@ -0,0 +1,1 @@\n+one\n")
+	if splitLines(added.leftBody)[1] != "" || splitLines(added.rightBody)[1] != "one" {
+		t.Fatalf("new file left %q right %q", added.leftBody, added.rightBody)
+	}
+	removed := splitDiff("@@ -2 +0,0 @@\n-gone\n")
+	if splitLines(removed.leftBody)[1] != "gone" || splitLines(removed.rightBody)[1] != "" {
+		t.Fatalf("deleted file left %q right %q", removed.leftBody, removed.rightBody)
+	}
+}
+
+func splitLines(s string) []string {
+	return strings.Split(strings.TrimSuffix(s, "\n"), "\n")
+}
+
+func gutterNum(n string) string {
+	return fmt.Sprintf(" %*s ", diffNumMinWidth, n)
+}
+
+func lineRange(text, fragment string) [2]int {
+	i := strings.Index(text, fragment)
+	return [2]int{i, i + len(fragment)}
+}
+
+func gutterCols(old, new string) string {
+	return fmt.Sprintf(" %*s %*s ", diffNumMinWidth, old, diffNumMinWidth, new)
+}
+
+func assertGutter(t *testing.T, diff, want string) {
+	t.Helper()
+	got := diffGutter(diff)
+	if got != want {
+		t.Fatalf("gutter:\n%q\nwant:\n%q", got, want)
+	}
+	if strings.Count(got, "\n") != strings.Count(diff, "\n") || strings.HasSuffix(got, "\n") != strings.HasSuffix(diff, "\n") {
+		t.Fatalf("newline mismatch:\n%s", got)
+	}
+}
+
+func TestStyleDiffGutter(t *testing.T) {
+	diff := "+++ b/file\n@@ -1,2 +1,2 @@\n ctx\n-old\n+new\n"
+	gutter := diffGutter(diff)
+	styles := styleDiffGutter(gutter, diff, false)
+	pal := diffPalette(false)
+	got, uniform := styles.ColorInRange(0, len(gutter), color.NRGBA{})
+	if !uniform || got != pal.meta {
+		t.Fatalf("number color = %v uniform=%v", got, uniform)
 	}
 }
 
