@@ -116,6 +116,8 @@ const (
 	GitPush             Key = "git.push"
 	GitCommit           Key = "git.commit"
 	GitGraph            Key = "git.graph"
+	GitTitle            Key = "git.title"
+	GitColID            Key = "git.col_id"
 	GitAmend            Key = "git.amend"
 	GitCancel           Key = "git.cancel"
 	GitDelete           Key = "git.delete"
@@ -420,7 +422,9 @@ var catalogs = map[Lang]map[Key]string{
 		GitPull:                        "Pull",
 		GitPush:                        "Push",
 		GitCommit:                      "コミット",
-		GitGraph:                       "Graph",
+		GitGraph:                       "グラフ",
+		GitTitle:                       "タイトル",
+		GitColID:                       "ID",
 		GitAmend:                       "Amend",
 		GitCancel:                      "キャンセル",
 		GitDelete:                      "削除",
@@ -711,6 +715,8 @@ var catalogs = map[Lang]map[Key]string{
 		GitPush:                        "Push",
 		GitCommit:                      "Commit",
 		GitGraph:                       "Graph",
+		GitTitle:                       "Title",
+		GitColID:                       "ID",
 		GitAmend:                       "Amend",
 		GitCancel:                      "Cancel",
 		GitDelete:                      "Delete",

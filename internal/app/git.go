@@ -58,23 +58,34 @@ type GitTool struct {
 	remoteClosed bool
 	navSel       string
 
-	commitList     basicwidget.List[string]
-	commitRows     guigui.WidgetSlice[*gitCommitRow]
-	commitItems    []basicwidget.ListItem[string]
-	graphEmpty     basicwidget.Text
-	showEmpty      bool
-	openHash       string
-	openShown      string
-	openFromSelect bool
-	building       bool
-	expand         gitCommitExpand
-	histFile       string
-	histFor        string
-	histFrac       float64
-	histDragging   bool
-	histBounds     image.Rectangle
-	histGraph      image.Rectangle
-	histStack      gitHistStack
+	commitList        basicwidget.List[string]
+	commitRows        guigui.WidgetSlice[*gitCommitRow]
+	commitItems       []basicwidget.ListItem[string]
+	graphEmpty        basicwidget.Text
+	showEmpty         bool
+	openHash          string
+	openShown         string
+	openFromSelect    bool
+	building          bool
+	expand            gitCommitExpand
+	histFile          string
+	histFor           string
+	histFrac          float64
+	histDragging      bool
+	histBounds        image.Rectangle
+	histGraph         image.Rectangle
+	histStack         gitHistStack
+	graphUnits        float64
+	graphDragging     bool
+	graphLanes        int
+	graphSplitBounds  image.Rectangle
+	authorUnits       float64
+	hashUnits         float64
+	dateUnits         float64
+	metaDrag          int
+	authorSplitBounds image.Rectangle
+	hashSplitBounds   image.Rectangle
+	dateSplitBounds   image.Rectangle
 
 	emptyHome   bool
 	showRecent  bool
@@ -186,6 +197,14 @@ func (t *GitTool) Build(context *guigui.Context, adder *guigui.ChildAdder) error
 	if t.histDragging && !ebiten.IsMouseButtonPressed(ebiten.MouseButtonLeft) {
 		t.histDragging = false
 		t.setHistDragPassthrough(context, false)
+	}
+	if t.graphDragging && !ebiten.IsMouseButtonPressed(ebiten.MouseButtonLeft) {
+		t.graphDragging = false
+		t.setGraphDragPassthrough(context, false)
+	}
+	if t.metaDrag != 0 && !ebiten.IsMouseButtonPressed(ebiten.MouseButtonLeft) {
+		t.metaDrag = 0
+		t.setGraphDragPassthrough(context, false)
 	}
 	t.tabBar.Sync(lang, model)
 	adder.AddWidget(&t.tabBar)
@@ -342,6 +361,7 @@ func (t *GitTool) Build(context *guigui.Context, adder *guigui.ChildAdder) error
 
 	rows := snap.Graph
 	t.showEmpty = !has || len(rows) == 0
+	t.graphLanes = 0
 	if !t.commitView && t.showEmpty {
 		t.graphEmpty.SetMultiline(true)
 		t.graphEmpty.SetWrapMode(basicwidget.WrapModeNormal)
@@ -357,6 +377,7 @@ func (t *GitTool) Build(context *guigui.Context, adder *guigui.ChildAdder) error
 		t.graphEmpty.SetBaseStyle(&emptyStyle)
 		t.histFile = ""
 		t.histFor = ""
+		t.commitList.SetHeaderHeight(0)
 		t.histStack.tool = t
 		t.histStack.graph = &t.graphEmpty
 		t.histStack.showDiff = false
@@ -378,11 +399,19 @@ func (t *GitTool) Build(context *guigui.Context, adder *guigui.ChildAdder) error
 		t.commitRows.SetLen(len(rows))
 		t.commitItems = slices.Delete(t.commitItems, 0, len(t.commitItems))
 		lanes := snap.Lanes
+		if lanes < 1 {
+			lanes = 1
+		}
+		t.graphLanes = lanes
 		for i, row := range rows {
 			r := t.commitRows.At(i)
 			r.Set(row, lanes, row.Commit.Hash == snap.HEAD, lang, func(ref gitcli.Ref) {
 				t.switchBranch(lang, model, ref)
 			}, onMenu)
+			r.graphUnits = t.graphUnits
+			r.authorUnits = t.authorUnits
+			r.hashUnits = t.hashUnits
+			r.dateUnits = t.dateUnits
 			t.commitItems = append(t.commitItems, basicwidget.ListItem[string]{
 				Content: r,
 				Value:   row.Commit.Hash,
@@ -397,6 +426,7 @@ func (t *GitTool) Build(context *guigui.Context, adder *guigui.ChildAdder) error
 					t.histFor = t.openHash
 					guigui.RequestRebuild()
 				})
+				t.expand.graphUnits = t.graphUnits
 				t.commitItems = append(t.commitItems, basicwidget.ListItem[string]{
 					Content:      &t.expand,
 					Unselectable: true,
@@ -405,7 +435,9 @@ func (t *GitTool) Build(context *guigui.Context, adder *guigui.ChildAdder) error
 		}
 		t.commitList.SetStyle(basicwidget.ListStyleNormal)
 		t.commitList.SetHighlightVisibleWhenUnfocused(true)
+		t.commitList.SetHeaderHeight(gitCommitHeaderHeight(basicwidget.UnitSize(context)))
 		t.commitList.SetItems(t.commitItems)
+		t.histStack.header.SetLang(lang)
 		if sel := model.Selected(); sel != "" {
 			t.commitList.SelectItemByValue(sel)
 		}
@@ -597,6 +629,10 @@ func (t *GitTool) revealCommit(model *GitModel, hash string) {
 }
 
 func (t *GitTool) Layout(context *guigui.Context, widgetBounds *guigui.WidgetBounds, layouter *guigui.ChildLayouter) {
+	t.graphSplitBounds = image.Rectangle{}
+	t.authorSplitBounds = image.Rectangle{}
+	t.hashSplitBounds = image.Rectangle{}
+	t.dateSplitBounds = image.Rectangle{}
 	u := basicwidget.UnitSize(context)
 	bounds := widgetBounds.Bounds()
 	barH := gitTabBarHeight(u)
@@ -747,6 +783,16 @@ func (t *GitTool) Tick(context *guigui.Context, widgetBounds *guigui.WidgetBound
 		t.setHistDragPassthrough(context, false)
 		guigui.RequestRebuild()
 	}
+	if t.graphDragging && !ebiten.IsMouseButtonPressed(ebiten.MouseButtonLeft) {
+		t.graphDragging = false
+		t.setGraphDragPassthrough(context, false)
+		guigui.RequestRebuild()
+	}
+	if t.metaDrag != 0 && !ebiten.IsMouseButtonPressed(ebiten.MouseButtonLeft) {
+		t.metaDrag = 0
+		t.setGraphDragPassthrough(context, false)
+		guigui.RequestRebuild()
+	}
 	if !inpututil.IsMouseButtonJustPressed(ebiten.MouseButtonLeft) {
 		return nil
 	}
@@ -765,7 +811,7 @@ func (t *GitTool) Tick(context *guigui.Context, widgetBounds *guigui.WidgetBound
 		t.openRecentAtCursor(model)
 		return nil
 	}
-	if !t.commitView && !openedBySelect && !t.histDragging {
+	if !t.commitView && !openedBySelect && !t.histDragging && !t.graphDragging && t.metaDrag == 0 && !t.cursorOnCommitSplit() {
 		if hash, ok := t.commitAtCursor(); ok {
 			if hash == t.openHash {
 				t.openHash = ""
@@ -792,7 +838,7 @@ func (t *GitTool) Tick(context *guigui.Context, widgetBounds *guigui.WidgetBound
 }
 
 func (t *GitTool) CursorShape(context *guigui.Context, widgetBounds *guigui.WidgetBounds) (ebiten.CursorShapeType, bool) {
-	if t.sideDragging {
+	if t.sideDragging || t.graphDragging || t.metaDrag != 0 {
 		return ebiten.CursorShapeEWResize, true
 	}
 	if t.histDragging {
@@ -804,6 +850,12 @@ func (t *GitTool) CursorShape(context *guigui.Context, widgetBounds *guigui.Widg
 func (t *GitTool) HandlePointingInput(context *guigui.Context, widgetBounds *guigui.WidgetBounds) guigui.HandleInputResult {
 	if t.sideDragging {
 		return t.dragSideSplit(context)
+	}
+	if t.graphDragging {
+		return t.dragGraphSplit(context)
+	}
+	if t.metaDrag != 0 {
+		return t.dragMetaSplit(context, t.metaDrag)
 	}
 	if t.histDragging {
 		return t.dragHistSplit(context)
@@ -830,6 +882,9 @@ func (t *GitTool) HandlePointingInput(context *guigui.Context, widgetBounds *gui
 		return guigui.HandleInputByWidget(t)
 	}
 	if !t.commitView {
+		if t.cursorOnCommitSplit() {
+			return guigui.HandleInputByWidget(t)
+		}
 		if hash, ok := t.commitAtCursor(); ok {
 			t.openCommitMenu(appModel.Lang(), model, hash)
 			return guigui.HandleInputByWidget(t)

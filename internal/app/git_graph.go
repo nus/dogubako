@@ -43,6 +43,123 @@ func gitLaneWidth(u int) int {
 	return w
 }
 
+func gitLaneMinWidth(u int) int {
+	w := u / 4
+	if w < 6 {
+		w = 6
+	}
+	natural := gitLaneWidth(u)
+	if w > natural {
+		w = natural
+	}
+	if w < 1 {
+		return 1
+	}
+	return w
+}
+
+func gitGraphLaneCount(lanes int) int {
+	if lanes < 1 {
+		return 1
+	}
+	return lanes
+}
+
+func gitGraphNaturalWidth(u, lanes int) int {
+	if u < 1 {
+		u = 1
+	}
+	return gitGraphLaneCount(lanes)*gitLaneWidth(u) + u/4
+}
+
+func gitGraphMinWidth(u, lanes int) int {
+	if u < 1 {
+		u = 1
+	}
+	return gitGraphLaneCount(lanes)*gitLaneMinWidth(u) + u/4
+}
+
+// gitGraphReserve is the width kept for the subject and the meta columns.
+func gitGraphReserve(u int) int {
+	if u < 1 {
+		u = 1
+	}
+	author, hash, date := gitMetaCols(u)
+	return author + hash + date + 6*u
+}
+
+func clampGitGraphCol(w, rowW, u, lanes int) int {
+	if u < 1 {
+		u = 1
+	}
+	minW := gitGraphMinWidth(u, lanes)
+	if rowW <= 0 {
+		if w < minW {
+			return minW
+		}
+		return w
+	}
+	maxW := rowW - gitGraphReserve(u)
+	if maxW < minW {
+		maxW = rowW / 2
+		if maxW < 1 {
+			maxW = 1
+		}
+		if minW > maxW {
+			minW = maxW
+		}
+	}
+	if w < minW {
+		w = minW
+	}
+	if w > maxW {
+		w = maxW
+	}
+	if w < 1 {
+		return 1
+	}
+	return w
+}
+
+// gitGraphColWidth is the commit-graph column width.
+// units is the dragged width in unit sizes. Zero keeps the width that fits the lanes.
+func gitGraphColWidth(rowW, u, lanes int, units float64) int {
+	if u < 1 {
+		u = 1
+	}
+	w := gitGraphNaturalWidth(u, lanes)
+	if units > 0 {
+		w = int(units*float64(u) + 0.5)
+	}
+	return clampGitGraphCol(w, rowW, u, lanes)
+}
+
+// gitLaneStep is the space between lane centers in a column of colW pixels.
+// A wider column keeps the natural spacing. A narrower column packs the lanes in.
+func gitLaneStep(colW, lanes, u int) int {
+	natural := gitLaneWidth(u)
+	n := gitGraphLaneCount(lanes)
+	pad := 0
+	if u > 0 {
+		pad = u / 4
+	}
+	if pad > colW {
+		pad = 0
+	}
+	inner := colW - pad
+	if inner < n {
+		inner = n
+	}
+	step := inner / n
+	if step > natural {
+		step = natural
+	}
+	if step < 1 {
+		return 1
+	}
+	return step
+}
+
 type gitGraphGlyph struct {
 	guigui.DefaultWidget
 
@@ -86,11 +203,11 @@ func (g *gitGraphGlyph) Draw(context *guigui.Context, widgetBounds *guigui.Widge
 		return
 	}
 	u := basicwidget.UnitSize(context)
-	lw := gitLaneWidth(u)
 	n := g.lanes
 	if n < 1 {
 		n = 1
 	}
+	lw := gitLaneStep(b.Dx(), n, u)
 	midY := float32(b.Min.Y + b.Dy()/2)
 	top := float32(b.Min.Y)
 	bot := float32(b.Max.Y)
@@ -186,7 +303,7 @@ func (g *gitGraphBridge) Draw(context *guigui.Context, widgetBounds *guigui.Widg
 		return
 	}
 	u := basicwidget.UnitSize(context)
-	lw := gitLaneWidth(u)
+	lw := gitLaneStep(b.Dx(), g.lanes, u)
 	stroke := float32(2)
 	if u >= 28 {
 		stroke = 2.5
@@ -281,6 +398,155 @@ func strokeGitBend(dst *ebiten.Image, x0, y0, x1, y1, nodeR, stroke float32, clr
 
 func gitMetaCols(u int) (author, hash, date int) {
 	return 6 * u, 4 * u, 7 * u
+}
+
+func gitCommitColGap(u int) int {
+	if u < 1 {
+		u = 1
+	}
+	return u / 6
+}
+
+func gitMinSubjectCol(u int) int { return 4 * u }
+
+func gitMinAuthorCol(u int) int { return 3 * u }
+
+func gitMinHashCol(u int) int { return 3 * u }
+
+func gitMinDateCol(u int) int { return 5 * u }
+
+func gitMaxMetaCol(u int) int { return 48 * u }
+
+func clampInt(v, lo, hi int) int {
+	if hi < lo {
+		hi = lo
+	}
+	if v < lo {
+		return lo
+	}
+	if v > hi {
+		return hi
+	}
+	return v
+}
+
+// gitMetaColWidths is the author, commit-id, and date column widths.
+// A unit value of zero keeps that column's default width.
+func gitMetaColWidths(rowW, u, graphW int, authorU, hashU, dateU float64) (author, hash, date int) {
+	if u < 1 {
+		u = 1
+	}
+	author, hash, date = gitMetaCols(u)
+	if authorU > 0 {
+		author = int(authorU*float64(u) + 0.5)
+	}
+	if hashU > 0 {
+		hash = int(hashU*float64(u) + 0.5)
+	}
+	if dateU > 0 {
+		date = int(dateU*float64(u) + 0.5)
+	}
+	return gitFitMetaCols(author, hash, date, rowW, u, graphW)
+}
+
+// gitFitMetaCols keeps the title column usable. Extra width stays on the title,
+// so a narrow row shrinks the meta columns down toward their minimums.
+func gitFitMetaCols(author, hash, date, rowW, u, graphW int) (int, int, int) {
+	if u < 1 {
+		u = 1
+	}
+	maxW := gitMaxMetaCol(u)
+	author = clampInt(author, gitMinAuthorCol(u), maxW)
+	hash = clampInt(hash, gitMinHashCol(u), maxW)
+	date = clampInt(date, gitMinDateCol(u), maxW)
+	if rowW <= 0 {
+		return author, hash, date
+	}
+	overflow := graphW + gitMinSubjectCol(u) + author + hash + date + 4*gitCommitColGap(u) - rowW
+	if overflow <= 0 {
+		return author, hash, date
+	}
+	shrink := func(w, minW int) int {
+		extra := w - minW
+		if extra <= 0 || overflow <= 0 {
+			return w
+		}
+		d := extra
+		if d > overflow {
+			d = overflow
+		}
+		overflow -= d
+		return w - d
+	}
+	date = shrink(date, gitMinDateCol(u))
+	hash = shrink(hash, gitMinHashCol(u))
+	author = shrink(author, gitMinAuthorCol(u))
+	return author, hash, date
+}
+
+// gitMetaRoom is the widest a meta column can be beside the graph, a minimum
+// title, and the other two meta columns.
+func gitMetaRoom(rowW, u, graphW, keep1, keep2, minW int) int {
+	maxW := gitMaxMetaCol(u)
+	if rowW <= 0 {
+		return maxW
+	}
+	room := rowW - graphW - gitMinSubjectCol(u) - keep1 - keep2 - 4*gitCommitColGap(u)
+	return clampInt(room, minW, maxW)
+}
+
+// gitMetaEdges is the horizontal extent of the title, author, commit id, and
+// date. The three meta columns are packed against the right edge of the row.
+func gitMetaEdges(rowRight, gap, authorW, hashW, dateW int) (subjectR, authorL, authorR, hashL, hashR, dateL, dateR int) {
+	dateR = rowRight
+	dateL = dateR - dateW
+	hashR = dateL - gap
+	hashL = hashR - hashW
+	authorR = hashL - gap
+	authorL = authorR - authorW
+	subjectR = authorL - gap
+	return subjectR, authorL, authorR, hashL, hashR, dateL, dateR
+}
+
+// gitMetaSplitEdges is where the title, author, and commit-id columns end.
+func gitMetaSplitEdges(rowRight, gap, authorW, hashW, dateW int) (subjectR, authorR, hashR int) {
+	subjectR, _, authorR, _, hashR, _, _ = gitMetaEdges(rowRight, gap, authorW, hashW, dateW)
+	return subjectR, authorR, hashR
+}
+
+// gitColSplitRect is the hit target centered on a column edge.
+func gitColSplitRect(edge, splitW, y0, y1, minX, maxX int) image.Rectangle {
+	x := edge - splitW/2
+	if x < minX {
+		x = minX
+	}
+	if x > maxX-splitW {
+		x = maxX - splitW
+	}
+	if x < minX {
+		x = minX
+	}
+	if y1 < y0 {
+		y1 = y0
+	}
+	return image.Rect(x, y0, x+splitW, y1)
+}
+
+// gitResizeAuthor sets the author width from the title's right edge.
+// x is that edge. The author's right edge stays put, so the title takes the difference.
+func gitResizeAuthor(authorR, gap, x, minW, maxW int) int {
+	return clampInt(authorR-x-gap, minW, maxW)
+}
+
+// gitTradeCols splits a fixed span at x, the right edge of the left column.
+// leftL and rightR stay put, so only those two columns change width.
+func gitTradeCols(leftL, rightR, gap, x, minL, minR int) (leftW, rightW int) {
+	total := rightR - gap - leftL
+	if total < minL+minR {
+		return minL, minR
+	}
+	leftW = clampInt(x-leftL, minL, total-minR)
+	return leftW, total - leftW
 }
 
 func refDecorations(ds []gitcli.Decoration) []gitcli.Decoration {
@@ -720,6 +986,10 @@ type gitCommitRow struct {
 	author      basicwidget.Text
 	hash        basicwidget.Text
 	date        basicwidget.Text
+	graphUnits  float64
+	authorUnits float64
+	hashUnits   float64
+	dateUnits   float64
 	uncommitted bool
 
 	layoutItems []guigui.LinearLayoutItem
@@ -764,14 +1034,14 @@ func (r *gitCommitRow) Build(context *guigui.Context, adder *guigui.ChildAdder) 
 	return nil
 }
 
-func (r *gitCommitRow) layoutRow(context *guigui.Context) guigui.LinearLayout {
+func (r *gitCommitRow) layoutRow(context *guigui.Context, rowW int) guigui.LinearLayout {
 	u := basicwidget.UnitSize(context)
 	n := r.graph.lanes
 	if n < 1 {
 		n = 1
 	}
-	graphW := n*gitLaneWidth(u) + u/4
-	authorW, hashW, dateW := gitMetaCols(u)
+	graphW := gitGraphColWidth(rowW, u, n, r.graphUnits)
+	authorW, hashW, dateW := gitMetaColWidths(rowW, u, graphW, r.authorUnits, r.hashUnits, r.dateUnits)
 	r.layoutItems = slices.Delete(r.layoutItems, 0, len(r.layoutItems))
 	r.layoutItems = append(r.layoutItems,
 		guigui.LinearLayoutItem{Widget: &r.graph, Size: guigui.FixedSize(graphW)},
@@ -788,7 +1058,7 @@ func (r *gitCommitRow) layoutRow(context *guigui.Context) guigui.LinearLayout {
 	r.layout = guigui.LinearLayout{
 		Direction: guigui.LayoutDirectionHorizontal,
 		Items:     r.layoutItems,
-		Gap:       u / 6,
+		Gap:       gitCommitColGap(u),
 	}
 	return r.layout
 }
@@ -810,12 +1080,120 @@ func (r *gitCommitRow) Layout(context *guigui.Context, widgetBounds *guigui.Widg
 	r.author.SetBaseStyle(&style)
 	r.hash.SetBaseStyle(&style)
 	r.date.SetBaseStyle(&style)
-	r.layoutRow(context).LayoutWidgets(context, widgetBounds.Bounds(), layouter)
+	r.layoutRow(context, widgetBounds.Bounds().Dx()).LayoutWidgets(context, widgetBounds.Bounds(), layouter)
+}
+
+func gitCommitHeaderHeight(u int) int {
+	if u < 1 {
+		u = 1
+	}
+	return u
+}
+
+// gitCommitHeader is the column-title row above the commit list.
+// Width drags start here and nowhere else in the list.
+type gitCommitHeader struct {
+	guigui.DefaultWidget
+
+	tool    *GitTool
+	graph   basicwidget.Text
+	subject basicwidget.Text
+	author  basicwidget.Text
+	hash    basicwidget.Text
+	date    basicwidget.Text
+
+	layoutItems []guigui.LinearLayoutItem
+	layout      guigui.LinearLayout
+}
+
+func (h *gitCommitHeader) SetLang(lang i18n.Lang) {
+	h.graph.SetValue(i18n.T(lang, i18n.GitGraph))
+	h.subject.SetValue(i18n.T(lang, i18n.GitTitle))
+	h.author.SetValue(i18n.T(lang, i18n.GitAuthor))
+	h.hash.SetValue(i18n.T(lang, i18n.GitColID))
+	h.date.SetValue(i18n.T(lang, i18n.GitDate))
+}
+
+func (h *gitCommitHeader) Build(context *guigui.Context, adder *guigui.ChildAdder) error {
+	adder.AddWidget(&h.graph)
+	adder.AddWidget(&h.subject)
+	adder.AddWidget(&h.author)
+	adder.AddWidget(&h.hash)
+	adder.AddWidget(&h.date)
+	for _, text := range []*basicwidget.Text{&h.graph, &h.subject, &h.author, &h.hash, &h.date} {
+		text.SetVerticalAlign(basicwidget.VerticalAlignMiddle)
+		text.SetWrapMode(basicwidget.WrapModeNone)
+		text.SetSelectable(false)
+	}
+	h.date.SetHorizontalAlign(basicwidget.HorizontalAlignEnd)
+	return nil
+}
+
+func (h *gitCommitHeader) layoutRow(context *guigui.Context, rowW int) guigui.LinearLayout {
+	u := basicwidget.UnitSize(context)
+	lanes := 1
+	var graphU, authorU, hashU, dateU float64
+	if h.tool != nil {
+		if h.tool.graphLanes > 0 {
+			lanes = h.tool.graphLanes
+		}
+		graphU = h.tool.graphUnits
+		authorU = h.tool.authorUnits
+		hashU = h.tool.hashUnits
+		dateU = h.tool.dateUnits
+	}
+	graphW := gitGraphColWidth(rowW, u, lanes, graphU)
+	authorW, hashW, dateW := gitMetaColWidths(rowW, u, graphW, authorU, hashU, dateU)
+	h.layoutItems = slices.Delete(h.layoutItems, 0, len(h.layoutItems))
+	h.layoutItems = append(h.layoutItems,
+		guigui.LinearLayoutItem{Widget: &h.graph, Size: guigui.FixedSize(graphW)},
+		guigui.LinearLayoutItem{Widget: &h.subject, Size: guigui.FlexibleSize(1)},
+		guigui.LinearLayoutItem{Widget: &h.author, Size: guigui.FixedSize(authorW)},
+		guigui.LinearLayoutItem{Widget: &h.hash, Size: guigui.FixedSize(hashW)},
+		guigui.LinearLayoutItem{Widget: &h.date, Size: guigui.FixedSize(dateW)},
+	)
+	h.layout = guigui.LinearLayout{
+		Direction: guigui.LayoutDirectionHorizontal,
+		Items:     h.layoutItems,
+		Gap:       gitCommitColGap(u),
+	}
+	return h.layout
+}
+
+func (h *gitCommitHeader) Layout(context *guigui.Context, widgetBounds *guigui.WidgetBounds, layouter *guigui.ChildLayouter) {
+	var style basicwidget.TextStyle
+	useGitMono(&style)
+	style.SetBold(true)
+	for _, text := range []*basicwidget.Text{&h.graph, &h.subject, &h.author, &h.hash, &h.date} {
+		text.SetBaseStyle(&style)
+	}
+	b := widgetBounds.Bounds()
+	inset := basicwidget.RoundedCornerRadius(context)
+	inner := b
+	inner.Min.X += inset
+	inner.Max.X -= inset
+	if inner.Max.X < inner.Min.X {
+		inner.Max.X = inner.Min.X
+	}
+	h.layoutRow(context, inner.Dx()).LayoutWidgets(context, inner, layouter)
+}
+
+func (h *gitCommitHeader) Measure(context *guigui.Context, constraints guigui.Constraints) image.Point {
+	u := basicwidget.UnitSize(context)
+	w := 16 * u
+	if fixed, ok := constraints.FixedWidth(); ok && fixed > 0 {
+		w = fixed
+	}
+	return image.Pt(w, gitCommitHeaderHeight(u))
 }
 
 func (r *gitCommitRow) Measure(context *guigui.Context, constraints guigui.Constraints) image.Point {
 	u := basicwidget.UnitSize(context)
-	s := r.layoutRow(context).Measure(context, constraints)
+	rowW := 0
+	if w, ok := constraints.FixedWidth(); ok {
+		rowW = w
+	}
+	s := r.layoutRow(context, rowW).Measure(context, constraints)
 	if s.Y < u {
 		s.Y = u
 	}
@@ -903,4 +1281,215 @@ func fillRoundRect(dst *ebiten.Image, bounds image.Rectangle, clr color.NRGBA) {
 	op := &vector.DrawPathOptions{AntiAlias: true}
 	op.ColorScale.ScaleWithColor(clr)
 	vector.FillPath(dst, &p, nil, op)
+}
+
+// gitGraphSplit is the draggable right edge of the commit-graph column.
+type gitGraphSplit struct {
+	guigui.DefaultWidget
+
+	tool *GitTool
+}
+
+func (s *gitGraphSplit) HandlePointingInput(context *guigui.Context, widgetBounds *guigui.WidgetBounds) guigui.HandleInputResult {
+	if s.tool == nil {
+		return guigui.HandleInputResult{}
+	}
+	if s.tool.graphDragging || widgetBounds.IsHitAtCursor() && inpututil.IsMouseButtonJustPressed(ebiten.MouseButtonLeft) {
+		return s.tool.dragGraphSplit(context)
+	}
+	return guigui.HandleInputResult{}
+}
+
+func (s *gitGraphSplit) CursorShape(context *guigui.Context, widgetBounds *guigui.WidgetBounds) (ebiten.CursorShapeType, bool) {
+	if s.tool != nil && s.tool.graphDragging || widgetBounds.IsHitAtCursor() {
+		return ebiten.CursorShapeEWResize, true
+	}
+	return 0, false
+}
+
+func (s *gitGraphSplit) Draw(context *guigui.Context, widgetBounds *guigui.WidgetBounds, dst *ebiten.Image) {
+	b := widgetBounds.Bounds()
+	if b.Empty() {
+		return
+	}
+	x := b.Min.X + b.Dx()/2
+	fillRect(dst, image.Rect(x, b.Min.Y, x+1, b.Max.Y), gitHistSplitColor(context.ColorMode()))
+}
+
+func (t *GitTool) setGraphUnits(units float64) {
+	t.graphUnits = units
+	for i := 0; i < t.commitRows.Len(); i++ {
+		t.commitRows.At(i).graphUnits = units
+	}
+	t.expand.graphUnits = units
+}
+
+func (t *GitTool) setGraphUnitsFromCursor(x, inset, u int) {
+	if t.histGraph.Empty() {
+		return
+	}
+	if u < 1 {
+		u = 1
+	}
+	rowW := t.histGraph.Dx() - 2*inset
+	if rowW < 1 {
+		rowW = 1
+	}
+	graphW := x - (t.histGraph.Min.X + inset)
+	w := clampGitGraphCol(graphW, rowW, u, t.graphLanes)
+	t.setGraphUnits(float64(w) / float64(u))
+}
+
+func (t *GitTool) dragGraphSplit(context *guigui.Context) guigui.HandleInputResult {
+	u := basicwidget.UnitSize(context)
+	if !t.graphDragging {
+		if !inpututil.IsMouseButtonJustPressed(ebiten.MouseButtonLeft) {
+			return guigui.HandleInputResult{}
+		}
+		t.graphDragging = true
+	}
+	t.setGraphUnitsFromCursor(image.Pt(ebiten.CursorPosition()).X, basicwidget.RoundedCornerRadius(context), u)
+	t.setGraphDragPassthrough(context, true)
+	if !ebiten.IsMouseButtonPressed(ebiten.MouseButtonLeft) {
+		t.graphDragging = false
+		t.setGraphDragPassthrough(context, false)
+	}
+	guigui.RequestRebuild()
+	return guigui.HandleInputByWidget(t)
+}
+
+func (t *GitTool) setGraphDragPassthrough(context *guigui.Context, pass bool) {
+	for _, w := range []guigui.Widget{
+		&t.tabBar,
+		&t.sidePane,
+		&t.sideSplit,
+		&t.fetchBtn,
+		&t.pullBtn,
+		&t.pushBtn,
+		&t.status,
+		&t.hint,
+		&t.expand,
+		&t.commitList,
+		&t.graphEmpty,
+		&t.histStack.header,
+		&t.histStack.diff,
+		&t.histStack.split,
+	} {
+		context.SetPassthrough(w, pass)
+	}
+}
+
+func (t *GitTool) cursorOnCommitSplit() bool {
+	c := image.Pt(ebiten.CursorPosition())
+	for _, b := range []image.Rectangle{
+		t.graphSplitBounds,
+		t.authorSplitBounds,
+		t.hashSplitBounds,
+		t.dateSplitBounds,
+	} {
+		if !b.Empty() && c.In(b) {
+			return true
+		}
+	}
+	return false
+}
+
+const (
+	gitMetaDragAuthor = 1
+	gitMetaDragHash   = 2
+	gitMetaDragDate   = 3
+)
+
+// gitMetaSplit is the draggable boundary of the title, author, commit id, or date.
+// The title boundary resizes the author and lets the title take the difference.
+// The author boundary trades width with the commit id. The commit-id boundary
+// trades width with the date.
+type gitMetaSplit struct {
+	guigui.DefaultWidget
+
+	tool *GitTool
+	kind int
+}
+
+func (s *gitMetaSplit) HandlePointingInput(context *guigui.Context, widgetBounds *guigui.WidgetBounds) guigui.HandleInputResult {
+	if s.tool == nil || s.tool.graphDragging {
+		return guigui.HandleInputResult{}
+	}
+	if s.tool.metaDrag == s.kind || s.tool.metaDrag == 0 && widgetBounds.IsHitAtCursor() && inpututil.IsMouseButtonJustPressed(ebiten.MouseButtonLeft) {
+		return s.tool.dragMetaSplit(context, s.kind)
+	}
+	return guigui.HandleInputResult{}
+}
+
+func (s *gitMetaSplit) CursorShape(context *guigui.Context, widgetBounds *guigui.WidgetBounds) (ebiten.CursorShapeType, bool) {
+	if s.tool != nil && s.tool.metaDrag == s.kind || widgetBounds.IsHitAtCursor() {
+		return ebiten.CursorShapeEWResize, true
+	}
+	return 0, false
+}
+
+func (s *gitMetaSplit) Draw(context *guigui.Context, widgetBounds *guigui.WidgetBounds, dst *ebiten.Image) {
+	b := widgetBounds.Bounds()
+	if b.Empty() {
+		return
+	}
+	x := b.Min.X + b.Dx()/2
+	fillRect(dst, image.Rect(x, b.Min.Y, x+1, b.Max.Y), gitHistSplitColor(context.ColorMode()))
+}
+
+func (t *GitTool) applyMetaUnits(author, hash, date float64) {
+	t.authorUnits = author
+	t.hashUnits = hash
+	t.dateUnits = date
+	for i := 0; i < t.commitRows.Len(); i++ {
+		r := t.commitRows.At(i)
+		r.authorUnits = author
+		r.hashUnits = hash
+		r.dateUnits = date
+	}
+}
+
+func (t *GitTool) resizeMetaFromCursor(x, inset, u int) {
+	if t.histGraph.Empty() || u < 1 {
+		return
+	}
+	rowLeft := t.histGraph.Min.X + inset
+	rowRight := t.histGraph.Max.X - inset
+	rowW := rowRight - rowLeft
+	if rowW < 1 {
+		return
+	}
+	graphW := gitGraphColWidth(rowW, u, t.graphLanes, t.graphUnits)
+	authorW, hashW, dateW := gitMetaColWidths(rowW, u, graphW, t.authorUnits, t.hashUnits, t.dateUnits)
+	gap := gitCommitColGap(u)
+	_, authorL, authorR, hashL, hashR, _, dateR := gitMetaEdges(rowRight, gap, authorW, hashW, dateW)
+	switch t.metaDrag {
+	case gitMetaDragAuthor:
+		authorW = gitResizeAuthor(authorR, gap, x, gitMinAuthorCol(u), gitMetaRoom(rowW, u, graphW, hashW, dateW, gitMinAuthorCol(u)))
+	case gitMetaDragHash:
+		authorW, hashW = gitTradeCols(authorL, hashR, gap, x, gitMinAuthorCol(u), gitMinHashCol(u))
+	case gitMetaDragDate:
+		hashW, dateW = gitTradeCols(hashL, dateR, gap, x, gitMinHashCol(u), gitMinDateCol(u))
+	default:
+		return
+	}
+	t.applyMetaUnits(float64(authorW)/float64(u), float64(hashW)/float64(u), float64(dateW)/float64(u))
+}
+
+func (t *GitTool) dragMetaSplit(context *guigui.Context, kind int) guigui.HandleInputResult {
+	u := basicwidget.UnitSize(context)
+	if t.metaDrag == 0 {
+		if kind == 0 || !inpututil.IsMouseButtonJustPressed(ebiten.MouseButtonLeft) {
+			return guigui.HandleInputResult{}
+		}
+		t.metaDrag = kind
+	}
+	t.resizeMetaFromCursor(image.Pt(ebiten.CursorPosition()).X, basicwidget.RoundedCornerRadius(context), u)
+	t.setGraphDragPassthrough(context, true)
+	if !ebiten.IsMouseButtonPressed(ebiten.MouseButtonLeft) {
+		t.metaDrag = 0
+		t.setGraphDragPassthrough(context, false)
+	}
+	guigui.RequestRebuild()
+	return guigui.HandleInputByWidget(t)
 }
