@@ -140,6 +140,82 @@ func gitEdgeColor(e gitcli.Edge) color.NRGBA {
 	return gitLaneColor(e.To)
 }
 
+// gitGraphBridge continues a commit's outgoing lanes through the detail
+// panel that opens under that commit.
+type gitGraphBridge struct {
+	guigui.DefaultWidget
+
+	lanes int
+	edges []gitcli.Edge
+}
+
+func (g *gitGraphBridge) Set(lanes int, edges []gitcli.Edge) {
+	g.lanes = lanes
+	g.edges = append(g.edges[:0], edges...)
+}
+
+func (g *gitGraphBridge) WriteStateKey(context *guigui.Context, w *guigui.StateKeyWriter) {
+	w.WriteInt(g.lanes)
+	w.WriteInt(len(g.edges))
+	for _, e := range g.edges {
+		w.WriteInt(e.From)
+		w.WriteInt(e.To)
+		w.WriteBool(e.Gray)
+	}
+}
+
+func (g *gitGraphBridge) Measure(context *guigui.Context, constraints guigui.Constraints) image.Point {
+	u := basicwidget.UnitSize(context)
+	n := g.lanes
+	if n < 1 {
+		n = 1
+	}
+	s := image.Pt(n*gitLaneWidth(u)+u/4, u)
+	if w, ok := constraints.FixedWidth(); ok {
+		s.X = w
+	}
+	if h, ok := constraints.FixedHeight(); ok {
+		s.Y = h
+	}
+	return s
+}
+
+func (g *gitGraphBridge) Draw(context *guigui.Context, widgetBounds *guigui.WidgetBounds, dst *ebiten.Image) {
+	b := widgetBounds.Bounds()
+	if b.Empty() || len(g.edges) == 0 {
+		return
+	}
+	u := basicwidget.UnitSize(context)
+	lw := gitLaneWidth(u)
+	stroke := float32(2)
+	if u >= 28 {
+		stroke = 2.5
+	}
+	top := float32(b.Min.Y)
+	bot := float32(b.Max.Y)
+	for _, e := range bridgeEdges(g.edges) {
+		x := float32(b.Min.X) + float32(lw)/2 + float32(e.To*lw)
+		vector.StrokeLine(dst, x, top, x, bot, stroke, gitEdgeColor(e), true)
+	}
+}
+
+// bridgeEdges keeps one edge per destination lane. A colored edge wins over a gray one.
+func bridgeEdges(edges []gitcli.Edge) []gitcli.Edge {
+	idx := map[int]int{}
+	out := make([]gitcli.Edge, 0, len(edges))
+	for _, e := range edges {
+		if i, ok := idx[e.To]; ok {
+			if out[i].Gray && !e.Gray {
+				out[i] = e
+			}
+			continue
+		}
+		idx[e.To] = len(out)
+		out = append(out, e)
+	}
+	return out
+}
+
 func gitNodeRadius(laneWidth int) float32 {
 	r := float32(laneWidth) * 0.28
 	if r < 3 {

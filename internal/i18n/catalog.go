@@ -150,7 +150,6 @@ const (
 	GitNoCommits        Key = "git.no_commits"
 	GitHint             Key = "git.hint"
 	GitDetached         Key = "git.detached"
-	GitWorkingTree      Key = "git.working_tree"
 	GitUncommitted      Key = "git.uncommitted"
 	GitAheadBehind      Key = "git.ahead_behind"
 	GitRemotes          Key = "git.remotes"
@@ -158,6 +157,8 @@ const (
 	GitRefs             Key = "git.refs"
 	GitSHA              Key = "git.sha"
 	GitParents          Key = "git.parents"
+	GitCommitter        Key = "git.committer"
+	GitDate             Key = "git.date"
 	GitChanges          Key = "git.changes"
 	GitChangeContent    Key = "git.change_content"
 	GitDiffCompact      Key = "git.diff_compact"
@@ -454,7 +455,6 @@ var catalogs = map[Lang]map[Key]string{
 		GitNoCommits:                   "表示するコミットがありません。",
 		GitHint:                        "ブランチをクリックすると先端のコミットを表示。グラフのブランチをダブルクリックすると切り替え。タグをダブルクリックすると切り替え。右クリックで名前の変更と削除。コミットを右クリックしてブランチやタグを作成。コミットをクリックして詳細。",
 		GitDetached:                    "detached HEAD",
-		GitWorkingTree:                 "作業ツリー",
 		GitUncommitted:                 "未コミットの変更",
 		GitAheadBehind:                 "ahead %d / behind %d",
 		GitRemotes:                     "リモート",
@@ -462,6 +462,8 @@ var catalogs = map[Lang]map[Key]string{
 		GitRefs:                        "参照",
 		GitSHA:                         "SHA",
 		GitParents:                     "親",
+		GitCommitter:                   "コミッタ",
+		GitDate:                        "日付",
 		GitChanges:                     "変更",
 		GitChangeContent:               "変更内容",
 		GitDiffCompact:                 "コンパクト",
@@ -743,7 +745,6 @@ var catalogs = map[Lang]map[Key]string{
 		GitNoCommits:                   "No commits to show.",
 		GitHint:                        "Click a branch to show its tip commit. Double-click a branch on the graph to switch. Double-click a tag to switch. Right-click a branch to rename or delete. Right-click a commit to create a branch or tag. Click a commit for details.",
 		GitDetached:                    "detached HEAD",
-		GitWorkingTree:                 "Working tree",
 		GitUncommitted:                 "Uncommitted changes",
 		GitAheadBehind:                 "ahead %d / behind %d",
 		GitRemotes:                     "Remotes",
@@ -751,6 +752,8 @@ var catalogs = map[Lang]map[Key]string{
 		GitRefs:                        "Refs",
 		GitSHA:                         "SHA",
 		GitParents:                     "Parents",
+		GitCommitter:                   "Committer",
+		GitDate:                        "Date",
 		GitChanges:                     "Changes",
 		GitChangeContent:               "Changes",
 		GitDiffCompact:                 "Compact",

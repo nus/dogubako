@@ -9,6 +9,8 @@ import (
 	"github.com/hajimehoshi/ebiten/v2/text/v2"
 
 	"github.com/guigui-gui/guigui/basicwidget"
+
+	"github.com/nus/dogubako/internal/gitcli"
 )
 
 func TestGitDiffFontMonospace(t *testing.T) {
@@ -26,6 +28,98 @@ func TestGitDiffFontMonospace(t *testing.T) {
 	}
 	if full != half*2 {
 		t.Fatalf("fullwidth %v, halfwidth %v", full, half)
+	}
+}
+
+func TestDiffPathStats(t *testing.T) {
+	diff := "" +
+		"diff --git a/a.txt b/a.txt\n" +
+		"--- a/a.txt\n" +
+		"+++ b/a.txt\n" +
+		"@@ -1,2 +1,3 @@\n" +
+		" ctx\n" +
+		"-old\n" +
+		"+new\n" +
+		"+extra\n" +
+		"diff --git a/pic.jpg b/pic.jpg\n" +
+		"Binary files a/pic.jpg and b/pic.jpg differ\n"
+	got := diffPathStats(diff)
+	if len(got) != 2 {
+		t.Fatalf("files = %+v", got)
+	}
+	if got[0].Path != "a.txt" || got[0].Add != 2 || got[0].Del != 1 {
+		t.Fatalf("a.txt = %+v", got[0])
+	}
+	if got[1].Path != "pic.jpg" || got[1].Add != 0 || got[1].Del != 0 {
+		t.Fatalf("pic.jpg = %+v", got[1])
+	}
+}
+
+func TestFileTreeLines(t *testing.T) {
+	stats := []gitPathStat{
+		{Path: "internal/app/git.go", Add: 12, Del: 3},
+		{Path: "README.md", Add: 1, Del: 0},
+		{Path: "internal/app/git_diff.go", Add: 4, Del: 1},
+	}
+	lines := fileTreeLines(stats, nil)
+	var names []string
+	for _, ln := range lines {
+		names = append(names, ln.Name)
+	}
+	want := []string{"README.md", "internal", "app", "git.go", "git_diff.go"}
+	if strings.Join(names, ",") != strings.Join(want, ",") {
+		t.Fatalf("names = %v", names)
+	}
+	if lines[0].Add != 1 || lines[0].Del != 0 || lines[0].Folder {
+		t.Fatalf("readme = %+v", lines[0])
+	}
+	if !lines[1].Folder || lines[1].Collapsed {
+		t.Fatalf("internal = %+v", lines[1])
+	}
+	text, addStart, addEnd, delStart, delEnd := fileTreeLabel("git.go", 12, 3)
+	if text != "git.go  (+12 -3)" {
+		t.Fatalf("label = %q", text)
+	}
+	if text[addStart:addEnd] != "+12" || text[delStart:delEnd] != "-3" {
+		t.Fatalf("spans %q %q", text[addStart:addEnd], text[delStart:delEnd])
+	}
+	folded := fileTreeLines(stats, map[string]bool{"internal": true})
+	if len(folded) != 2 || folded[1].Name != "internal" || !folded[1].Collapsed {
+		t.Fatalf("folded = %+v", folded)
+	}
+}
+
+func TestBridgeEdgesPrefersColor(t *testing.T) {
+	got := bridgeEdges([]gitcli.Edge{
+		{From: 1, To: 0, Gray: true},
+		{From: 0, To: 0},
+		{From: 2, To: 2},
+	})
+	if len(got) != 2 || got[0].Gray || got[0].To != 0 || got[1].To != 2 {
+		t.Fatalf("edges = %+v", got)
+	}
+}
+
+func TestFileDiffText(t *testing.T) {
+	diff := "" +
+		"diff --git a/a.txt b/a.txt\n" +
+		"--- a/a.txt\n" +
+		"+++ b/a.txt\n" +
+		"@@ -1 +1 @@\n" +
+		"-old\n" +
+		"+new\n" +
+		"diff --git a/b.txt b/b.txt\n" +
+		"--- a/b.txt\n" +
+		"+++ b/b.txt\n" +
+		"@@ -1 +1 @@\n" +
+		"-gone\n" +
+		"+kept\n"
+	got := fileDiffText(diff, "b.txt")
+	if !strings.Contains(got, "+kept") || strings.Contains(got, "a.txt") {
+		t.Fatalf("b.txt = %q", got)
+	}
+	if fileDiffText(diff, "missing") != "" || fileDiffText(diff, "") != "" {
+		t.Fatal("unknown path should be empty")
 	}
 }
 

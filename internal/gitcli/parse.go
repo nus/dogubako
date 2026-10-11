@@ -111,12 +111,46 @@ func (e StatusEntry) String() string {
 	return strings.TrimSpace(e.Code + " " + e.Path)
 }
 
-// CommitDetail is the bottom-panel payload for one commit.
+// CommitDetail is the payload shown under one commit in the graph.
 type CommitDetail struct {
 	Commit
-	Body  string
-	Files []string
-	Diff  string
+	Committer      string
+	CommitterEmail string
+	Body           string
+	Files          []string
+	Diff           string
+}
+
+// parseDetailMeta reads the one-line log record used by Repo.Detail.
+// Fields are hash, parents, author, email, author date, committer, committer email, subject.
+func parseDetailMeta(stdout string) (CommitDetail, bool) {
+	stdout = strings.ReplaceAll(stdout, "\r\n", "\n")
+	stdout = strings.TrimSpace(stdout)
+	if stdout == "" {
+		return CommitDetail{}, false
+	}
+	line, _, _ := strings.Cut(stdout, "\n")
+	parts := strings.Split(line, fieldSep)
+	if len(parts) < 8 || parts[0] == "" {
+		return CommitDetail{}, false
+	}
+	var parents []string
+	if p := strings.TrimSpace(parts[1]); p != "" {
+		parents = strings.Fields(p)
+	}
+	when, _ := time.Parse(time.RFC3339, parts[4])
+	return CommitDetail{
+		Commit: Commit{
+			Hash:    parts[0],
+			Parents: parents,
+			Author:  parts[2],
+			Email:   parts[3],
+			When:    when,
+			Subject: strings.Join(parts[7:], fieldSep),
+		},
+		Committer:      parts[5],
+		CommitterEmail: parts[6],
+	}, true
 }
 
 func parseLog(stdout string) []Commit {

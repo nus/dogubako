@@ -6,6 +6,38 @@ import (
 	"testing"
 )
 
+func TestParseDetailMeta(t *testing.T) {
+	line := strings.Join([]string{
+		"abc123",
+		"parent1 parent2",
+		"Ada",
+		"ada@example.com",
+		"2026-10-11T09:17:39+09:00",
+		"GitHub",
+		"noreply@github.com",
+		"fix graph",
+	}, fieldSep)
+	d, ok := parseDetailMeta(line + "\n")
+	if !ok {
+		t.Fatal("parse failed")
+	}
+	if d.Hash != "abc123" || d.Author != "Ada" || d.Email != "ada@example.com" {
+		t.Fatalf("commit = %+v", d.Commit)
+	}
+	if d.Committer != "GitHub" || d.CommitterEmail != "noreply@github.com" {
+		t.Fatalf("committer = %q <%s>", d.Committer, d.CommitterEmail)
+	}
+	if d.Subject != "fix graph" || len(d.Parents) != 2 || d.Parents[1] != "parent2" {
+		t.Fatalf("subject %q parents %#v", d.Subject, d.Parents)
+	}
+	if d.When.IsZero() {
+		t.Fatal("missing date")
+	}
+	if _, ok := parseDetailMeta(""); ok {
+		t.Fatal("empty should fail")
+	}
+}
+
 func TestParseLogLineAndDecorations(t *testing.T) {
 	line := strings.Join([]string{
 		"aaa111bbbbccccddddeeeeffff000011112222",
