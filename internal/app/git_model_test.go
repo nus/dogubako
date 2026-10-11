@@ -8,8 +8,6 @@ import (
 	"testing"
 	"time"
 
-	"github.com/guigui-gui/guigui/basicwidget"
-
 	"github.com/nus/dogubako/internal/gitcli"
 	"github.com/nus/dogubako/internal/i18n"
 )
@@ -586,27 +584,48 @@ func initRepo(t *testing.T, name string) string {
 	return dir
 }
 
-func TestParentLinksMapShortHashes(t *testing.T) {
-	var body gitDetailBody
-	body.setParents([]string{"0123456789abcdef", "abcdef0123456789"})
-	if body.parentsText.Value() != "0123456  abcdef0" {
-		t.Fatalf("text = %q", body.parentsText.Value())
+func TestFormatCommitMetaParents(t *testing.T) {
+	when := time.Date(2026, 10, 11, 9, 17, 39, 0, time.FixedZone("JST", 9*3600))
+	text, ranges, hashes := formatCommitMeta(i18n.EN, gitcli.CommitDetail{
+		Commit: gitcli.Commit{
+			Hash:    "0123456789abcdef",
+			Parents: []string{"aaaaaaaaaaaaaaaa", "bbbbbbbbbbbbbbbb"},
+			Author:  "Yota",
+			Email:   "a@b.c",
+			When:    when,
+		},
+		Committer:      "GitHub",
+		CommitterEmail: "noreply@github.com",
+		Body:           "subject\n\nCo-authored-by: Cursor <cursoragent@cursor.com>",
+	})
+	if !strings.Contains(text, "Commit: 0123456789abcdef") {
+		t.Fatalf("commit line missing: %q", text)
 	}
-	if len(body.parentRanges) != 2 || len(body.parentHashes) != 2 {
-		t.Fatalf("ranges %d hashes %d", len(body.parentRanges), len(body.parentHashes))
+	if !strings.Contains(text, "Author: Yota <a@b.c>") || !strings.Contains(text, "Committer: GitHub <noreply@github.com>") {
+		t.Fatalf("people missing: %q", text)
 	}
-	if body.parentRanges[0] != (basicwidget.TextRange{StartInBytes: 0, EndInBytes: 7}) {
-		t.Fatalf("first range = %+v", body.parentRanges[0])
+	if !strings.Contains(text, "Co-authored-by: Cursor <cursoragent@cursor.com>") {
+		t.Fatalf("body missing: %q", text)
 	}
-	if body.parentRanges[1] != (basicwidget.TextRange{StartInBytes: 9, EndInBytes: 16}) {
-		t.Fatalf("second range = %+v", body.parentRanges[1])
+	if len(ranges) != 2 || len(hashes) != 2 {
+		t.Fatalf("ranges %d hashes %d", len(ranges), len(hashes))
 	}
-	if body.parentHashes[1] != "abcdef0123456789" {
-		t.Fatalf("hash = %q", body.parentHashes[1])
+	if hashes[0] != "aaaaaaaaaaaaaaaa" || hashes[1] != "bbbbbbbbbbbbbbbb" {
+		t.Fatalf("hashes = %#v", hashes)
 	}
-	body.setParents(nil)
-	if body.showParents || body.parentsText.Value() != "" || len(body.parentHashes) != 0 {
-		t.Fatal("parents not cleared")
+	if text[ranges[0].StartInBytes:ranges[0].EndInBytes] != hashes[0] {
+		t.Fatalf("first parent range = %q", text[ranges[0].StartInBytes:ranges[0].EndInBytes])
+	}
+	if text[ranges[1].StartInBytes:ranges[1].EndInBytes] != hashes[1] {
+		t.Fatalf("second parent range = %q", text[ranges[1].StartInBytes:ranges[1].EndInBytes])
+	}
+	got := formatCommitWhenIn(when)
+	if got != "Sun Oct 11 2026 09:17:39 GMT+0900 (JST)" {
+		t.Fatalf("when = %q", got)
+	}
+	empty, emptyRanges, emptyHashes := formatCommitMeta(i18n.EN, gitcli.CommitDetail{})
+	if len(emptyRanges) != 0 || len(emptyHashes) != 0 || !strings.Contains(empty, "Commit: ") {
+		t.Fatalf("empty = %q ranges %d", empty, len(emptyRanges))
 	}
 }
 

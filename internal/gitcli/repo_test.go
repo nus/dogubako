@@ -135,6 +135,9 @@ func TestOpenSnapshotCommitAmend(t *testing.T) {
 	if !strings.Contains(d.Diff, "c.txt") || !strings.Contains(d.Diff, "+c") {
 		t.Fatalf("diff = %q", d.Diff)
 	}
+	if d.Committer != "Test" || d.CommitterEmail != "test@example.com" {
+		t.Fatalf("committer = %q <%s>", d.Committer, d.CommitterEmail)
+	}
 }
 
 func TestCreateTag(t *testing.T) {

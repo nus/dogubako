@@ -58,11 +58,23 @@ type GitTool struct {
 	remoteClosed bool
 	navSel       string
 
-	commitList  basicwidget.List[string]
-	commitRows  guigui.WidgetSlice[*gitCommitRow]
-	commitItems []basicwidget.ListItem[string]
-	graphEmpty  basicwidget.Text
-	showEmpty   bool
+	commitList     basicwidget.List[string]
+	commitRows     guigui.WidgetSlice[*gitCommitRow]
+	commitItems    []basicwidget.ListItem[string]
+	graphEmpty     basicwidget.Text
+	showEmpty      bool
+	openHash       string
+	openShown      string
+	openFromSelect bool
+	building       bool
+	expand         gitCommitExpand
+	histFile       string
+	histFor        string
+	histFrac       float64
+	histDragging   bool
+	histBounds     image.Rectangle
+	histGraph      image.Rectangle
+	histStack      gitHistStack
 
 	emptyHome   bool
 	showRecent  bool
@@ -98,11 +110,8 @@ type GitTool struct {
 	sshDirShown   string
 	sshConnected  bool
 
-	detail gitDetail
-
-	workTree      basicwidget.Text
-	showWorkTree  bool
-	workTreeLines int
+	workTree     basicwidget.Text
+	showWorkTree bool
 
 	stageBtn    basicwidget.Button
 	unstageBtn  basicwidget.Button
@@ -151,9 +160,13 @@ func (t *GitTool) WriteStateKey(context *guigui.Context, w *guigui.StateKeyWrite
 	w.WriteString(m.Selected())
 	w.WriteBool(m.Busy())
 	w.WriteBool(t.commitView)
+	w.WriteString(t.openHash)
+	w.WriteString(t.histFile)
 }
 
 func (t *GitTool) Build(context *guigui.Context, adder *guigui.ChildAdder) error {
+	t.building = true
+	defer func() { t.building = false }()
 	v, ok := context.Env(t, EnvKeyModel)
 	if !ok {
 		return nil
@@ -169,6 +182,10 @@ func (t *GitTool) Build(context *guigui.Context, adder *guigui.ChildAdder) error
 	if t.sideDragging && !ebiten.IsMouseButtonPressed(ebiten.MouseButtonLeft) {
 		t.sideDragging = false
 		t.setSideDragPassthrough(context, false)
+	}
+	if t.histDragging && !ebiten.IsMouseButtonPressed(ebiten.MouseButtonLeft) {
+		t.histDragging = false
+		t.setHistDragPassthrough(context, false)
 	}
 	t.tabBar.Sync(lang, model)
 	adder.AddWidget(&t.tabBar)
@@ -194,7 +211,7 @@ func (t *GitTool) Build(context *guigui.Context, adder *guigui.ChildAdder) error
 	adder.AddWidget(&t.sidePane)
 	t.sideSplit.tool = t
 	adder.AddWidget(&t.sideSplit)
-	t.setWorkTree(lang, model)
+	t.showWorkTree = model.HasRepo() && model.Snapshot().Status.Dirty()
 	t.showChanges = model.Snapshot().Status.Dirty()
 	if t.commitView {
 		if !t.showWorkTree {
@@ -213,11 +230,6 @@ func (t *GitTool) Build(context *guigui.Context, adder *guigui.ChildAdder) error
 		adder.AddWidget(&t.unstageBtn)
 		adder.AddWidget(&t.commitBtn)
 		adder.AddWidget(&t.amendBtn)
-	} else {
-		adder.AddWidget(&t.detail)
-		if t.showWorkTree {
-			adder.AddWidget(&t.workTree)
-		}
 	}
 
 	repoPath := model.Path()
@@ -343,9 +355,26 @@ func (t *GitTool) Build(context *guigui.Context, adder *guigui.ChildAdder) error
 		var emptyStyle basicwidget.TextStyle
 		useGitMono(&emptyStyle)
 		t.graphEmpty.SetBaseStyle(&emptyStyle)
-		adder.AddWidget(&t.graphEmpty)
+		t.histFile = ""
+		t.histFor = ""
+		t.histStack.tool = t
+		t.histStack.graph = &t.graphEmpty
+		t.histStack.showDiff = false
+		adder.AddWidget(&t.histStack)
 	} else if !t.commitView {
-		adder.AddWidget(&t.commitList)
+		if t.openHash != "" {
+			found := false
+			for _, row := range rows {
+				if row.Commit.Hash == t.openHash {
+					found = true
+					break
+				}
+			}
+			if !found {
+				t.openHash = ""
+			}
+		}
+		t.syncHistFile()
 		t.commitRows.SetLen(len(rows))
 		t.commitItems = slices.Delete(t.commitItems, 0, len(t.commitItems))
 		lanes := snap.Lanes
@@ -358,6 +387,21 @@ func (t *GitTool) Build(context *guigui.Context, adder *guigui.ChildAdder) error
 				Content: r,
 				Value:   row.Commit.Hash,
 			})
+			if row.Commit.Hash == t.openHash {
+				opened := row
+				t.expand.Set(lang, model, opened, lanes, t.histFile, func(hash string) {
+					t.openHash = hash
+					t.revealCommit(model, hash)
+				}, func(path string) {
+					t.histFile = path
+					t.histFor = t.openHash
+					guigui.RequestRebuild()
+				})
+				t.commitItems = append(t.commitItems, basicwidget.ListItem[string]{
+					Content:      &t.expand,
+					Unselectable: true,
+				})
+			}
 		}
 		t.commitList.SetStyle(basicwidget.ListStyleNormal)
 		t.commitList.SetHighlightVisibleWhenUnfocused(true)
@@ -370,17 +414,39 @@ func (t *GitTool) Build(context *guigui.Context, adder *guigui.ChildAdder) error
 				t.commitList.EnsureItemVisibleByIndex(idx)
 			}
 		}
+		if t.openHash != t.openShown {
+			t.openShown = t.openHash
+			if t.openHash != "" {
+				if idx := t.commitList.IndexByValue(t.openHash); idx >= 0 && idx+1 < t.commitList.ItemCount() {
+					t.commitList.EnsureItemVisibleByIndex(idx + 1)
+				}
+			}
+		}
+		context.SetClipChildren(&t.commitList, true)
+		t.histStack.tool = t
+		t.histStack.graph = &t.commitList
+		t.histStack.showDiff = t.histFile != ""
+		if t.histStack.showDiff {
+			t.setHistDiff(lang, model)
+		}
+		adder.AddWidget(&t.histStack)
 		t.commitList.OnItemSelected(func(context *guigui.Context, index int) {
 			item, ok := t.commitList.ItemByIndex(index)
 			if !ok || item.Value == "" {
 				return
 			}
 			model.SelectCommit(item.Value)
+			if item.Value == gitcli.Uncommitted {
+				t.openHash = ""
+				return
+			}
+			if !t.building {
+				t.openHash = item.Value
+				t.openFromSelect = true
+			}
 		})
 		context.SetEnabled(&t.commitList, !busy)
 	}
-
-	t.detail.Set(lang, model, onMenu, t.diffSplit, t.setDiffSplit)
 
 	t.setChangeList(context, lang, model, snap.Status.Entries, has && !busy)
 
@@ -474,30 +540,6 @@ func samePaths(a, b []string) bool {
 		}
 	}
 	return true
-}
-
-func (t *GitTool) setWorkTree(lang i18n.Lang, model *GitModel) {
-	t.showWorkTree = false
-	t.workTreeLines = 0
-	if !model.HasRepo() {
-		return
-	}
-	st := model.Snapshot().Status
-	if !st.Dirty() {
-		return
-	}
-	var b strings.Builder
-	b.WriteString(i18n.T(lang, i18n.GitWorkingTree))
-	for _, e := range st.Entries {
-		b.WriteByte('\n')
-		b.WriteString(e.String())
-	}
-	t.workTree.SetValue(b.String())
-	t.workTree.SetMultiline(true)
-	t.workTree.SetWrapMode(basicwidget.WrapModeNone)
-	t.workTree.SetSelectable(true)
-	t.workTreeLines = 1 + len(st.Entries)
-	t.showWorkTree = true
 }
 
 func (t *GitTool) setTreeFold(folded *map[string]bool, value string, expanded bool) {
@@ -601,12 +643,15 @@ func (t *GitTool) Layout(context *guigui.Context, widgetBounds *guigui.WidgetBou
 	t.layoutOverlays(context, layouter)
 }
 
-func (t *GitTool) layoutHistoryColumn(u int) {
-	graphBody := guigui.Widget(&t.graphEmpty)
-	if !t.showEmpty {
-		graphBody = &t.commitList
+func (t *GitTool) syncHistFile() {
+	if t.histFor == t.openHash {
+		return
 	}
+	t.histFile = ""
+	t.histFor = t.openHash
+}
 
+func (t *GitTool) layoutHistoryColumn(u int) {
 	t.netItems = slices.Delete(t.netItems, 0, len(t.netItems))
 	t.netItems = append(t.netItems,
 		guigui.LinearLayoutItem{Widget: &t.fetchBtn},
@@ -619,19 +664,8 @@ func (t *GitTool) layoutHistoryColumn(u int) {
 	t.rightItems = slices.Delete(t.rightItems, 0, len(t.rightItems))
 	t.rightItems = append(t.rightItems,
 		guigui.LinearLayoutItem{Size: guigui.FixedSize(u), Layout: &t.netRow},
-		guigui.LinearLayoutItem{Widget: graphBody, Size: guigui.FlexibleSize(3)},
-		guigui.LinearLayoutItem{Widget: &t.detail, Size: guigui.FlexibleSize(2)},
+		guigui.LinearLayoutItem{Widget: &t.histStack, Size: guigui.FlexibleSize(1)},
 	)
-	if t.showWorkTree {
-		lines := t.workTreeLines
-		if lines < 1 {
-			lines = 1
-		}
-		if lines > 4 {
-			lines = 4
-		}
-		t.rightItems = append(t.rightItems, guigui.LinearLayoutItem{Widget: &t.workTree, Size: guigui.FixedSize(lines * u)})
-	}
 	t.rightItems = append(t.rightItems,
 		guigui.LinearLayoutItem{Widget: &t.status, Size: guigui.FixedSize(u * 3 / 4)},
 		guigui.LinearLayoutItem{Widget: &t.hint, Size: guigui.FixedSize(u * 3 / 4)},
@@ -701,9 +735,16 @@ func (t *GitTool) layoutOverlays(context *guigui.Context, layouter *guigui.Child
 }
 
 func (t *GitTool) Tick(context *guigui.Context, widgetBounds *guigui.WidgetBounds) error {
+	openedBySelect := t.openFromSelect
+	t.openFromSelect = false
 	if t.sideDragging && !ebiten.IsMouseButtonPressed(ebiten.MouseButtonLeft) {
 		t.sideDragging = false
 		t.setSideDragPassthrough(context, false)
+		guigui.RequestRebuild()
+	}
+	if t.histDragging && !ebiten.IsMouseButtonPressed(ebiten.MouseButtonLeft) {
+		t.histDragging = false
+		t.setHistDragPassthrough(context, false)
 		guigui.RequestRebuild()
 	}
 	if !inpututil.IsMouseButtonJustPressed(ebiten.MouseButtonLeft) {
@@ -723,6 +764,16 @@ func (t *GitTool) Tick(context *guigui.Context, widgetBounds *guigui.WidgetBound
 	if t.emptyHome {
 		t.openRecentAtCursor(model)
 		return nil
+	}
+	if !t.commitView && !openedBySelect && !t.histDragging {
+		if hash, ok := t.commitAtCursor(); ok {
+			if hash == t.openHash {
+				t.openHash = ""
+			} else {
+				t.openHash = hash
+			}
+			guigui.RequestRebuild()
+		}
 	}
 	ref, hit := t.refAtRows(&t.sidePane.body.tagRows, model)
 	if !hit {
@@ -744,12 +795,18 @@ func (t *GitTool) CursorShape(context *guigui.Context, widgetBounds *guigui.Widg
 	if t.sideDragging {
 		return ebiten.CursorShapeEWResize, true
 	}
+	if t.histDragging {
+		return ebiten.CursorShapeNSResize, true
+	}
 	return 0, false
 }
 
 func (t *GitTool) HandlePointingInput(context *guigui.Context, widgetBounds *guigui.WidgetBounds) guigui.HandleInputResult {
 	if t.sideDragging {
 		return t.dragSideSplit(context)
+	}
+	if t.histDragging {
+		return t.dragHistSplit(context)
 	}
 	if !inpututil.IsMouseButtonJustPressed(ebiten.MouseButtonRight) {
 		return guigui.HandleInputResult{}
@@ -781,10 +838,16 @@ func (t *GitTool) HandlePointingInput(context *guigui.Context, widgetBounds *gui
 	return guigui.HandleInputResult{}
 }
 
+// cursorInGraphItem reports a commit-row hit that lies inside the graph.
+// A row rectangle can continue into the splitter under the graph.
+func cursorInGraphItem(cursor image.Point, graph, item image.Rectangle) bool {
+	return cursor.In(graph) && cursor.In(item)
+}
+
 func (t *GitTool) commitAtCursor() (string, bool) {
 	c := image.Pt(ebiten.CursorPosition())
 	for i := 0; i < t.commitList.ItemCount(); i++ {
-		if !c.In(t.commitList.ItemBounds(i)) {
+		if !cursorInGraphItem(c, t.histGraph, t.commitList.ItemBounds(i)) {
 			continue
 		}
 		item, ok := t.commitList.ItemByIndex(i)
@@ -794,6 +857,19 @@ func (t *GitTool) commitAtCursor() (string, bool) {
 		return item.Value, true
 	}
 	return "", false
+}
+
+func (t *GitTool) setHistDiff(lang i18n.Lang, model *GitModel) {
+	detail := model.Detail()
+	body := ""
+	empty := i18n.T(lang, i18n.StatusGitLoading)
+	if detail.Hash == t.openHash {
+		body = fileDiffText(detail.Diff, t.histFile)
+		empty = i18n.T(lang, i18n.GitNoChanges)
+	}
+	shown := t.openHash + "\x00" + t.histFile
+	t.histStack.diff.Set(body, empty, shown)
+	t.histStack.diff.SetSplit(lang, t.diffSplit, t.setDiffSplit)
 }
 
 func (t *GitTool) setDiffSplit(split bool) {

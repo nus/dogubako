@@ -7,13 +7,10 @@ import (
 	"strconv"
 	"strings"
 
-	"github.com/hajimehoshi/ebiten/v2"
-
 	"github.com/guigui-gui/guigui"
 	"github.com/guigui-gui/guigui/basicwidget"
 
 	"github.com/nus/dogubako/internal/gitcli"
-	"github.com/nus/dogubako/internal/i18n"
 )
 
 // gitFileDiff is one file section of a unified diff.
@@ -21,97 +18,6 @@ type gitFileDiff struct {
 	Name   string
 	Status string
 	Text   string
-}
-
-// gitChanges is the changes tab: a file list beside the colored diff.
-type gitChanges struct {
-	guigui.DefaultWidget
-
-	list basicwidget.List[int]
-	mode gitDiffModeBar
-	diff gitDiffView
-	note basicwidget.Text
-
-	files    []gitFileDiff
-	items    []basicwidget.ListItem[int]
-	selected int
-	seen     string
-	message  string
-	split    bool
-}
-
-func (c *gitChanges) Set(lang i18n.Lang, model *GitModel, split bool, onSplit func(bool)) {
-	c.mode.Set(lang, split, onSplit)
-	if split != c.split {
-		c.split = split
-		c.diff.ResetScroll()
-	}
-	c.message = ""
-	c.files = nil
-	if !model.HasRepo() {
-		c.message = i18n.T(lang, i18n.GitEmpty)
-		c.note.SetValue(c.message)
-		return
-	}
-	detail := model.Detail()
-	if detail.Hash == "" {
-		c.message = i18n.T(lang, i18n.GitNoCommits)
-		c.note.SetValue(c.message)
-		return
-	}
-	if detail.Hash != c.seen {
-		c.seen = detail.Hash
-		c.selected = 0
-		c.diff.ResetScroll()
-	}
-	c.files = splitUnifiedDiff(detail.Diff)
-	if len(c.files) == 0 {
-		c.message = i18n.T(lang, i18n.GitNoChanges)
-		c.note.SetValue(c.message)
-		return
-	}
-	if c.selected < 0 || c.selected >= len(c.files) {
-		c.selected = 0
-	}
-	c.items = c.items[:0]
-	for i, f := range c.files {
-		c.items = append(c.items, basicwidget.ListItem[int]{
-			Text:  f.Status + "  " + f.Name,
-			Value: i,
-		})
-	}
-	c.list.SetItems(c.items)
-	c.list.SelectItemByIndex(c.selected)
-}
-
-func (c *gitChanges) Build(context *guigui.Context, adder *guigui.ChildAdder) error {
-	if c.message != "" {
-		c.note.SetMultiline(true)
-		c.note.SetWrapMode(basicwidget.WrapModeNormal)
-		c.note.SetSelectable(true)
-		adder.AddWidget(&c.note)
-		return nil
-	}
-	adder.AddWidget(&c.list)
-	adder.AddWidget(&c.mode)
-	adder.AddWidget(&c.diff)
-	c.list.SetStyle(basicwidget.ListStyleNormal)
-	c.list.SetHighlightVisibleWhenUnfocused(true)
-	c.list.SetSelectedItemBold(false)
-	c.list.OnItemSelected(func(context *guigui.Context, index int) {
-		if index < 0 || index >= len(c.files) || index == c.selected {
-			return
-		}
-		c.selected = index
-		c.diff.ResetScroll()
-		guigui.RequestRebuild()
-	})
-	text := ""
-	if c.selected >= 0 && c.selected < len(c.files) {
-		text = c.files[c.selected].Text
-	}
-	c.diff.Set(text, context.ColorMode() == ebiten.ColorModeDark, c.split)
-	return nil
 }
 
 // gitDiffView shows a diff in the compact layout or the split layout.
@@ -311,51 +217,6 @@ func (v *gitDiffView) Measure(context *guigui.Context, constraints guigui.Constr
 	return image.Pt(w, h)
 }
 
-func (c *gitChanges) Layout(context *guigui.Context, widgetBounds *guigui.WidgetBounds, layouter *guigui.ChildLayouter) {
-	bounds := widgetBounds.Bounds()
-	if c.message != "" {
-		layouter.LayoutWidget(&c.note, bounds)
-		return
-	}
-	u := basicwidget.UnitSize(context)
-	listW := bounds.Dx() / 3
-	if maxW := 18 * u; listW > maxW {
-		listW = maxW
-	}
-	if minW := 10 * u; listW < minW {
-		listW = minW
-	}
-	if listW > bounds.Dx()/2 {
-		listW = bounds.Dx() / 2
-	}
-	if listW < 0 {
-		listW = 0
-	}
-	gap := u / 4
-	left := image.Rect(bounds.Min.X, bounds.Min.Y, bounds.Min.X+listW, bounds.Max.Y)
-	right := image.Rect(bounds.Min.X+listW+gap, bounds.Min.Y, bounds.Max.X, bounds.Max.Y)
-	if right.Min.X > right.Max.X {
-		right.Min.X = right.Max.X
-	}
-	mode := c.mode.Measure(context, guigui.Constraints{})
-	headerH := mode.Y
-	if headerH <= 0 {
-		headerH = u
-	}
-	header := image.Rect(right.Min.X, right.Min.Y, right.Max.X, right.Min.Y+headerH)
-	body := image.Rect(right.Min.X, header.Max.Y+gap, right.Max.X, right.Max.Y)
-	if body.Min.Y > body.Max.Y {
-		body.Min.Y = body.Max.Y
-	}
-	modeW := mode.X
-	if modeW > header.Dx() {
-		modeW = header.Dx()
-	}
-	layouter.LayoutWidget(&c.list, left)
-	layouter.LayoutWidget(&c.mode, image.Rect(header.Max.X-modeW, header.Min.Y, header.Max.X, header.Max.Y))
-	layouter.LayoutWidget(&c.diff, body)
-}
-
 func configureDiffPanel(p *basicwidget.Panel) {
 	p.SetAutoBorder(false)
 	p.SetBorders(basicwidget.PanelBorders{})
@@ -431,6 +292,54 @@ func splitUnifiedDiff(diff string) []gitFileDiff {
 		b.WriteString(line)
 	}
 	flush()
+	return out
+}
+
+// gitPathStat is the added and deleted line counts for one file.
+type gitPathStat struct {
+	Path string
+	Add  int
+	Del  int
+}
+
+// fileDiffText returns the unified diff section for path.
+// An unknown path returns an empty string.
+func fileDiffText(diff, path string) string {
+	if path == "" {
+		return ""
+	}
+	for _, f := range splitUnifiedDiff(diff) {
+		if f.Name == path {
+			return f.Text
+		}
+	}
+	return ""
+}
+
+// diffPathStats counts changed lines in each file of a unified diff.
+// A binary file has zero counts.
+func diffPathStats(diff string) []gitPathStat {
+	files := splitUnifiedDiff(diff)
+	if len(files) == 0 {
+		return nil
+	}
+	out := make([]gitPathStat, 0, len(files))
+	for _, f := range files {
+		if f.Name == "" {
+			continue
+		}
+		st := gitPathStat{Path: f.Name}
+		for _, line := range strings.Split(f.Text, "\n") {
+			switch {
+			case strings.HasPrefix(line, "+++"), strings.HasPrefix(line, "---"):
+			case strings.HasPrefix(line, "+"):
+				st.Add++
+			case strings.HasPrefix(line, "-"):
+				st.Del++
+			}
+		}
+		out = append(out, st)
+	}
 	return out
 }
 

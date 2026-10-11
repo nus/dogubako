@@ -268,28 +268,23 @@ func (r *Repo) Detail(ctx context.Context, hash string) (CommitDetail, error) {
 	if err := ctx.Err(); err != nil {
 		return CommitDetail{}, err
 	}
-	meta, err := r.output(ctx, "log", "-1", "--no-notes", "--no-decorate", "--pretty=tformat:%H%x1f%P%x1f%an%x1f%ae%x1f%aI%x1f%cI%x1f%s", hash)
+	meta, err := r.output(ctx, "log", "-1", "--no-notes", "--no-decorate", "--pretty=tformat:%H%x1f%P%x1f%an%x1f%ae%x1f%aI%x1f%cn%x1f%ce%x1f%s", hash)
 	if err != nil {
 		return CommitDetail{}, err
 	}
-	set := parseHistory(meta)
-	var c *histCommit
-	for _, item := range set {
-		c = item
-		break
-	}
-	if c == nil {
+	detail, ok := parseDetailMeta(meta)
+	if !ok {
 		return CommitDetail{}, fmt.Errorf("unknown revision %s", hash)
 	}
-	body, err := r.output(ctx, "log", "-1", "--format=%B", "--no-notes", c.Hash)
+	body, err := r.output(ctx, "log", "-1", "--format=%B", "--no-notes", detail.Hash)
 	if err != nil {
 		return CommitDetail{}, err
 	}
-	files, err := r.output(ctx, "diff-tree", "--no-commit-id", "--name-status", "-r", "--root", c.Hash)
+	files, err := r.output(ctx, "diff-tree", "--no-commit-id", "--name-status", "-r", "--root", detail.Hash)
 	if err != nil {
 		return CommitDetail{}, err
 	}
-	diff, err := r.output(ctx, "show", "--no-notes", "--no-color", "--format=", "--patch", c.Hash)
+	diff, err := r.output(ctx, "show", "--no-notes", "--no-color", "--format=", "--patch", detail.Hash)
 	if err != nil {
 		return CommitDetail{}, err
 	}
@@ -299,13 +294,11 @@ func (r *Repo) Detail(ctx context.Context, hash string) (CommitDetail, error) {
 	if err != nil {
 		decos = nil
 	}
-	c.Decorations = decos[c.Hash]
-	return CommitDetail{
-		Commit: c.Commit,
-		Body:   strings.TrimSpace(body),
-		Files:  parseNameStatus(files),
-		Diff:   diff,
-	}, nil
+	detail.Decorations = decos[detail.Hash]
+	detail.Body = strings.TrimSpace(body)
+	detail.Files = parseNameStatus(files)
+	detail.Diff = diff
+	return detail, nil
 }
 
 // Commit creates a commit. amend rewrites HEAD.
