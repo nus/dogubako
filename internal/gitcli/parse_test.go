@@ -127,7 +127,7 @@ func TestLayoutGraphLinear(t *testing.T) {
 		{Hash: "b", Parents: []string{"c"}},
 		{Hash: "c"},
 	}
-	rows := LayoutGraph(commits)
+	rows := LayoutGraph(commits, "")
 	if len(rows) != 3 {
 		t.Fatalf("len = %d", len(rows))
 	}
@@ -148,7 +148,7 @@ func TestLayoutGraphMerge(t *testing.T) {
 		{Hash: "F", Parents: []string{"P"}},
 		{Hash: "P"},
 	}
-	rows := LayoutGraph(commits)
+	rows := LayoutGraph(commits, "")
 	if rows[0].Lane != 0 {
 		t.Fatalf("M lane = %d", rows[0].Lane)
 	}
@@ -232,10 +232,81 @@ func TestLayoutGraphTwoTips(t *testing.T) {
 		{Hash: "D", Parents: []string{"C"}},
 		{Hash: "C"},
 	}
-	rows := LayoutGraph(commits)
+	rows := LayoutGraph(commits, "")
 	if rows[0].Lane != 0 || rows[1].Lane != 1 || rows[2].Lane != 0 {
 		t.Fatalf("lanes = %d %d %d", rows[0].Lane, rows[1].Lane, rows[2].Lane)
 	}
+}
+
+func TestLayoutGraphCheckedOutBranchStaysStraight(t *testing.T) {
+	// E is newer than the checked-out tip D. Both descend from C.
+	// D's line stays in one lane and E folds into it.
+	tips := []Commit{
+		{Hash: "E", Parents: []string{"C"}},
+		{Hash: "D", Parents: []string{"C"}},
+		{Hash: "C"},
+	}
+	rows := LayoutGraph(tips, "D")
+	if lane := mainlineLane(t, rows, "D", "C"); rows[0].Lane == lane {
+		t.Fatalf("newer tip stayed on the checked-out lane %d", lane)
+	}
+
+	// The side branch is committed after the merge, so it reserves P
+	// before the checked-out first parent A is drawn. A must keep M's lane.
+	merged := []Commit{
+		{Hash: "M", Parents: []string{"A", "B"}},
+		{Hash: "B", Parents: []string{"P"}},
+		{Hash: "A", Parents: []string{"P"}},
+		{Hash: "P"},
+	}
+	rows = LayoutGraph(merged, "M")
+	lane := mainlineLane(t, rows, "M", "A", "P")
+	if !hasEdge(rowByHash(t, rows, "A").Outgoing, lane, lane) {
+		t.Fatalf("A left the checked-out lane: %#v", rowByHash(t, rows, "A").Outgoing)
+	}
+	if rowByHash(t, rows, "B").Lane == lane {
+		t.Fatalf("merged parent B stayed on the checked-out lane %d", lane)
+	}
+
+	// A newer branch interleaves with a merge on the checked-out branch.
+	interleaved := []Commit{
+		{Hash: "F2", Parents: []string{"F1"}},
+		{Hash: "M2", Parents: []string{"M1"}},
+		{Hash: "F1", Parents: []string{"A"}},
+		{Hash: "M1", Parents: []string{"A", "B"}},
+		{Hash: "B", Parents: []string{"P"}},
+		{Hash: "A", Parents: []string{"P"}},
+		{Hash: "P"},
+	}
+	rows = LayoutGraph(interleaved, "M2")
+	mainlineLane(t, rows, "M2", "M1", "A", "P")
+}
+
+func mainlineLane(t *testing.T, rows []GraphRow, hashes ...string) int {
+	t.Helper()
+	lane := -1
+	for _, hash := range hashes {
+		got := rowByHash(t, rows, hash).Lane
+		if lane < 0 {
+			lane = got
+			continue
+		}
+		if got != lane {
+			t.Fatalf("commit %s lane = %d, want %d", hash, got, lane)
+		}
+	}
+	return lane
+}
+
+func rowByHash(t *testing.T, rows []GraphRow, hash string) GraphRow {
+	t.Helper()
+	for _, r := range rows {
+		if r.Commit.Hash == hash {
+			return r
+		}
+	}
+	t.Fatalf("missing commit %s", hash)
+	return GraphRow{}
 }
 
 func hasEdge(edges []Edge, from, to int) bool {
