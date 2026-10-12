@@ -28,6 +28,13 @@ type gitLoadResult struct {
 	err   error
 }
 
+type gitMoreResult struct {
+	snap gitcli.Snapshot
+	prev int
+	gen  uint64
+	err  error
+}
+
 type gitOpResult struct {
 	okKey      i18n.Key
 	errKey     i18n.Key
@@ -83,10 +90,18 @@ type gitSession struct {
 	status statusMsg
 
 	pendingLoad   <-chan gitLoadResult
+	pendingMore   <-chan gitMoreResult
 	pendingOp     <-chan gitOpResult
 	pendingDetail <-chan gitDetailResult
 	pendingStatus <-chan gitStatusResult
 	lastPoll      time.Time
+
+	// histLimit is how many commits the graph has asked for.
+	// histPage overrides the page size in tests. Zero uses gitcli.HistoryPage.
+	histLimit int
+	histPage  int
+	histMore  bool
+	histGen   uint64
 
 	workSlots [2]gitWorkSlot
 
@@ -170,11 +185,40 @@ func (m *gitSession) Busy() bool {
 	return m.pendingLoad != nil || m.pendingOp != nil
 }
 
+func (m *gitSession) historyPage() int {
+	if m.histPage > 0 {
+		return m.histPage
+	}
+	return gitcli.HistoryPage
+}
+
+func (m *gitSession) historyLimit() int {
+	if m.histLimit > 0 {
+		return m.histLimit
+	}
+	return m.historyPage()
+}
+
+// HasMoreHistory reports that older commits can still be loaded.
+func (m *gitSession) HasMoreHistory() bool { return m.histMore }
+
+// HistoryLoading reports that a snapshot or another history page is in flight.
+func (m *gitSession) HistoryLoading() bool {
+	return m.pendingLoad != nil || m.pendingMore != nil
+}
+
+// LoadMoreHistory fetches the next page of older commits.
+func (m *gitSession) LoadMoreHistory() { m.loadMoreHistory() }
+
 func (m *gitSession) open(path string) {
 	if m.Busy() || strings.TrimSpace(path) == "" {
 		return
 	}
 	m.path = canonicalPath(path)
+	m.histGen++
+	m.pendingMore = nil
+	m.histLimit = m.historyPage()
+	m.histMore = false
 	m.SetStatus(i18n.StatusGitLoading)
 	ch := make(chan gitLoadResult, 1)
 	m.pendingLoad = ch
@@ -183,6 +227,7 @@ func (m *gitSession) open(path string) {
 		m.owner.saveTabs()
 	}
 	hidden := cloneHidden(m.hidden)
+	limit := m.historyLimit()
 	go func() {
 		ctx, cancel := context.WithTimeout(context.Background(), gitLoadTimeout)
 		defer cancel()
@@ -191,7 +236,7 @@ func (m *gitSession) open(path string) {
 			ch <- gitLoadResult{err: err}
 			return
 		}
-		snap, err := repo.Snapshot(ctx, gitcli.SnapshotOpts{HiddenRemotes: hidden})
+		snap, err := repo.Snapshot(ctx, gitcli.SnapshotOpts{HiddenRemotes: hidden, MaxCommits: limit})
 		ch <- gitLoadResult{repo: repo, snap: snap, err: err}
 	}()
 }
@@ -220,6 +265,11 @@ func (m *gitSession) loadSnap(quiet bool) {
 	if m.Busy() || m.repo == nil {
 		return
 	}
+	if m.pendingMore != nil && quiet {
+		return
+	}
+	m.histGen++
+	m.pendingMore = nil
 	if !quiet {
 		m.SetStatus(i18n.StatusGitLoading)
 	}
@@ -228,16 +278,41 @@ func (m *gitSession) loadSnap(quiet bool) {
 	m.generation++
 	repo := m.repo
 	hidden := cloneHidden(m.hidden)
+	limit := m.historyLimit()
 	go func() {
 		ctx, cancel := context.WithTimeout(context.Background(), gitLoadTimeout)
 		defer cancel()
-		snap, err := repo.Snapshot(ctx, gitcli.SnapshotOpts{HiddenRemotes: hidden})
+		snap, err := repo.Snapshot(ctx, gitcli.SnapshotOpts{HiddenRemotes: hidden, MaxCommits: limit})
 		ch <- gitLoadResult{repo: repo, snap: snap, err: err, quiet: quiet}
 	}()
 }
 
+func (m *gitSession) loadMoreHistory() {
+	if m.pendingMore != nil || m.Busy() || m.repo == nil || !m.histMore {
+		return
+	}
+	prev := m.historyLimit()
+	next := prev + m.historyPage()
+	m.histLimit = next
+	m.histGen++
+	gen := m.histGen
+	ch := make(chan gitMoreResult, 1)
+	m.pendingMore = ch
+	m.generation++
+	repo := m.repo
+	hidden := cloneHidden(m.hidden)
+	go func() {
+		ctx, cancel := context.WithTimeout(context.Background(), gitLoadTimeout)
+		defer cancel()
+		snap, err := repo.Snapshot(ctx, gitcli.SnapshotOpts{HiddenRemotes: hidden, MaxCommits: next})
+		ch <- gitMoreResult{snap: snap, prev: prev, gen: gen, err: err}
+	}()
+	guigui.RequestRebuild()
+}
+
 func (m *gitSession) Drain() {
 	m.drainLoad()
+	m.drainMore()
 	m.drainOp()
 	m.drainDetail()
 	m.drainWork()
@@ -245,7 +320,7 @@ func (m *gitSession) Drain() {
 }
 
 func (m *gitSession) PollStatus() {
-	if m.pendingStatus != nil || m.Busy() || m.repo == nil {
+	if m.pendingStatus != nil || m.Busy() || m.pendingMore != nil || m.repo == nil {
 		return
 	}
 	now := time.Now()
@@ -381,8 +456,38 @@ func (m *gitSession) drainLoad() {
 	}
 }
 
+func (m *gitSession) drainMore() {
+	if m.pendingMore == nil {
+		return
+	}
+	select {
+	case res := <-m.pendingMore:
+		m.pendingMore = nil
+		if res.gen != m.histGen {
+			return
+		}
+		if res.err != nil {
+			m.histLimit = res.prev
+			m.SetStatus(i18n.StatusGitOpFailed, res.err)
+			m.generation++
+			guigui.RequestRebuild()
+			return
+		}
+		prevN := len(m.snap.Commits)
+		m.applySnap(res.snap)
+		if len(m.snap.Commits) <= prevN {
+			m.histMore = false
+		} else if m.status.key == i18n.StatusGitOpened {
+			m.SetStatus(i18n.StatusGitOpened, m.path, len(m.snap.Commits))
+		}
+		guigui.RequestRebuild()
+	default:
+	}
+}
+
 func (m *gitSession) applySnap(snap gitcli.Snapshot) {
 	m.snap = snap
+	m.histMore = snap.MoreCommits
 	if m.sel == "" && snap.HEAD != "" {
 		m.sel = snap.HEAD
 		m.startDetail(snap.HEAD)

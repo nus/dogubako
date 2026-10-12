@@ -75,6 +75,8 @@ type GitTool struct {
 	histBounds     image.Rectangle
 	histGraph      image.Rectangle
 	histStack      gitHistStack
+	histSpin       gitSpin
+	showHistSpin   bool
 	// graphUnits is the commit-graph column width in unit sizes.
 	// Zero uses the width that fits the lanes. A dragged width is restored next launch.
 	graphUnits        float64
@@ -174,6 +176,8 @@ func (t *GitTool) WriteStateKey(context *guigui.Context, w *guigui.StateKeyWrite
 	w.WriteString(m.Path())
 	w.WriteString(m.Selected())
 	w.WriteBool(m.Busy())
+	w.WriteBool(m.HistoryLoading())
+	w.WriteBool(m.HasMoreHistory())
 	w.WriteBool(t.commitView)
 	w.WriteString(t.openHash)
 	w.WriteString(t.histFile)
@@ -181,6 +185,7 @@ func (t *GitTool) WriteStateKey(context *guigui.Context, w *guigui.StateKeyWrite
 
 func (t *GitTool) Build(context *guigui.Context, adder *guigui.ChildAdder) error {
 	t.building = true
+	t.showHistSpin = false
 	defer func() { t.building = false }()
 	t.ensureGraphWidth()
 	v, ok := context.Env(t, EnvKeyModel)
@@ -371,7 +376,9 @@ func (t *GitTool) Build(context *guigui.Context, adder *guigui.ChildAdder) error
 		t.graphEmpty.SetWrapMode(basicwidget.WrapModeNormal)
 		t.graphEmpty.SetHorizontalAlign(basicwidget.HorizontalAlignCenter)
 		t.graphEmpty.SetVerticalAlign(basicwidget.VerticalAlignMiddle)
-		if !has {
+		if model.HistoryLoading() {
+			t.graphEmpty.SetValue("")
+		} else if !has {
 			t.graphEmpty.SetValue(i18n.T(lang, i18n.GitEmpty))
 		} else {
 			t.graphEmpty.SetValue(i18n.T(lang, i18n.GitNoCommits))
@@ -383,7 +390,11 @@ func (t *GitTool) Build(context *guigui.Context, adder *guigui.ChildAdder) error
 		t.histFor = ""
 		t.commitList.SetHeaderHeight(0)
 		t.histStack.tool = t
-		t.histStack.graph = &t.graphEmpty
+		if model.HistoryLoading() {
+			t.histStack.graph = &t.histSpin
+		} else {
+			t.histStack.graph = &t.graphEmpty
+		}
 		t.histStack.showDiff = false
 		adder.AddWidget(&t.histStack)
 	} else if !t.commitView {
@@ -482,6 +493,11 @@ func (t *GitTool) Build(context *guigui.Context, adder *guigui.ChildAdder) error
 			}
 		})
 		context.SetEnabled(&t.commitList, !busy)
+		if model.HistoryLoading() {
+			t.showHistSpin = true
+			context.SetPassthrough(&t.histSpin, true)
+			adder.AddWidget(&t.histSpin)
+		}
 	}
 
 	t.setChangeList(context, lang, model, snap.Status.Entries, has && !busy)
@@ -773,9 +789,32 @@ func (t *GitTool) layoutOverlays(context *guigui.Context, layouter *guigui.Child
 	if t.rename.IsOpen() {
 		center(&t.rename, t.rename.contentSize(context))
 	}
+	if t.showHistSpin && !t.histGraph.Empty() {
+		layouter.LayoutWidget(&t.histSpin, t.histSpinBounds(basicwidget.UnitSize(context)))
+	}
+}
+
+func (t *GitTool) histSpinBounds(u int) image.Rectangle {
+	g := t.histGraph
+	size := u * 2
+	if size < 24 {
+		size = 24
+	}
+	x := g.Min.X + (g.Dx()-size)/2
+	y := g.Max.Y - size - u/5
+	if y < g.Min.Y {
+		y = g.Min.Y
+	}
+	if x < g.Min.X {
+		x = g.Min.X
+	}
+	return image.Rect(x, y, x+size, y+size)
 }
 
 func (t *GitTool) Tick(context *guigui.Context, widgetBounds *guigui.WidgetBounds) error {
+	if v, ok := context.Env(t, EnvKeyModel); ok {
+		t.maybeLoadMoreHistory(v.(*Model).Git())
+	}
 	openedBySelect := t.openFromSelect
 	t.openFromSelect = false
 	if t.sideDragging && !ebiten.IsMouseButtonPressed(ebiten.MouseButtonLeft) {
@@ -839,6 +878,20 @@ func (t *GitTool) Tick(context *guigui.Context, widgetBounds *guigui.WidgetBound
 		model.DoCheckout(ref)
 	}
 	return nil
+}
+
+func (t *GitTool) maybeLoadMoreHistory(model *GitModel) {
+	if t.commitView || t.showEmpty || t.emptyHome || t.sshPick {
+		return
+	}
+	if !model.HasRepo() || !model.HasMoreHistory() || model.HistoryLoading() {
+		return
+	}
+	n := t.commitList.ItemCount()
+	if n == 0 || !t.commitList.IsItemInViewport(n-1) {
+		return
+	}
+	model.LoadMoreHistory()
 }
 
 func (t *GitTool) CursorShape(context *guigui.Context, widgetBounds *guigui.WidgetBounds) (ebiten.CursorShapeType, bool) {

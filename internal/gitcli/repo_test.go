@@ -3,6 +3,7 @@ package gitcli
 import (
 	"context"
 	"errors"
+	"fmt"
 	"os"
 	"os/exec"
 	"path/filepath"
@@ -983,6 +984,68 @@ func hasDecoration(ds []Decoration, kind, name string) bool {
 		}
 	}
 	return false
+}
+
+func TestSnapshotHistoryPages(t *testing.T) {
+	dir := initRepo(t)
+	for i := 0; i < 6; i++ {
+		commitEmptyAt(t, dir, fmt.Sprintf("c%d", i), fmt.Sprintf("2020-01-01 00:00:%02d +0000", i))
+	}
+	ctx, cancel := context.WithTimeout(context.Background(), 15*time.Second)
+	defer cancel()
+	repo, err := Open(ctx, dir)
+	if err != nil {
+		t.Fatal(err)
+	}
+	page, err := repo.Snapshot(ctx, SnapshotOpts{MaxCommits: 3})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(page.Commits) != 3 || !page.MoreCommits {
+		t.Fatalf("page commits=%d more=%v", len(page.Commits), page.MoreCommits)
+	}
+	if page.Commits[0].Subject != "c5" || page.Commits[2].Subject != "c3" {
+		t.Fatalf("page subjects = %q %q %q", page.Commits[0].Subject, page.Commits[1].Subject, page.Commits[2].Subject)
+	}
+	all, err := repo.Snapshot(ctx, SnapshotOpts{MaxCommits: 6})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(all.Commits) != 6 || all.MoreCommits {
+		t.Fatalf("all commits=%d more=%v", len(all.Commits), all.MoreCommits)
+	}
+	for i := range page.Commits {
+		if page.Commits[i].Hash != all.Commits[i].Hash {
+			t.Fatalf("prefix mismatch at %d", i)
+		}
+	}
+	def, err := repo.Snapshot(ctx, SnapshotOpts{})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(def.Commits) != 6 || def.MoreCommits {
+		t.Fatalf("default commits=%d more=%v", len(def.Commits), def.MoreCommits)
+	}
+}
+
+func commitEmptyAt(t *testing.T, dir, msg, when string) {
+	t.Helper()
+	cmd := exec.Command("git", "commit", "--allow-empty", "-m", msg)
+	cmd.Dir = dir
+	cmd.Env = append(os.Environ(),
+		"GIT_AUTHOR_NAME=Test",
+		"GIT_AUTHOR_EMAIL=test@example.com",
+		"GIT_COMMITTER_NAME=Test",
+		"GIT_COMMITTER_EMAIL=test@example.com",
+		"GIT_AUTHOR_DATE="+when,
+		"GIT_COMMITTER_DATE="+when,
+		"GIT_CONFIG_GLOBAL=/dev/null",
+		"GIT_CONFIG_SYSTEM=/dev/null",
+	)
+	out, err := cmd.CombinedOutput()
+	if err != nil {
+		t.Fatalf("git commit: %v\n%s", err, out)
+	}
 }
 
 func commitHasDecoration(cs []Commit, kind, name string) bool {

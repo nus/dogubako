@@ -3,8 +3,10 @@ package app
 import (
 	"image"
 	"image/color"
+	"math"
 	"slices"
 	"strings"
+	"time"
 
 	"github.com/hajimehoshi/ebiten/v2"
 	"github.com/hajimehoshi/ebiten/v2/inpututil"
@@ -1570,4 +1572,78 @@ func (t *GitTool) dragMetaSplit(context *guigui.Context, kind int) guigui.Handle
 	t.setGraphDragPassthrough(context, true)
 	guigui.RequestRebuild()
 	return guigui.HandleInputByWidget(t)
+}
+
+// gitSpin is the history loading indicator: a ring of dots that chase a head.
+type gitSpin struct {
+	guigui.DefaultWidget
+}
+
+func (s *gitSpin) WriteStateKey(context *guigui.Context, w *guigui.StateKeyWriter) {
+	w.WriteInt64(time.Now().UnixMilli() / 32)
+}
+
+func (s *gitSpin) Measure(context *guigui.Context, constraints guigui.Constraints) image.Point {
+	u := basicwidget.UnitSize(context)
+	size := image.Pt(u, u)
+	if w, ok := constraints.FixedWidth(); ok {
+		size.X = w
+	}
+	if h, ok := constraints.FixedHeight(); ok {
+		size.Y = h
+	}
+	return size
+}
+
+func (s *gitSpin) Tick(context *guigui.Context, widgetBounds *guigui.WidgetBounds) error {
+	guigui.RequestRebuild()
+	return nil
+}
+
+func (s *gitSpin) Draw(context *guigui.Context, widgetBounds *guigui.WidgetBounds, dst *ebiten.Image) {
+	b := widgetBounds.Bounds()
+	if b.Dx() < 2 || b.Dy() < 2 {
+		return
+	}
+	side := b.Dx()
+	if b.Dy() < side {
+		side = b.Dy()
+	}
+	radius := float32(side) * 0.28
+	if radius > 11 {
+		radius = 11
+	}
+	if radius < 5 {
+		radius = 5
+	}
+	dot := radius * 0.28
+	if dot < 1.4 {
+		dot = 1.4
+	}
+	cx := float32(b.Min.X + b.Dx()/2)
+	cy := float32(b.Min.Y + b.Dy()/2)
+	bg := color.NRGBA{R: 0xff, G: 0xff, B: 0xff, A: 0xe6}
+	ink := color.NRGBA{R: 0x22, G: 0x22, B: 0x22, A: 0xff}
+	if context.ColorMode() == ebiten.ColorModeDark {
+		bg = color.NRGBA{R: 0x2a, G: 0x2a, B: 0x2a, A: 0xdd}
+		ink = color.NRGBA{R: 0xee, G: 0xee, B: 0xee, A: 0xff}
+	}
+	vector.DrawFilledCircle(dst, cx, cy, radius+dot*1.8, bg, true)
+
+	const n = 8
+	turn := float64(time.Now().UnixMilli()%1000) / 1000
+	head := turn * n
+	for i := 0; i < n; i++ {
+		ang := (float64(i)/float64(n))*2*math.Pi - math.Pi/2
+		x := cx + radius*float32(math.Cos(ang))
+		y := cy + radius*float32(math.Sin(ang))
+		dist := head - float64(i)
+		if dist < 0 {
+			dist += n
+		}
+		fade := 1 - dist/n
+		c := ink
+		c.A = uint8(36 + 219*fade*fade)
+		vector.DrawFilledCircle(dst, x, y, dot, c, true)
+	}
 }

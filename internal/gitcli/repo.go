@@ -18,8 +18,11 @@ import (
 )
 
 const (
-	defaultMaxLog = 500
-	maxWalk       = 20000
+	// HistoryPage is the number of commits loaded at a time.
+	HistoryPage   = 300
+	defaultMaxLog = HistoryPage
+	// maxWalk caps a single history read so a huge repository stays bounded.
+	maxWalk = 20000
 )
 
 // Repo is a git working tree. Operations run the git binary in Dir.
@@ -93,6 +96,8 @@ type Snapshot struct {
 	Tags           []Ref
 	Status         Status
 	RefDigest      string
+	// MoreCommits reports that older commits exist beyond Commits.
+	MoreCommits bool
 }
 
 // State is the part of a repository that the graph must follow.
@@ -156,7 +161,7 @@ func (r *Repo) Snapshot(ctx context.Context, opts SnapshotOpts) (Snapshot, error
 		tips = append(tips, ref.Hash)
 	}
 	if len(tips) > 0 {
-		commits, err := r.history(ctx, tips, max)
+		commits, more, err := r.history(ctx, tips, max)
 		if err != nil {
 			return s, err
 		}
@@ -167,6 +172,7 @@ func (r *Repo) Snapshot(ctx context.Context, opts SnapshotOpts) (Snapshot, error
 			}
 		}
 		s.Commits = commits
+		s.MoreCommits = more
 	}
 
 	s.Status, err = r.status(ctx)
@@ -926,10 +932,23 @@ func (r *Repo) upstream(ctx context.Context) (remote, branch string, ok bool, er
 	return remote, branch, true, nil
 }
 
-func (r *Repo) history(ctx context.Context, tips []string, limit int) ([]Commit, error) {
+func (r *Repo) history(ctx context.Context, tips []string, limit int) ([]Commit, bool, error) {
+	if limit <= 0 {
+		limit = defaultMaxLog
+	}
+	if limit > maxWalk {
+		limit = maxWalk
+	}
+	// One extra commit tells us whether the page was cut off.
+	fetch := limit + 1
+	capped := fetch > maxWalk
+	if capped {
+		fetch = maxWalk
+	}
 	seen := map[string]bool{}
 	args := []string{
-		"log", "-n", strconv.Itoa(maxWalk),
+		"log", "-n", strconv.Itoa(fetch),
+		"--date-order",
 		"--no-notes", "--no-decorate",
 		"--pretty=tformat:%H%x1f%P%x1f%an%x1f%ae%x1f%aI%x1f%cI%x1f%s",
 	}
@@ -942,13 +961,21 @@ func (r *Repo) history(ctx context.Context, tips []string, limit int) ([]Commit,
 		args = append(args, tip)
 	}
 	if len(seen) == 0 {
-		return nil, nil
+		return nil, false, nil
 	}
 	out, err := r.output(ctx, args...)
 	if err != nil {
-		return nil, err
+		return nil, false, err
 	}
-	return orderNewest(parseHistory(out), limit), nil
+	ordered := orderNewest(parseHistory(out), 0)
+	more := len(ordered) > limit
+	if more {
+		ordered = ordered[:limit]
+	}
+	if capped {
+		more = false
+	}
+	return ordered, more, nil
 }
 
 type histCommit struct {

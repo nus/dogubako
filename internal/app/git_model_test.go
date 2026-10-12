@@ -245,6 +245,52 @@ func TestGitModelOpenCommitAmend(t *testing.T) {
 	}
 }
 
+func TestGitModelHistoryPages(t *testing.T) {
+	requireGitBin(t)
+	dir := t.TempDir()
+	gitRun(t, dir, "init", "-b", "main")
+	gitRun(t, dir, "config", "user.name", "Test")
+	gitRun(t, dir, "config", "user.email", "test@example.com")
+	gitRun(t, dir, "config", "commit.gpgsign", "false")
+	for i := 0; i < 5; i++ {
+		gitCommitEmpty(t, dir, "c"+string(rune('0'+i)), "2020-01-01 00:00:0"+string(rune('0'+i))+" +0000")
+	}
+
+	cfg := t.TempDir()
+	restore := overrideSidebarConfigDir(func() (string, error) { return cfg, nil })
+	t.Cleanup(restore)
+
+	var m GitModel
+	m.ensure()
+	m.histPage = 2
+	m.Open(dir)
+	waitGit(t, &m)
+	if len(m.Snapshot().Commits) != 2 || !m.HasMoreHistory() {
+		t.Fatalf("first page commits=%d more=%v status=%s", len(m.Snapshot().Commits), m.HasMoreHistory(), m.StatusText(i18n.EN))
+	}
+	if m.Snapshot().Commits[0].Subject != "c4" {
+		t.Fatalf("newest = %q", m.Snapshot().Commits[0].Subject)
+	}
+	m.LoadMoreHistory()
+	waitGit(t, &m)
+	if len(m.Snapshot().Commits) != 4 || !m.HasMoreHistory() {
+		t.Fatalf("second page commits=%d more=%v", len(m.Snapshot().Commits), m.HasMoreHistory())
+	}
+	if m.Snapshot().Commits[0].Subject != "c4" || m.Snapshot().Commits[3].Subject != "c1" {
+		t.Fatalf("subjects = %q … %q", m.Snapshot().Commits[0].Subject, m.Snapshot().Commits[3].Subject)
+	}
+	m.LoadMoreHistory()
+	waitGit(t, &m)
+	if len(m.Snapshot().Commits) != 5 || m.HasMoreHistory() {
+		t.Fatalf("end commits=%d more=%v status=%s", len(m.Snapshot().Commits), m.HasMoreHistory(), m.StatusText(i18n.EN))
+	}
+	m.LoadMoreHistory()
+	waitGit(t, &m)
+	if len(m.Snapshot().Commits) != 5 || m.HasMoreHistory() {
+		t.Fatalf("extra load commits=%d more=%v", len(m.Snapshot().Commits), m.HasMoreHistory())
+	}
+}
+
 func TestGitModelToggleRemoteReloads(t *testing.T) {
 	requireGitBin(t)
 	dir := t.TempDir()
@@ -685,6 +731,26 @@ func TestRevealCommitSelectsHash(t *testing.T) {
 	m.RevealCommit("abc123")
 	if m.Selected() != "abc123" || m.TakeReveal() != "abc123" {
 		t.Fatal("same hash should stay selected and reveal again")
+	}
+}
+
+func gitCommitEmpty(t *testing.T, dir, msg, when string) {
+	t.Helper()
+	cmd := exec.Command("git", "commit", "--allow-empty", "-m", msg)
+	cmd.Dir = dir
+	cmd.Env = append(os.Environ(),
+		"GIT_AUTHOR_NAME=Test",
+		"GIT_AUTHOR_EMAIL=test@example.com",
+		"GIT_COMMITTER_NAME=Test",
+		"GIT_COMMITTER_EMAIL=test@example.com",
+		"GIT_AUTHOR_DATE="+when,
+		"GIT_COMMITTER_DATE="+when,
+		"GIT_CONFIG_GLOBAL=/dev/null",
+		"GIT_CONFIG_SYSTEM=/dev/null",
+	)
+	out, err := cmd.CombinedOutput()
+	if err != nil {
+		t.Fatalf("git commit: %v\n%s", err, out)
 	}
 }
 
