@@ -982,6 +982,7 @@ func (b *gitRefBadges) Measure(context *guigui.Context, constraints guigui.Const
 type gitCommitRow struct {
 	guigui.DefaultWidget
 
+	tool        *GitTool
 	graph       gitGraphGlyph
 	badges      gitRefBadges
 	subject     basicwidget.Text
@@ -1031,9 +1032,21 @@ func (r *gitCommitRow) Build(context *guigui.Context, adder *guigui.ChildAdder) 
 	for _, text := range []*basicwidget.Text{&r.subject, &r.author, &r.hash, &r.date} {
 		text.SetVerticalAlign(basicwidget.VerticalAlignMiddle)
 		text.SetWrapMode(basicwidget.WrapModeNone)
+		text.SetSelectable(false)
 	}
 	r.date.SetHorizontalAlign(basicwidget.HorizontalAlignEnd)
 	return nil
+}
+
+func (r *gitCommitRow) HandleButtonInput(context *guigui.Context, widgetBounds *guigui.WidgetBounds) guigui.HandleInputResult {
+	if r.tool == nil || graphArrowBlocked(context) {
+		return guigui.HandleInputResult{}
+	}
+	down, ok := graphArrow()
+	if !ok || !r.tool.moveOpenCommit(down) {
+		return guigui.HandleInputResult{}
+	}
+	return guigui.HandleInputByWidget(r)
 }
 
 func (r *gitCommitRow) layoutRow(context *guigui.Context, rowW int) guigui.LinearLayout {
