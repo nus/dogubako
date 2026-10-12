@@ -214,11 +214,29 @@ func (m *GitModel) addTab() {
 func (m *GitModel) anyBusy() bool {
 	m.ensure()
 	for _, s := range m.tabs {
-		if s.Busy() {
+		if s.Busy() || s.pendingMore != nil {
 			return true
 		}
 	}
 	return false
+}
+
+// HasMoreHistory reports that the active repository has older commits to load.
+func (m *GitModel) HasMoreHistory() bool {
+	m.ensure()
+	return m.gitSession.HasMoreHistory()
+}
+
+// HistoryLoading reports that the active repository is reading history.
+func (m *GitModel) HistoryLoading() bool {
+	m.ensure()
+	return m.gitSession.HistoryLoading()
+}
+
+// LoadMoreHistory fetches the next page of commits for the active repository.
+func (m *GitModel) LoadMoreHistory() {
+	m.ensure()
+	m.gitSession.LoadMoreHistory()
 }
 
 func (m *GitModel) tabIndex(path string) int {
