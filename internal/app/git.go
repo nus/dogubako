@@ -58,30 +58,34 @@ type GitTool struct {
 	remoteClosed bool
 	navSel       string
 
-	commitList        basicwidget.List[string]
-	commitRows        guigui.WidgetSlice[*gitCommitRow]
-	commitItems       []basicwidget.ListItem[string]
-	graphEmpty        basicwidget.Text
-	showEmpty         bool
-	openHash          string
-	openShown         string
-	openFromSelect    bool
-	building          bool
-	expand            gitCommitExpand
-	histFile          string
-	histFor           string
-	histFrac          float64
-	histDragging      bool
-	histBounds        image.Rectangle
-	histGraph         image.Rectangle
-	histStack         gitHistStack
+	commitList     basicwidget.List[string]
+	commitRows     guigui.WidgetSlice[*gitCommitRow]
+	commitItems    []basicwidget.ListItem[string]
+	graphEmpty     basicwidget.Text
+	showEmpty      bool
+	openHash       string
+	openShown      string
+	openFromSelect bool
+	building       bool
+	expand         gitCommitExpand
+	histFile       string
+	histFor        string
+	histFrac       float64
+	histDragging   bool
+	histBounds     image.Rectangle
+	histGraph      image.Rectangle
+	histStack      gitHistStack
+	// graphUnits is the commit-graph column width in unit sizes.
+	// Zero uses the width that fits the lanes. A dragged width is restored next launch.
 	graphUnits        float64
+	graphWidthLoaded  bool
 	graphDragging     bool
 	graphLanes        int
 	graphSplitBounds  image.Rectangle
 	authorUnits       float64
 	hashUnits         float64
 	dateUnits         float64
+	metaWidthLoaded   bool
 	metaDrag          int
 	authorSplitBounds image.Rectangle
 	hashSplitBounds   image.Rectangle
@@ -178,6 +182,7 @@ func (t *GitTool) WriteStateKey(context *guigui.Context, w *guigui.StateKeyWrite
 func (t *GitTool) Build(context *guigui.Context, adder *guigui.ChildAdder) error {
 	t.building = true
 	defer func() { t.building = false }()
+	t.ensureGraphWidth()
 	v, ok := context.Env(t, EnvKeyModel)
 	if !ok {
 		return nil
@@ -199,8 +204,7 @@ func (t *GitTool) Build(context *guigui.Context, adder *guigui.ChildAdder) error
 		t.setHistDragPassthrough(context, false)
 	}
 	if t.graphDragging && !ebiten.IsMouseButtonPressed(ebiten.MouseButtonLeft) {
-		t.graphDragging = false
-		t.setGraphDragPassthrough(context, false)
+		t.stopGraphDrag(context)
 	}
 	if t.metaDrag != 0 && !ebiten.IsMouseButtonPressed(ebiten.MouseButtonLeft) {
 		t.metaDrag = 0
@@ -629,6 +633,7 @@ func (t *GitTool) revealCommit(model *GitModel, hash string) {
 }
 
 func (t *GitTool) Layout(context *guigui.Context, widgetBounds *guigui.WidgetBounds, layouter *guigui.ChildLayouter) {
+	t.ensureGraphWidth()
 	t.graphSplitBounds = image.Rectangle{}
 	t.authorSplitBounds = image.Rectangle{}
 	t.hashSplitBounds = image.Rectangle{}
@@ -784,8 +789,7 @@ func (t *GitTool) Tick(context *guigui.Context, widgetBounds *guigui.WidgetBound
 		guigui.RequestRebuild()
 	}
 	if t.graphDragging && !ebiten.IsMouseButtonPressed(ebiten.MouseButtonLeft) {
-		t.graphDragging = false
-		t.setGraphDragPassthrough(context, false)
+		t.stopGraphDrag(context)
 		guigui.RequestRebuild()
 	}
 	if t.metaDrag != 0 && !ebiten.IsMouseButtonPressed(ebiten.MouseButtonLeft) {

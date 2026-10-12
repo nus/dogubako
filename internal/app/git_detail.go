@@ -179,7 +179,7 @@ func (e *gitCommitExpand) Layout(context *guigui.Context, widgetBounds *guigui.W
 	if n < 1 {
 		n = 1
 	}
-	graphW := gitGraphColWidth(b.Dx(), u, n, e.graphUnits)
+	graphW := gitGraphColWidth(b.Dx(), u, n, preferGraphUnits(e.graphUnits))
 	gap := u / 6
 	layouter.LayoutWidget(&e.bridge, image.Rect(b.Min.X, b.Min.Y, b.Min.X+graphW, b.Max.Y))
 
@@ -666,8 +666,7 @@ func (s *gitHistStack) Build(context *guigui.Context, adder *guigui.ChildAdder) 
 		s.tool.setHistDragPassthrough(context, false)
 	}
 	if s.tool != nil && s.tool.graphDragging && !ebiten.IsMouseButtonPressed(ebiten.MouseButtonLeft) {
-		s.tool.graphDragging = false
-		s.tool.setGraphDragPassthrough(context, false)
+		s.tool.stopGraphDrag(context)
 	}
 	if s.tool != nil && s.tool.metaDrag != 0 && !ebiten.IsMouseButtonPressed(ebiten.MouseButtonLeft) {
 		s.tool.metaDrag = 0
@@ -753,7 +752,8 @@ func (s *gitHistStack) layoutGraphSplit(context *guigui.Context, graphB image.Re
 	}
 	rowLeft := graphB.Min.X + inset
 	rowRight := graphB.Max.X - inset
-	graphW := gitGraphColWidth(rowW, u, s.tool.graphLanes, s.tool.graphUnits)
+	s.tool.ensureGraphWidth()
+	graphW := gitGraphColWidth(rowW, u, s.tool.graphLanes, preferGraphUnits(s.tool.graphUnits))
 	splitW := gitWorkSplitWidth(u)
 	headerB := image.Rect(graphB.Min.X, graphB.Min.Y, graphB.Max.X, graphB.Min.Y+gitCommitHeaderHeight(u))
 	if headerB.Max.Y > graphB.Max.Y {
@@ -764,7 +764,8 @@ func (s *gitHistStack) layoutGraphSplit(context *guigui.Context, graphB image.Re
 	s.tool.graphSplitBounds = splitB
 	layouter.LayoutWidget(&s.graphSplit, splitB)
 
-	authorW, hashW, dateW := gitMetaColWidths(rowW, u, graphW, s.tool.authorUnits, s.tool.hashUnits, s.tool.dateUnits)
+	authorU, hashU, dateU := preferMetaUnits(s.tool.authorUnits, s.tool.hashUnits, s.tool.dateUnits)
+	authorW, hashW, dateW := gitMetaColWidths(rowW, u, graphW, authorU, hashU, dateU)
 	subjectR, authorR, hashR := gitMetaSplitEdges(rowRight, gitCommitColGap(u), authorW, hashW, dateW)
 	place := func(edge int, dst *image.Rectangle, widget guigui.Widget) {
 		r := gitColSplitRect(edge, splitW, headerB.Min.Y, headerB.Max.Y, graphB.Min.X, graphB.Max.X)

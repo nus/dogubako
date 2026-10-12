@@ -1040,8 +1040,9 @@ func (r *gitCommitRow) layoutRow(context *guigui.Context, rowW int) guigui.Linea
 	if n < 1 {
 		n = 1
 	}
-	graphW := gitGraphColWidth(rowW, u, n, r.graphUnits)
-	authorW, hashW, dateW := gitMetaColWidths(rowW, u, graphW, r.authorUnits, r.hashUnits, r.dateUnits)
+	graphW := gitGraphColWidth(rowW, u, n, preferGraphUnits(r.graphUnits))
+	authorU, hashU, dateU := preferMetaUnits(r.authorUnits, r.hashUnits, r.dateUnits)
+	authorW, hashW, dateW := gitMetaColWidths(rowW, u, graphW, authorU, hashU, dateU)
 	r.layoutItems = slices.Delete(r.layoutItems, 0, len(r.layoutItems))
 	r.layoutItems = append(r.layoutItems,
 		guigui.LinearLayoutItem{Widget: &r.graph, Size: guigui.FixedSize(graphW)},
@@ -1137,11 +1138,14 @@ func (h *gitCommitHeader) layoutRow(context *guigui.Context, rowW int) guigui.Li
 		if h.tool.graphLanes > 0 {
 			lanes = h.tool.graphLanes
 		}
+		h.tool.ensureGraphWidth()
 		graphU = h.tool.graphUnits
 		authorU = h.tool.authorUnits
 		hashU = h.tool.hashUnits
 		dateU = h.tool.dateUnits
 	}
+	graphU = preferGraphUnits(graphU)
+	authorU, hashU, dateU = preferMetaUnits(authorU, hashU, dateU)
 	graphW := gitGraphColWidth(rowW, u, lanes, graphU)
 	authorW, hashW, dateW := gitMetaColWidths(rowW, u, graphW, authorU, hashU, dateU)
 	h.layoutItems = slices.Delete(h.layoutItems, 0, len(h.layoutItems))
@@ -1317,11 +1321,15 @@ func (s *gitGraphSplit) Draw(context *guigui.Context, widgetBounds *guigui.Widge
 }
 
 func (t *GitTool) setGraphUnits(units float64) {
+	changed := units != t.graphUnits
 	t.graphUnits = units
 	for i := 0; i < t.commitRows.Len(); i++ {
 		t.commitRows.At(i).graphUnits = units
 	}
 	t.expand.graphUnits = units
+	if changed {
+		rememberGitGraphUnits(units)
+	}
 }
 
 func (t *GitTool) setGraphUnitsFromCursor(x, inset, u int) {
@@ -1348,14 +1356,76 @@ func (t *GitTool) dragGraphSplit(context *guigui.Context) guigui.HandleInputResu
 		}
 		t.graphDragging = true
 	}
+	if !ebiten.IsMouseButtonPressed(ebiten.MouseButtonLeft) {
+		// Keep the last width from while the button was held. Re-sampling after
+		// release can snap the column back to the lane width.
+		t.stopGraphDrag(context)
+		guigui.RequestRebuild()
+		return guigui.HandleInputByWidget(t)
+	}
 	t.setGraphUnitsFromCursor(image.Pt(ebiten.CursorPosition()).X, basicwidget.RoundedCornerRadius(context), u)
 	t.setGraphDragPassthrough(context, true)
-	if !ebiten.IsMouseButtonPressed(ebiten.MouseButtonLeft) {
-		t.graphDragging = false
-		t.setGraphDragPassthrough(context, false)
-	}
 	guigui.RequestRebuild()
 	return guigui.HandleInputByWidget(t)
+}
+
+func (t *GitTool) ensureGraphWidth() {
+	if t.graphWidthLoaded {
+		return
+	}
+	t.graphWidthLoaded = true
+	if t.graphUnits > 0 {
+		t.ensureMetaWidths()
+		return
+	}
+	if u := preferredGitGraphUnits(); u > 0 {
+		t.graphUnits = u
+		for i := 0; i < t.commitRows.Len(); i++ {
+			t.commitRows.At(i).graphUnits = u
+		}
+		t.expand.graphUnits = u
+	}
+	t.ensureMetaWidths()
+}
+
+func (t *GitTool) ensureMetaWidths() {
+	if t.metaWidthLoaded {
+		return
+	}
+	t.metaWidthLoaded = true
+	author, hash, date := preferredGitMetaUnits()
+	if t.authorUnits == 0 {
+		t.authorUnits = author
+	}
+	if t.hashUnits == 0 {
+		t.hashUnits = hash
+	}
+	if t.dateUnits == 0 {
+		t.dateUnits = date
+	}
+	for i := 0; i < t.commitRows.Len(); i++ {
+		r := t.commitRows.At(i)
+		if r.authorUnits == 0 {
+			r.authorUnits = t.authorUnits
+		}
+		if r.hashUnits == 0 {
+			r.hashUnits = t.hashUnits
+		}
+		if r.dateUnits == 0 {
+			r.dateUnits = t.dateUnits
+		}
+	}
+}
+
+func (t *GitTool) stopGraphDrag(context *guigui.Context) {
+	if !t.graphDragging {
+		return
+	}
+	t.graphDragging = false
+	if context != nil {
+		t.setGraphDragPassthrough(context, false)
+	}
+	rememberGitGraphUnits(t.graphUnits)
 }
 
 func (t *GitTool) setGraphDragPassthrough(context *guigui.Context, pass bool) {
@@ -1438,6 +1508,7 @@ func (s *gitMetaSplit) Draw(context *guigui.Context, widgetBounds *guigui.Widget
 }
 
 func (t *GitTool) applyMetaUnits(author, hash, date float64) {
+	changed := author != t.authorUnits || hash != t.hashUnits || date != t.dateUnits
 	t.authorUnits = author
 	t.hashUnits = hash
 	t.dateUnits = date
@@ -1446,6 +1517,9 @@ func (t *GitTool) applyMetaUnits(author, hash, date float64) {
 		r.authorUnits = author
 		r.hashUnits = hash
 		r.dateUnits = date
+	}
+	if changed {
+		rememberGitMetaUnits(author, hash, date)
 	}
 }
 
@@ -1459,8 +1533,9 @@ func (t *GitTool) resizeMetaFromCursor(x, inset, u int) {
 	if rowW < 1 {
 		return
 	}
-	graphW := gitGraphColWidth(rowW, u, t.graphLanes, t.graphUnits)
-	authorW, hashW, dateW := gitMetaColWidths(rowW, u, graphW, t.authorUnits, t.hashUnits, t.dateUnits)
+	graphW := gitGraphColWidth(rowW, u, t.graphLanes, preferGraphUnits(t.graphUnits))
+	authorU, hashU, dateU := preferMetaUnits(t.authorUnits, t.hashUnits, t.dateUnits)
+	authorW, hashW, dateW := gitMetaColWidths(rowW, u, graphW, authorU, hashU, dateU)
 	gap := gitCommitColGap(u)
 	_, authorL, authorR, hashL, hashR, _, dateR := gitMetaEdges(rowRight, gap, authorW, hashW, dateW)
 	switch t.metaDrag {
@@ -1484,12 +1559,15 @@ func (t *GitTool) dragMetaSplit(context *guigui.Context, kind int) guigui.Handle
 		}
 		t.metaDrag = kind
 	}
-	t.resizeMetaFromCursor(image.Pt(ebiten.CursorPosition()).X, basicwidget.RoundedCornerRadius(context), u)
-	t.setGraphDragPassthrough(context, true)
 	if !ebiten.IsMouseButtonPressed(ebiten.MouseButtonLeft) {
+		// Keep the last width from while the button was held.
 		t.metaDrag = 0
 		t.setGraphDragPassthrough(context, false)
+		guigui.RequestRebuild()
+		return guigui.HandleInputByWidget(t)
 	}
+	t.resizeMetaFromCursor(image.Pt(ebiten.CursorPosition()).X, basicwidget.RoundedCornerRadius(context), u)
+	t.setGraphDragPassthrough(context, true)
 	guigui.RequestRebuild()
 	return guigui.HandleInputByWidget(t)
 }

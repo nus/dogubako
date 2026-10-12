@@ -1,6 +1,10 @@
 package app
 
-import "testing"
+import (
+	"os"
+	"path/filepath"
+	"testing"
+)
 
 func TestGitGraphColWidth(t *testing.T) {
 	const u = 24
@@ -44,6 +48,125 @@ func TestGitGraphColWidthRoundTrip(t *testing.T) {
 		if got != clamped {
 			t.Fatalf("width %d clamped to %d came back as %d", w, clamped, got)
 		}
+	}
+}
+
+func TestGitGraphWidthPersists(t *testing.T) {
+	dir := t.TempDir()
+	restore := overrideSidebarConfigDir(func() (string, error) { return dir, nil })
+	resetGitGraphUnitsPref()
+	resetGitMetaUnitsPref()
+	t.Cleanup(func() {
+		restore()
+		resetGitGraphUnitsPref()
+		resetGitMetaUnitsPref()
+	})
+
+	if got := loadGitGraphUnits(); got != 0 {
+		t.Fatalf("missing = %v", got)
+	}
+	if err := saveGitGraphUnits(0); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := os.Stat(filepath.Join(dir, "dogubako", "git-graph-width")); !os.IsNotExist(err) {
+		t.Fatalf("zero width wrote a file: %v", err)
+	}
+	if err := saveGitGraphUnits(12.5); err != nil {
+		t.Fatal(err)
+	}
+
+	var tool GitTool
+	tool.ensureGraphWidth()
+	if tool.graphUnits != 12.5 {
+		t.Fatalf("loaded = %v", tool.graphUnits)
+	}
+	if got := preferGraphUnits(0); got != 12.5 {
+		t.Fatalf("fallback = %v", got)
+	}
+	natural := gitGraphNaturalWidth(24, 2)
+	if got := gitGraphColWidth(2000, 24, 2, preferGraphUnits(0)); got == natural {
+		t.Fatalf("restored width %d collapsed to the lane width", got)
+	}
+	tool.graphUnits = 4
+	tool.ensureGraphWidth()
+	if tool.graphUnits != 4 {
+		t.Fatalf("second load = %v", tool.graphUnits)
+	}
+
+	var again GitTool
+	again.graphDragging = true
+	again.graphUnits = 9.25
+	again.stopGraphDrag(nil)
+	if again.graphDragging {
+		t.Fatal("drag still active")
+	}
+	if got := loadGitGraphUnits(); got != 9.25 {
+		t.Fatalf("saved on drag end = %v", got)
+	}
+	again.stopGraphDrag(nil)
+	if got := loadGitGraphUnits(); got != 9.25 {
+		t.Fatalf("second stop = %v", got)
+	}
+
+	for _, bad := range []string{"", "0", "-3", "nope", "nan", "inf"} {
+		if err := os.WriteFile(filepath.Join(dir, "dogubako", "git-graph-width"), []byte(bad+"\n"), 0o644); err != nil {
+			t.Fatal(err)
+		}
+		if got := loadGitGraphUnits(); got != 0 {
+			t.Fatalf("invalid %q = %v", bad, got)
+		}
+	}
+}
+
+func TestGitMetaWidthsPersist(t *testing.T) {
+	dir := t.TempDir()
+	restore := overrideSidebarConfigDir(func() (string, error) { return dir, nil })
+	resetGitMetaUnitsPref()
+	t.Cleanup(func() {
+		restore()
+		resetGitMetaUnitsPref()
+	})
+
+	author, hash, date := preferredGitMetaUnits()
+	if author != 0 || hash != 0 || date != 0 {
+		t.Fatalf("missing = %v %v %v", author, hash, date)
+	}
+	rememberGitMetaUnits(4.5, 3.25, 6)
+	saved := loadGitMetaUnits()
+	if saved.Author != 4.5 || saved.Hash != 3.25 || saved.Date != 6 {
+		t.Fatalf("saved = %+v", saved)
+	}
+
+	var tool GitTool
+	tool.ensureMetaWidths()
+	if tool.authorUnits != 4.5 || tool.hashUnits != 3.25 || tool.dateUnits != 6 {
+		t.Fatalf("loaded = %v %v %v", tool.authorUnits, tool.hashUnits, tool.dateUnits)
+	}
+	tool.authorUnits = 2
+	tool.ensureMetaWidths()
+	if tool.authorUnits != 2 {
+		t.Fatalf("second load = %v", tool.authorUnits)
+	}
+
+	const u = 24
+	defAuthor, defHash, defDate := gitMetaCols(u)
+	authorU, hashU, dateU := preferMetaUnits(0, 0, 0)
+	gotAuthor, gotHash, gotDate := gitMetaColWidths(4000, u, 40, authorU, hashU, dateU)
+	if gotAuthor == defAuthor && gotHash == defHash && gotDate == defDate {
+		t.Fatal("restored columns stayed at the defaults")
+	}
+	wantAuthor, wantHash, wantDate := int(authorU*float64(u)+0.5), int(hashU*float64(u)+0.5), int(dateU*float64(u)+0.5)
+	if gotAuthor != wantAuthor || gotHash != wantHash || gotDate != wantDate {
+		t.Fatalf("restored = %d %d %d", gotAuthor, gotHash, gotDate)
+	}
+
+	resetGitMetaUnitsPref()
+	if err := os.WriteFile(filepath.Join(dir, "dogubako", "git-meta-widths.json"), []byte("{}\n"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	empty := loadGitMetaUnits()
+	if empty.Author != 0 || empty.Hash != 0 || empty.Date != 0 {
+		t.Fatalf("empty = %+v", empty)
 	}
 }
 
