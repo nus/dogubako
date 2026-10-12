@@ -15,7 +15,9 @@ import (
 	"github.com/nus/dogubako/internal/i18n"
 )
 
-// gitWorkPanes is the working copy: unstaged and staged file lists beside one diff.
+// gitWorkPanes is the working copy.
+// The top band places the staging lists on the left and the commit form on the right.
+// The diff fills the area under that band.
 type gitWorkPanes struct {
 	guigui.DefaultWidget
 
@@ -25,14 +27,30 @@ type gitWorkPanes struct {
 	files      gitFileColumn
 	diff       gitWorkDiff
 	split      gitWorkSplit
+	hSplit     gitWorkHSplit
 
-	// sideStaged is true when the diff column shows the staged list's selection.
+	// sideStaged is true when the diff shows the staged list's selection.
 	sideStaged bool
 
-	// filesFrac is the file-list share of the width beside the splitter.
-	// Zero uses the default one-third split.
+	commitInput *guigui.WidgetWithSize[*basicwidget.TextInput]
+	stageBtn    *basicwidget.Button
+	unstageBtn  *basicwidget.Button
+	amendBtn    *basicwidget.Button
+	commitBtn   *basicwidget.Button
+	btnItems    []guigui.LinearLayoutItem
+
+	// empty replaces the staging lists when the work tree is clean.
+	empty    *basicwidget.Text
+	showDiff bool
+
+	// filesFrac is the staging column's share of the top-band width.
+	// Zero uses half.
 	filesFrac float64
+	// topFrac is the top band's share of the height beside the splitter.
+	// Zero uses two fifths, leaving the rest for the diff.
+	topFrac   float64
 	dragging  bool
+	hDragging bool
 	bounds    image.Rectangle
 }
 
@@ -41,38 +59,155 @@ func (p *gitWorkPanes) Build(context *guigui.Context, adder *guigui.ChildAdder) 
 		p.dragging = false
 		p.setDragPassthrough(context, false)
 	}
+	if p.hDragging && !ebiten.IsMouseButtonPressed(ebiten.MouseButtonLeft) {
+		p.hDragging = false
+		p.setDragPassthrough(context, false)
+	}
 	p.split.panes = p
+	p.hSplit.panes = p
 	p.files.unstaged = &p.unstaged
 	p.files.staged = &p.staged
-	adder.AddWidget(&p.filesPanel)
-	p.filesPanel.SetBackgroundStyle(basicwidget.PanelBackgroundStyleNone)
-	p.filesPanel.SetAutoBorder(false)
-	p.filesPanel.SetBorders(basicwidget.PanelBorders{})
-	p.filesPanel.SetContentConstraints(basicwidget.PanelContentConstraintsFixedWidth)
-	p.filesPanel.SetContent(&p.files)
-	adder.AddWidget(&p.diff)
+	if p.empty != nil {
+		adder.AddWidget(p.empty)
+	} else {
+		adder.AddWidget(&p.filesPanel)
+		p.filesPanel.SetBackgroundStyle(basicwidget.PanelBackgroundStyleNone)
+		p.filesPanel.SetAutoBorder(false)
+		p.filesPanel.SetBorders(basicwidget.PanelBorders{})
+		p.filesPanel.SetContentConstraints(basicwidget.PanelContentConstraintsFixedWidth)
+		p.filesPanel.SetContent(&p.files)
+	}
 	adder.AddWidget(&p.split)
+	p.addCommitWidgets(adder)
+	if p.showDiff {
+		adder.AddWidget(&p.hSplit)
+		adder.AddWidget(&p.diff)
+	}
 	return nil
+}
+
+func (p *gitWorkPanes) addCommitWidgets(adder *guigui.ChildAdder) {
+	if p.commitInput != nil {
+		adder.AddWidget(p.commitInput)
+	}
+	if p.stageBtn != nil {
+		adder.AddWidget(p.stageBtn)
+	}
+	if p.unstageBtn != nil {
+		adder.AddWidget(p.unstageBtn)
+	}
+	if p.amendBtn != nil {
+		adder.AddWidget(p.amendBtn)
+	}
+	if p.commitBtn != nil {
+		adder.AddWidget(p.commitBtn)
+	}
 }
 
 func (p *gitWorkPanes) setDragPassthrough(context *guigui.Context, pass bool) {
 	context.SetPassthrough(&p.filesPanel, pass)
 	context.SetPassthrough(&p.diff, pass)
+	context.SetPassthrough(&p.split, pass)
+	context.SetPassthrough(&p.hSplit, pass)
+	if p.empty != nil {
+		context.SetPassthrough(p.empty, pass)
+	}
+	if p.commitInput != nil {
+		context.SetPassthrough(p.commitInput, pass)
+	}
+	if p.stageBtn != nil {
+		context.SetPassthrough(p.stageBtn, pass)
+	}
+	if p.unstageBtn != nil {
+		context.SetPassthrough(p.unstageBtn, pass)
+	}
+	if p.amendBtn != nil {
+		context.SetPassthrough(p.amendBtn, pass)
+	}
+	if p.commitBtn != nil {
+		context.SetPassthrough(p.commitBtn, pass)
+	}
 }
 
 func (p *gitWorkPanes) Layout(context *guigui.Context, widgetBounds *guigui.WidgetBounds, layouter *guigui.ChildLayouter) {
 	u := basicwidget.UnitSize(context)
 	b := widgetBounds.Bounds()
 	p.bounds = b
-	splitW := gitWorkSplitWidth(u)
-	filesW := gitWorkFilesWidth(b.Dx(), splitW, p.filesFrac, 6*u, 8*u)
+	top := b
+	if p.showDiff {
+		splitH := gitWorkSplitWidth(u)
+		topH := gitWorkBandHeight(b.Dy(), splitH, p.topFrac, 6*u, 8*u)
+		top = image.Rect(b.Min.X, b.Min.Y, b.Max.X, b.Min.Y+topH)
+		splitB := image.Rect(b.Min.X, top.Max.Y, b.Max.X, top.Max.Y+splitH)
+		diffB := image.Rect(b.Min.X, splitB.Max.Y, b.Max.X, b.Max.Y)
+		if diffB.Min.Y > diffB.Max.Y {
+			diffB.Min.Y = diffB.Max.Y
+		}
+		layouter.LayoutWidget(&p.hSplit, splitB)
+		layouter.LayoutWidget(&p.diff, diffB)
+	}
 
-	filesBounds := image.Rect(b.Min.X, b.Min.Y, b.Min.X+filesW, b.Max.Y)
-	splitBounds := image.Rect(filesBounds.Max.X, b.Min.Y, filesBounds.Max.X+splitW, b.Max.Y)
-	diffBounds := image.Rect(splitBounds.Max.X, b.Min.Y, b.Max.X, b.Max.Y)
-	layouter.LayoutWidget(&p.filesPanel, filesBounds)
-	layouter.LayoutWidget(&p.split, splitBounds)
-	layouter.LayoutWidget(&p.diff, diffBounds)
+	splitW := gitWorkSplitWidth(u)
+	stageFrac := p.filesFrac
+	if stageFrac <= 0 {
+		stageFrac = 0.5
+	}
+	stageW := gitWorkFilesWidth(top.Dx(), splitW, stageFrac, 6*u, 8*u)
+	stageB := image.Rect(top.Min.X, top.Min.Y, top.Min.X+stageW, top.Max.Y)
+	splitB := image.Rect(stageB.Max.X, top.Min.Y, stageB.Max.X+splitW, top.Max.Y)
+	commitB := image.Rect(splitB.Max.X, top.Min.Y, top.Max.X, top.Max.Y)
+	if p.empty != nil {
+		layouter.LayoutWidget(p.empty, stageB)
+	} else {
+		layouter.LayoutWidget(&p.filesPanel, stageB)
+	}
+	layouter.LayoutWidget(&p.split, splitB)
+	p.layoutCommitForm(context, commitB, layouter, u)
+}
+
+// gitWorkBandHeight is the staging-and-commit band's height.
+// frac is that band's share of the space beside the splitter. Zero uses two fifths.
+func gitWorkBandHeight(total, splitH int, frac float64, minBand, minDiff int) int {
+	if frac <= 0 {
+		frac = 0.4
+	}
+	return gitWorkFilesWidth(total, splitH, frac, minBand, minDiff)
+}
+
+func (p *gitWorkPanes) layoutCommitForm(context *guigui.Context, bounds image.Rectangle, layouter *guigui.ChildLayouter, u int) {
+	if p.commitInput == nil || bounds.Dx() <= 0 || bounds.Dy() <= 0 {
+		return
+	}
+	btnH := u
+	gap := u / 6
+	msgMaxY := bounds.Max.Y - btnH - gap
+	if msgMaxY < bounds.Min.Y {
+		msgMaxY = bounds.Min.Y
+	}
+	layouter.LayoutWidget(p.commitInput, image.Rect(bounds.Min.X, bounds.Min.Y, bounds.Max.X, msgMaxY))
+	btnY := bounds.Max.Y - btnH
+	if btnY < bounds.Min.Y {
+		btnY = bounds.Min.Y
+	}
+	p.btnItems = p.btnItems[:0]
+	if p.stageBtn != nil {
+		p.btnItems = append(p.btnItems, guigui.LinearLayoutItem{Widget: p.stageBtn})
+	}
+	if p.unstageBtn != nil {
+		p.btnItems = append(p.btnItems, guigui.LinearLayoutItem{Widget: p.unstageBtn})
+	}
+	p.btnItems = append(p.btnItems, guigui.LinearLayoutItem{Size: guigui.FlexibleSize(1)})
+	if p.amendBtn != nil {
+		p.btnItems = append(p.btnItems, guigui.LinearLayoutItem{Widget: p.amendBtn})
+	}
+	if p.commitBtn != nil {
+		p.btnItems = append(p.btnItems, guigui.LinearLayoutItem{Widget: p.commitBtn})
+	}
+	(guigui.LinearLayout{
+		Direction: guigui.LayoutDirectionHorizontal,
+		Items:     p.btnItems,
+		Gap:       u / 4,
+	}).LayoutWidgets(context, image.Rect(bounds.Min.X, btnY, bounds.Max.X, bounds.Max.Y), layouter)
 }
 
 // gitFileColumn is the scrolling file column: unstaged, then staged when present.
@@ -199,7 +334,7 @@ func (p *gitWorkPanes) setFilesFracFromCursor(x, u int) {
 func (p *gitWorkPanes) dragSplit(context *guigui.Context) guigui.HandleInputResult {
 	u := basicwidget.UnitSize(context)
 	if !p.dragging {
-		if !inpututil.IsMouseButtonJustPressed(ebiten.MouseButtonLeft) {
+		if p.hDragging || !inpututil.IsMouseButtonJustPressed(ebiten.MouseButtonLeft) {
 			return guigui.HandleInputResult{}
 		}
 		p.dragging = true
@@ -214,16 +349,72 @@ func (p *gitWorkPanes) dragSplit(context *guigui.Context) guigui.HandleInputResu
 	return guigui.HandleInputByWidget(p)
 }
 
-func (p *gitWorkPanes) HandlePointingInput(context *guigui.Context, widgetBounds *guigui.WidgetBounds) guigui.HandleInputResult {
-	if !p.dragging {
-		return guigui.HandleInputResult{}
+func (p *gitWorkPanes) setTopFracFromCursor(y, u int) {
+	splitH := gitWorkSplitWidth(u)
+	avail := p.bounds.Dy() - splitH
+	if avail <= 0 {
+		return
 	}
-	return p.dragSplit(context)
+	minBand := 6 * u
+	minDiff := 8 * u
+	bandH := y - p.bounds.Min.Y - splitH/2
+	frac := float64(bandH) / float64(avail)
+	minFrac := float64(minBand) / float64(avail)
+	maxFrac := float64(avail-minDiff) / float64(avail)
+	if maxFrac < minFrac {
+		maxFrac = minFrac
+	}
+	if frac < minFrac {
+		frac = minFrac
+	}
+	if frac > maxFrac {
+		frac = maxFrac
+	}
+	if frac <= 0 {
+		frac = 0.01
+	}
+	p.topFrac = frac
+}
+
+func (p *gitWorkPanes) dragHSplit(context *guigui.Context) guigui.HandleInputResult {
+	u := basicwidget.UnitSize(context)
+	if !p.hDragging {
+		if p.dragging || !inpututil.IsMouseButtonJustPressed(ebiten.MouseButtonLeft) {
+			return guigui.HandleInputResult{}
+		}
+		p.hDragging = true
+	}
+	p.setTopFracFromCursor(image.Pt(ebiten.CursorPosition()).Y, u)
+	p.setDragPassthrough(context, true)
+	if !ebiten.IsMouseButtonPressed(ebiten.MouseButtonLeft) {
+		p.hDragging = false
+		p.setDragPassthrough(context, false)
+	}
+	guigui.RequestRebuild()
+	return guigui.HandleInputByWidget(p)
+}
+
+func (p *gitWorkPanes) HandlePointingInput(context *guigui.Context, widgetBounds *guigui.WidgetBounds) guigui.HandleInputResult {
+	if p.dragging {
+		return p.dragSplit(context)
+	}
+	if p.hDragging {
+		return p.dragHSplit(context)
+	}
+	return guigui.HandleInputResult{}
 }
 
 func (p *gitWorkPanes) Tick(context *guigui.Context, widgetBounds *guigui.WidgetBounds) error {
+	released := false
 	if p.dragging && !ebiten.IsMouseButtonPressed(ebiten.MouseButtonLeft) {
 		p.dragging = false
+		released = true
+	}
+	if p.hDragging && !ebiten.IsMouseButtonPressed(ebiten.MouseButtonLeft) {
+		p.hDragging = false
+		released = true
+	}
+	if released {
 		p.setDragPassthrough(context, false)
 		guigui.RequestRebuild()
 	}
@@ -231,13 +422,16 @@ func (p *gitWorkPanes) Tick(context *guigui.Context, widgetBounds *guigui.Widget
 }
 
 func (p *gitWorkPanes) CursorShape(context *guigui.Context, widgetBounds *guigui.WidgetBounds) (ebiten.CursorShapeType, bool) {
+	if p.hDragging {
+		return ebiten.CursorShapeNSResize, true
+	}
 	if p.dragging {
 		return ebiten.CursorShapeEWResize, true
 	}
 	return 0, false
 }
 
-// gitWorkSplit is the draggable vertical boundary between the file lists and the diff.
+// gitWorkSplit is the draggable vertical boundary between the staging lists and the commit form.
 type gitWorkSplit struct {
 	guigui.DefaultWidget
 
@@ -245,7 +439,7 @@ type gitWorkSplit struct {
 }
 
 func (s *gitWorkSplit) HandlePointingInput(context *guigui.Context, widgetBounds *guigui.WidgetBounds) guigui.HandleInputResult {
-	if s.panes == nil {
+	if s.panes == nil || s.panes.hDragging {
 		return guigui.HandleInputResult{}
 	}
 	if s.panes.dragging || widgetBounds.IsHitAtCursor() && inpututil.IsMouseButtonJustPressed(ebiten.MouseButtonLeft) {
@@ -255,10 +449,58 @@ func (s *gitWorkSplit) HandlePointingInput(context *guigui.Context, widgetBounds
 }
 
 func (s *gitWorkSplit) CursorShape(context *guigui.Context, widgetBounds *guigui.WidgetBounds) (ebiten.CursorShapeType, bool) {
+	if s.panes != nil && s.panes.hDragging {
+		return 0, false
+	}
 	if s.panes != nil && s.panes.dragging || widgetBounds.IsHitAtCursor() {
 		return ebiten.CursorShapeEWResize, true
 	}
 	return 0, false
+}
+
+func (s *gitWorkSplit) Draw(context *guigui.Context, widgetBounds *guigui.WidgetBounds, dst *ebiten.Image) {
+	b := widgetBounds.Bounds()
+	if b.Empty() {
+		return
+	}
+	x := b.Min.X + b.Dx()/2
+	fillRect(dst, image.Rect(x, b.Min.Y, x+1, b.Max.Y), gitHistSplitColor(context.ColorMode()))
+}
+
+// gitWorkHSplit is the draggable horizontal boundary between the commit band and the diff.
+type gitWorkHSplit struct {
+	guigui.DefaultWidget
+
+	panes *gitWorkPanes
+}
+
+func (s *gitWorkHSplit) HandlePointingInput(context *guigui.Context, widgetBounds *guigui.WidgetBounds) guigui.HandleInputResult {
+	if s.panes == nil || s.panes.dragging {
+		return guigui.HandleInputResult{}
+	}
+	if s.panes.hDragging || widgetBounds.IsHitAtCursor() && inpututil.IsMouseButtonJustPressed(ebiten.MouseButtonLeft) {
+		return s.panes.dragHSplit(context)
+	}
+	return guigui.HandleInputResult{}
+}
+
+func (s *gitWorkHSplit) CursorShape(context *guigui.Context, widgetBounds *guigui.WidgetBounds) (ebiten.CursorShapeType, bool) {
+	if s.panes != nil && s.panes.dragging {
+		return 0, false
+	}
+	if s.panes != nil && s.panes.hDragging || widgetBounds.IsHitAtCursor() {
+		return ebiten.CursorShapeNSResize, true
+	}
+	return 0, false
+}
+
+func (s *gitWorkHSplit) Draw(context *guigui.Context, widgetBounds *guigui.WidgetBounds, dst *ebiten.Image) {
+	b := widgetBounds.Bounds()
+	if b.Empty() {
+		return
+	}
+	y := b.Min.Y + b.Dy()/2
+	fillRect(dst, image.Rect(b.Min.X, y, b.Max.X, y+1), gitHistSplitColor(context.ColorMode()))
 }
 
 func (p *gitWorkPanes) HandleButtonInput(context *guigui.Context, widgetBounds *guigui.WidgetBounds) guigui.HandleInputResult {

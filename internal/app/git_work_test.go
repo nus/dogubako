@@ -55,3 +55,22 @@ func TestGitWorkFilesWidth(t *testing.T) {
 		t.Fatalf("tight pane = %d", got)
 	}
 }
+
+func TestGitWorkBandHeight(t *testing.T) {
+	const split = 12
+	const minBand = 144
+	const minDiff = 192
+	avail := 900 - split
+	if got := gitWorkBandHeight(900, split, 0, minBand, minDiff); got != int(float64(avail)*0.4) {
+		t.Fatalf("default band = %d", got)
+	}
+	if got := gitWorkBandHeight(900, split, 0.7, minBand, minDiff); got != int(float64(avail)*0.7) {
+		t.Fatalf("tall band = %d", got)
+	}
+	if got := gitWorkBandHeight(900, split, 0.95, minBand, minDiff); got != 900-split-minDiff {
+		t.Fatalf("capped band = %d", got)
+	}
+	if got := gitWorkBandHeight(100, split, 0.5, minBand, minDiff); got < 1 || got >= 100-split {
+		t.Fatalf("tight band = %d", got)
+	}
+}
