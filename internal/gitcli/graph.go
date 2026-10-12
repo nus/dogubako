@@ -20,7 +20,10 @@ type GraphRow struct {
 }
 
 // LayoutGraph assigns columns (lanes) for a newest-first commit list.
-func LayoutGraph(commits []Commit) []GraphRow {
+// head is the checked-out commit. Its first-parent chain stays in the lane
+// that commit lands in, so the checked-out branch draws as one vertical line.
+// An empty head, or a head that is not in commits, keeps the unpinned layout.
+func LayoutGraph(commits []Commit, head string) []GraphRow {
 	if len(commits) == 0 {
 		return nil
 	}
@@ -28,8 +31,10 @@ func LayoutGraph(commits []Commit) []GraphRow {
 	for _, c := range commits {
 		known[c.Hash] = struct{}{}
 	}
+	mainline := headFirstParents(commits, head)
 
 	active := []string{}
+	mainLane := -1
 	rows := make([]GraphRow, len(commits))
 	for i, c := range commits {
 		lane := indexOf(active, c.Hash)
@@ -42,6 +47,9 @@ func LayoutGraph(commits []Commit) []GraphRow {
 				active[lane] = c.Hash
 			}
 		}
+		if _, onMain := mainline[c.Hash]; onMain && mainLane < 0 {
+			mainLane = lane
+		}
 
 		parents := make([]string, 0, len(c.Parents))
 		for _, p := range c.Parents {
@@ -51,14 +59,25 @@ func LayoutGraph(commits []Commit) []GraphRow {
 		}
 
 		next := append([]string(nil), active...)
+		_, onMain := mainline[c.Hash]
+		stick := onMain && lane == mainLane && len(parents) > 0 && c.Parents[0] == parents[0]
 		if len(parents) == 0 {
 			next[lane] = ""
-		} else {
-			if j := indexOf(active, parents[0]); j >= 0 && j != lane {
-				next[lane] = ""
-			} else {
-				next[lane] = parents[0]
+		} else if stick {
+			// Another line may already be carrying the next commit on this
+			// branch. Fold that line in, instead of bending this branch over
+			// to the lane that reached the parent first.
+			first := parents[0]
+			if j := indexOf(next, first); j >= 0 && j != lane {
+				next[j] = ""
 			}
+			next[lane] = first
+		} else if j := indexOf(active, parents[0]); j >= 0 && j != lane {
+			next[lane] = ""
+		} else {
+			next[lane] = parents[0]
+		}
+		if len(parents) > 1 {
 			for _, p := range parents[1:] {
 				if indexOf(next, p) >= 0 {
 					continue
@@ -104,10 +123,37 @@ func LayoutGraph(commits []Commit) []GraphRow {
 	return rows
 }
 
+// headFirstParents is the checked-out commit and the commits reached by
+// following only first parents. Those are the commits drawn on its line.
+func headFirstParents(commits []Commit, head string) map[string]struct{} {
+	if head == "" {
+		return nil
+	}
+	by := make(map[string]Commit, len(commits))
+	for _, c := range commits {
+		by[c.Hash] = c
+	}
+	chain := map[string]struct{}{}
+	for h := head; ; {
+		c, ok := by[h]
+		if !ok {
+			return chain
+		}
+		if _, seen := chain[h]; seen {
+			return chain
+		}
+		chain[h] = struct{}{}
+		if len(c.Parents) == 0 {
+			return chain
+		}
+		h = c.Parents[0]
+	}
+}
+
 // WithUncommitted inserts a synthetic node on the row directly above head,
 // with a gray edge into that commit. Other commits keep their own edges.
 func WithUncommitted(commits []Commit, head string) []GraphRow {
-	rows := LayoutGraph(commits)
+	rows := LayoutGraph(commits, head)
 	if head == "" {
 		return rows
 	}

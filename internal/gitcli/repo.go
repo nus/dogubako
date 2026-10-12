@@ -235,7 +235,7 @@ func (r *Repo) refDigest(ctx context.Context) (string, error) {
 // ApplyWorkTree rebuilds the graph lanes from the commits already loaded,
 // including the gray uncommitted node when the worktree is dirty.
 func ApplyWorkTree(s *Snapshot) {
-	s.Graph = LayoutGraph(s.Commits)
+	s.Graph = LayoutGraph(s.Commits, s.HEAD)
 	s.Lanes = LaneCount(s.Graph)
 	if s.Status.Dirty() && s.HEAD != "" && len(s.Commits) > 0 {
 		s.Graph = WithUncommitted(s.Commits, s.HEAD)
