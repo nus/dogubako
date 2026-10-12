@@ -778,3 +778,27 @@ func gitRun(t *testing.T, dir string, args ...string) {
 		t.Fatalf("git %s: %v\n%s", strings.Join(args, " "), err, out)
 	}
 }
+
+func TestHighlightCommitLeavesDetail(t *testing.T) {
+	var m GitModel
+	m.ensure()
+	m.sel = "aaa"
+	m.detail.Hash = "aaa"
+	before := m.generation
+	m.HighlightCommit("bbb")
+	if m.Selected() != "bbb" || m.Detail().Hash != "aaa" {
+		t.Fatalf("selected=%s detail=%s", m.Selected(), m.Detail().Hash)
+	}
+	if m.generation == before {
+		t.Fatal("generation did not advance")
+	}
+	gen := m.generation
+	m.HighlightCommit("bbb")
+	if m.generation != gen {
+		t.Fatal("repeat highlight changed generation")
+	}
+	m.HighlightCommit("")
+	if m.Selected() != "bbb" {
+		t.Fatalf("empty highlight selected=%s", m.Selected())
+	}
+}

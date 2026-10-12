@@ -1,9 +1,12 @@
 package app
 
 import (
+	"image"
 	"os"
 	"path/filepath"
 	"testing"
+
+	"github.com/nus/dogubako/internal/gitcli"
 )
 
 func TestGitGraphColWidth(t *testing.T) {
@@ -243,5 +246,157 @@ func TestGitLaneStep(t *testing.T) {
 	narrow := gitGraphMinWidth(u, lanes)
 	if got := gitLaneStep(narrow, lanes, u); got >= gitLaneWidth(u) {
 		t.Fatalf("packed step = %d, natural %d", got, gitLaneWidth(u))
+	}
+}
+
+func uniformRows(n, h, origin int) func(int) image.Rectangle {
+	return func(i int) image.Rectangle {
+		if i < 0 || i >= n {
+			return image.Rectangle{}
+		}
+		y := origin + i*h
+		return image.Rect(0, y, 10, y+h)
+	}
+}
+
+func TestGraphPageIndex(t *testing.T) {
+	view := image.Rect(0, 0, 10, 100)
+	bounds := uniformRows(20, 20, 0)
+	if got := graphTopIndex(20, bounds, view); got != 0 {
+		t.Fatalf("top = %d", got)
+	}
+	if got := graphPageIndex(20, bounds, view, true); got != 5 {
+		t.Fatalf("page down = %d, want 5", got)
+	}
+	if got := graphPageIndex(20, bounds, view, false); got != 0 {
+		t.Fatalf("page up at top = %d", got)
+	}
+
+	// Rows 5–9 fill the viewport.
+	scrolled := uniformRows(20, 20, -100)
+	if got := graphTopIndex(20, scrolled, view); got != 5 {
+		t.Fatalf("scrolled top = %d", got)
+	}
+	if got := graphPageIndex(20, scrolled, view, true); got != 10 {
+		t.Fatalf("scrolled page down = %d, want 10", got)
+	}
+	if got := graphPageIndex(20, scrolled, view, false); got != 0 {
+		t.Fatalf("scrolled page up = %d, want 0", got)
+	}
+
+	// A partial row at the bottom becomes the next top row.
+	short := image.Rect(0, 0, 10, 90)
+	if got := graphPageIndex(20, bounds, short, true); got != 4 {
+		t.Fatalf("partial page down = %d, want 4", got)
+	}
+
+	// The loaded rows already fit, so page down stays put.
+	if got := graphPageIndex(3, uniformRows(3, 20, 0), view, true); got != 0 {
+		t.Fatalf("short list page down = %d", got)
+	}
+
+	// A row taller than the viewport steps to the next row.
+	tall := func(i int) image.Rectangle {
+		switch i {
+		case 0:
+			return image.Rect(0, 0, 10, 200)
+		case 1:
+			return image.Rect(0, 200, 10, 220)
+		default:
+			return image.Rectangle{}
+		}
+	}
+	if got := graphPageIndex(2, tall, view, true); got != 1 {
+		t.Fatalf("tall page down = %d, want 1", got)
+	}
+}
+
+func TestNextGraphCommit(t *testing.T) {
+	// 0 commit, 1 detail panel, 2 commit, 3 commit
+	commit := func(i int) bool { return i != 1 }
+	if got := nextGraphCommit(4, commit, 0, true); got != 2 {
+		t.Fatalf("down skips detail = %d, want 2", got)
+	}
+	if got := nextGraphCommit(4, commit, 2, false); got != 0 {
+		t.Fatalf("up skips detail = %d, want 0", got)
+	}
+	if got := nextGraphCommit(4, commit, 3, true); got != 3 {
+		t.Fatalf("down at end = %d, want 3", got)
+	}
+	if got := nextGraphCommit(4, commit, 0, false); got != 0 {
+		t.Fatalf("up at start = %d, want 0", got)
+	}
+	if got := nextGraphCommit(4, commit, -1, true); got != 0 {
+		t.Fatalf("from none down = %d, want 0", got)
+	}
+	if got := nextGraphCommit(4, commit, -1, false); got != 3 {
+		t.Fatalf("from none up = %d, want 3", got)
+	}
+	if got := nextGraphCommit(0, commit, 0, true); got != -1 {
+		t.Fatalf("empty = %d, want -1", got)
+	}
+}
+
+func TestNearestCommitIndex(t *testing.T) {
+	values := []string{"a", "", "b"}
+	value := func(i int) string { return values[i] }
+	if got := nearestCommitIndex(len(values), value, 1); got != 0 {
+		t.Fatalf("expand row = %d, want 0", got)
+	}
+	if got := nearestCommitIndex(len(values), value, 2); got != 2 {
+		t.Fatalf("last commit = %d", got)
+	}
+	if got := nearestCommitIndex(0, value, 0); got != -1 {
+		t.Fatalf("empty = %d", got)
+	}
+}
+
+func TestCommitOpenAfterSelect(t *testing.T) {
+	if got := commitOpenAfterSelect("", "bbb", true); got != "" {
+		t.Fatalf("arrow while closed = %q", got)
+	}
+	if got := commitOpenAfterSelect("aaa", "bbb", true); got != "bbb" {
+		t.Fatalf("arrow while open = %q", got)
+	}
+	if got := commitOpenAfterSelect("aaa", gitcli.Uncommitted, true); got != "" {
+		t.Fatalf("arrow to uncommitted = %q", got)
+	}
+	if got := commitOpenAfterSelect("", "bbb", false); got != "bbb" {
+		t.Fatalf("click while closed = %q", got)
+	}
+	if got := commitOpenAfterSelect("aaa", "bbb", false); got != "bbb" {
+		t.Fatalf("click while open = %q", got)
+	}
+}
+
+func TestHistoryEndHold(t *testing.T) {
+	var tool GitTool
+	tool.trackHistoryEnd("repo")
+	if tool.holdHistoryEnd(false, false) {
+		t.Fatal("unpinned hold")
+	}
+	tool.pinHistoryEnd()
+	if !tool.holdHistoryEnd(false, false) {
+		t.Fatal("jump toward the end should hold")
+	}
+	if !tool.holdHistoryEnd(true, false) {
+		t.Fatal("arrived end should hold")
+	}
+	if tool.holdHistoryEnd(true, true) {
+		t.Fatal("wheel down should release")
+	}
+
+	tool.pinHistoryEnd()
+	if !tool.holdHistoryEnd(true, false) {
+		t.Fatal("pin again")
+	}
+	if tool.holdHistoryEnd(false, false) {
+		t.Fatal("scrolling away should release")
+	}
+
+	tool.pinHistoryEnd()
+	tool.trackHistoryEnd("other")
+	if tool.holdHistoryEnd(true, false) {
+		t.Fatal("another repository should release")
 	}
 }

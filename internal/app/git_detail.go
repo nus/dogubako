@@ -24,6 +24,7 @@ import (
 type gitCommitExpand struct {
 	guigui.DefaultWidget
 
+	tool      *GitTool
 	bridge    gitGraphBridge
 	metaPanel basicwidget.Panel
 	meta      basicwidget.Text
@@ -141,8 +142,25 @@ func (e *gitCommitExpand) Build(context *guigui.Context, adder *guigui.ChildAdde
 	var metaStyle basicwidget.TextStyle
 	useGitMono(&metaStyle)
 	e.meta.SetBaseStyle(&metaStyle)
+	e.meta.OnHandleButtonInput(e.keepCommitArrows)
+	e.note.OnHandleButtonInput(e.keepCommitArrows)
 	e.applyParentLinks(context)
 	return nil
+}
+
+// keepCommitArrows moves between commits unless this text owns the caret.
+func (e *gitCommitExpand) keepCommitArrows(context *guigui.Context, widgetBounds *guigui.WidgetBounds) guigui.HandleInputResult {
+	if e.tool == nil || graphArrowBlocked(context) {
+		return guigui.HandleInputResult{}
+	}
+	if context.IsFocusedOrHasFocusedDescendant(&e.meta) || context.IsFocusedOrHasFocusedDescendant(&e.note) {
+		return guigui.HandleInputResult{}
+	}
+	down, ok := graphArrow()
+	if !ok || !e.tool.moveOpenCommit(down) {
+		return guigui.HandleInputResult{}
+	}
+	return guigui.HandleInputByWidget(e)
 }
 
 func (e *gitCommitExpand) applyParentLinks(context *guigui.Context) {

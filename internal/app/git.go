@@ -77,6 +77,11 @@ type GitTool struct {
 	histStack      gitHistStack
 	histSpin       gitSpin
 	showHistSpin   bool
+	// historyEndOn means End already asked for the next history page.
+	// The pager waits until the user scrolls away or asks again.
+	historyEndOn   bool
+	historyEndSeen bool
+	historyEndPath string
 	// graphUnits is the commit-graph column width in unit sizes.
 	// Zero uses the width that fits the lanes. A dragged width is restored next launch.
 	graphUnits        float64
@@ -420,6 +425,7 @@ func (t *GitTool) Build(context *guigui.Context, adder *guigui.ChildAdder) error
 		t.graphLanes = lanes
 		for i, row := range rows {
 			r := t.commitRows.At(i)
+			r.tool = t
 			r.Set(row, lanes, row.Commit.Hash == snap.HEAD, lang, func(ref gitcli.Ref) {
 				t.switchBranch(lang, model, ref)
 			}, onMenu)
@@ -433,6 +439,7 @@ func (t *GitTool) Build(context *guigui.Context, adder *guigui.ChildAdder) error
 			})
 			if row.Commit.Hash == t.openHash {
 				opened := row
+				t.expand.tool = t
 				t.expand.Set(lang, model, opened, lanes, t.histFile, func(hash string) {
 					t.openHash = hash
 					t.revealCommit(model, hash)
@@ -483,12 +490,16 @@ func (t *GitTool) Build(context *guigui.Context, adder *guigui.ChildAdder) error
 				return
 			}
 			model.SelectCommit(item.Value)
-			if item.Value == gitcli.Uncommitted {
-				t.openHash = ""
+			if t.building {
 				return
 			}
-			if !t.building {
-				t.openHash = item.Value
+			arrow := graphKeyRepeating(ebiten.KeyUp) || graphKeyRepeating(ebiten.KeyDown)
+			next := commitOpenAfterSelect(t.openHash, item.Value, arrow)
+			if next == t.openHash {
+				return
+			}
+			t.openHash = next
+			if next != "" && !arrow {
 				t.openFromSelect = true
 			}
 		})
@@ -700,12 +711,88 @@ func (t *GitTool) Layout(context *guigui.Context, widgetBounds *guigui.WidgetBou
 	t.layoutOverlays(context, layouter)
 }
 
+// moveOpenCommit selects the next commit in the graph.
+// The open detail panel is its own list row, so the list's arrow keys stop on it.
+// down moves toward older commits. The key is consumed even at either end.
+func (t *GitTool) moveOpenCommit(down bool) bool {
+	if t.commitView || t.showEmpty || t.emptyHome || t.sshPick {
+		return false
+	}
+	if t.rename.IsOpen() || t.confirm.IsOpen() || t.tagMenu.IsOpen() || t.branchMenu.IsOpen() || t.commitMenu.IsOpen() || t.selMenu.IsOpen() {
+		return false
+	}
+	n := t.commitList.ItemCount()
+	if n == 0 {
+		return false
+	}
+	next := nextGraphCommit(n, func(i int) bool {
+		item, ok := t.commitList.ItemByIndex(i)
+		return ok && item.Value != "" && !item.Unselectable
+	}, t.commitList.SelectedItemIndex(), down)
+	if next < 0 {
+		return true
+	}
+	if next != t.commitList.SelectedItemIndex() {
+		t.commitList.SelectItemByIndex(next)
+		t.commitList.EnsureItemVisibleByIndex(next)
+	}
+	return true
+}
+
+// nextGraphCommit is the next commit row. The detail panel is skipped.
+// from < 0 starts from either end. The current index is returned when the
+// search reaches the end of the list.
+func nextGraphCommit(n int, commit func(int) bool, from int, down bool) int {
+	if n <= 0 {
+		return -1
+	}
+	if from < 0 || from >= n {
+		if down {
+			for i := 0; i < n; i++ {
+				if commit(i) {
+					return i
+				}
+			}
+		} else {
+			for i := n - 1; i >= 0; i-- {
+				if commit(i) {
+					return i
+				}
+			}
+		}
+		return -1
+	}
+	step := -1
+	if down {
+		step = 1
+	}
+	for i := from + step; i >= 0 && i < n; i += step {
+		if commit(i) {
+			return i
+		}
+	}
+	return from
+}
+
 func (t *GitTool) syncHistFile() {
 	if t.histFor == t.openHash {
 		return
 	}
 	t.histFile = ""
 	t.histFor = t.openHash
+}
+
+// commitOpenAfterSelect is the commit whose detail stays open after selecting hash.
+// Arrow keys keep the panel open only when it was already open, and leave it
+// closed otherwise. A click opens the commit. The uncommitted row has no panel.
+func commitOpenAfterSelect(openHash, hash string, arrow bool) string {
+	if hash == "" || hash == gitcli.Uncommitted {
+		return ""
+	}
+	if arrow && openHash == "" {
+		return ""
+	}
+	return hash
 }
 
 func (t *GitTool) layoutHistoryColumn(u int) {
@@ -884,14 +971,55 @@ func (t *GitTool) maybeLoadMoreHistory(model *GitModel) {
 	if t.commitView || t.showEmpty || t.emptyHome || t.sshPick {
 		return
 	}
+	t.trackHistoryEnd(model.Path())
 	if !model.HasRepo() || !model.HasMoreHistory() || model.HistoryLoading() {
 		return
 	}
 	n := t.commitList.ItemCount()
-	if n == 0 || !t.commitList.IsItemInViewport(n-1) {
+	visible := n > 0 && t.commitList.IsItemInViewport(n-1)
+	_, wy := ebiten.Wheel()
+	wheelDown := wy < 0 && image.Pt(ebiten.CursorPosition()).In(t.histGraph)
+	if t.holdHistoryEnd(visible, wheelDown) {
+		return
+	}
+	if !visible {
 		return
 	}
 	model.LoadMoreHistory()
+}
+
+func (t *GitTool) trackHistoryEnd(path string) {
+	if t.historyEndPath == path {
+		return
+	}
+	t.historyEndPath = path
+	t.clearHistoryEnd()
+}
+
+func (t *GitTool) clearHistoryEnd() {
+	t.historyEndOn = false
+	t.historyEndSeen = false
+}
+
+func (t *GitTool) pinHistoryEnd() {
+	t.historyEndOn = true
+	t.historyEndSeen = false
+}
+
+// holdHistoryEnd reports that End's extra history page is already requested,
+// so another page waits. A downward wheel, or scrolling back up, releases the hold.
+func (t *GitTool) holdHistoryEnd(visible, wheelDown bool) bool {
+	if !t.historyEndOn {
+		return false
+	}
+	if t.historyEndSeen && (wheelDown || !visible) {
+		t.clearHistoryEnd()
+		return false
+	}
+	if visible {
+		t.historyEndSeen = true
+	}
+	return true
 }
 
 func (t *GitTool) CursorShape(context *guigui.Context, widgetBounds *guigui.WidgetBounds) (ebiten.CursorShapeType, bool) {
@@ -902,6 +1030,298 @@ func (t *GitTool) CursorShape(context *guigui.Context, widgetBounds *guigui.Widg
 		return ebiten.CursorShapeNSResize, true
 	}
 	return 0, false
+}
+
+func (t *GitTool) HandleButtonInput(context *guigui.Context, widgetBounds *guigui.WidgetBounds) guigui.HandleInputResult {
+	if !t.commitGraphKeyTarget(context) {
+		return guigui.HandleInputResult{}
+	}
+	var key ebiten.Key
+	switch {
+	case graphKeyRepeating(ebiten.KeyPageDown):
+		key = ebiten.KeyPageDown
+	case graphKeyRepeating(ebiten.KeyPageUp):
+		key = ebiten.KeyPageUp
+	case graphKeyRepeating(ebiten.KeyHome):
+		key = ebiten.KeyHome
+	case graphKeyRepeating(ebiten.KeyEnd):
+		key = ebiten.KeyEnd
+	default:
+		return guigui.HandleInputResult{}
+	}
+	v, ok := context.Env(t, EnvKeyModel)
+	if !ok {
+		return guigui.HandleInputResult{}
+	}
+	t.scrollCommitGraph(context, v.(*Model).Git(), key)
+	return guigui.HandleInputByWidget(t)
+}
+
+func (t *GitTool) commitGraphKeyTarget(context *guigui.Context) bool {
+	if t.commitView || t.showEmpty || t.emptyHome || t.sshPick {
+		return false
+	}
+	if t.rename.IsOpen() || t.confirm.IsOpen() || t.tagMenu.IsOpen() || t.branchMenu.IsOpen() || t.commitMenu.IsOpen() || t.selMenu.IsOpen() {
+		return false
+	}
+	if shortcutModifierPressed(context) || ebiten.IsKeyPressed(ebiten.KeyShift) || ebiten.IsKeyPressed(ebiten.KeyAlt) || ebiten.IsKeyPressed(ebiten.KeyControl) {
+		return false
+	}
+	if context.IsFocusedOrHasFocusedDescendant(&t.commitList) {
+		return true
+	}
+	// Focus is outside this tool. The graph takes Page, Home, and End.
+	return !context.IsFocusedOrHasFocusedDescendant(t)
+}
+
+func (t *GitTool) scrollCommitGraph(context *guigui.Context, model *GitModel, key ebiten.Key) {
+	n := t.commitList.ItemCount()
+	if n == 0 || model == nil {
+		return
+	}
+	switch key {
+	case ebiten.KeyHome:
+		t.clearHistoryEnd()
+		t.scrollGraphTo(model, 0)
+	case ebiten.KeyEnd:
+		end := nearestCommitIndex(n, t.commitListValue, n-1)
+		if end < 0 {
+			end = n - 1
+		}
+		t.scrollGraphTo(model, end)
+		// One more page after landing on the last commit already loaded.
+		// The hold keeps that from chaining while the new end stays on screen.
+		t.pinHistoryEnd()
+		model.LoadMoreHistory()
+	case ebiten.KeyPageDown:
+		t.clearHistoryEnd()
+		t.scrollGraphPage(model, context, true)
+	case ebiten.KeyPageUp:
+		t.clearHistoryEnd()
+		t.scrollGraphPage(model, context, false)
+	}
+}
+
+func (t *GitTool) scrollGraphPage(model *GitModel, context *guigui.Context, down bool) {
+	n := t.commitList.ItemCount()
+	view := t.commitRowView(context)
+	if n == 0 || view.Empty() {
+		return
+	}
+	bounds := t.commitList.ItemBounds
+	top := graphTopIndex(n, bounds, view)
+	if top < 0 {
+		return
+	}
+	index := graphPageIndex(n, bounds, view, down)
+	if index == top {
+		return
+	}
+	t.scrollGraphTo(model, index)
+}
+
+func (t *GitTool) scrollGraphTo(model *GitModel, index int) {
+	n := t.commitList.ItemCount()
+	if n == 0 {
+		return
+	}
+	if index < 0 {
+		index = 0
+	}
+	if index >= n {
+		index = n - 1
+	}
+	t.commitList.JumpToItemByIndex(index)
+	sel := nearestCommitIndex(n, t.commitListValue, index)
+	if sel < 0 {
+		return
+	}
+	hash := t.commitListValue(sel)
+	model.HighlightCommit(hash)
+}
+
+func (t *GitTool) commitListValue(index int) string {
+	item, ok := t.commitList.ItemByIndex(index)
+	if !ok {
+		return ""
+	}
+	return item.Value
+}
+
+func (t *GitTool) commitRowView(context *guigui.Context) image.Rectangle {
+	view := t.histGraph
+	if view.Empty() {
+		return view
+	}
+	header := gitCommitHeaderHeight(basicwidget.UnitSize(context))
+	view.Min.Y += header
+	if view.Min.Y > view.Max.Y {
+		view.Min.Y = view.Max.Y
+	}
+	return view
+}
+
+func graphArrowBlocked(context *guigui.Context) bool {
+	return shortcutModifierPressed(context) || ebiten.IsKeyPressed(ebiten.KeyShift) || ebiten.IsKeyPressed(ebiten.KeyAlt) || ebiten.IsKeyPressed(ebiten.KeyControl)
+}
+
+func graphArrow() (down, ok bool) {
+	switch {
+	case graphKeyRepeating(ebiten.KeyDown):
+		return true, true
+	case graphKeyRepeating(ebiten.KeyUp):
+		return false, true
+	default:
+		return false, false
+	}
+}
+
+// graphKeyRepeating matches the list widget's arrow-key repeat.
+func graphKeyRepeating(key ebiten.Key) bool {
+	if !ebiten.IsKeyPressed(key) {
+		return false
+	}
+	d := inpututil.KeyPressDuration(key)
+	if d <= 1 {
+		return true
+	}
+	delay := ebiten.TPS() * 2 / 5
+	if d < delay {
+		return false
+	}
+	return (d-delay)%4 == 0
+}
+
+// graphPageIndex is the row that should sit at the top after scrolling one viewport.
+// bounds returns each row's rectangle in the same space as view. An empty
+// rectangle means the row is not laid out. down moves toward later commits.
+func graphPageIndex(n int, bounds func(int) image.Rectangle, view image.Rectangle, down bool) int {
+	if n <= 0 {
+		return 0
+	}
+	last := n - 1
+	if view.Empty() {
+		if down {
+			return last
+		}
+		return 0
+	}
+	first := graphTopIndex(n, bounds, view)
+	if first < 0 {
+		if down {
+			return last
+		}
+		return 0
+	}
+	if !down {
+		return graphPageUpIndex(first, bounds, view)
+	}
+	lb := bounds(last)
+	if !lb.Empty() && lb.Min.Y >= view.Min.Y && lb.Max.Y <= view.Max.Y {
+		return first
+	}
+	for i := first; i < n; i++ {
+		b := bounds(i)
+		if b.Empty() {
+			if i > first {
+				return i
+			}
+			break
+		}
+		if b.Min.Y >= view.Max.Y {
+			return i
+		}
+		if b.Max.Y > view.Max.Y {
+			// This row crosses the bottom. Land on it so the rest comes into view.
+			// When it is already the top row, step forward so the key still moves.
+			if i == first && b.Min.Y <= view.Min.Y && i < last {
+				return i + 1
+			}
+			return i
+		}
+	}
+	return last
+}
+
+// graphTopIndex is the first row that intersects view, or -1 when none do.
+func graphTopIndex(n int, bounds func(int) image.Rectangle, view image.Rectangle) int {
+	if n <= 0 || view.Empty() {
+		return -1
+	}
+	for i := 0; i < n; i++ {
+		b := bounds(i)
+		if b.Empty() || b.Max.Y <= view.Min.Y {
+			continue
+		}
+		if b.Min.Y >= view.Max.Y {
+			break
+		}
+		return i
+	}
+	return -1
+}
+
+func graphPageUpIndex(first int, bounds func(int) image.Rectangle, view image.Rectangle) int {
+	if first <= 0 {
+		return 0
+	}
+	pageH := view.Dy()
+	if pageH < 1 {
+		return 0
+	}
+	b := bounds(first)
+	hidden := view.Min.Y - b.Min.Y
+	if hidden < 0 {
+		hidden = 0
+	}
+	need := pageH - hidden
+	if need <= 0 {
+		return first
+	}
+	fallback := b.Dy()
+	if fallback < 1 {
+		fallback = 1
+	}
+	acc := 0
+	for i := first - 1; i >= 0; i-- {
+		h := bounds(i).Dy()
+		if h < 1 {
+			h = fallback
+		}
+		acc += h
+		if acc >= need {
+			return i
+		}
+	}
+	return 0
+}
+
+// nearestCommitIndex is the commit row closest to index.
+// An empty value is the detail panel under an open commit.
+func nearestCommitIndex(n int, value func(int) string, index int) int {
+	if n <= 0 {
+		return -1
+	}
+	if index < 0 {
+		index = 0
+	}
+	if index >= n {
+		index = n - 1
+	}
+	if value(index) != "" {
+		return index
+	}
+	for i := index - 1; i >= 0; i-- {
+		if value(i) != "" {
+			return i
+		}
+	}
+	for i := index + 1; i < n; i++ {
+		if value(i) != "" {
+			return i
+		}
+	}
+	return -1
 }
 
 func (t *GitTool) HandlePointingInput(context *guigui.Context, widgetBounds *guigui.WidgetBounds) guigui.HandleInputResult {

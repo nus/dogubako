@@ -575,6 +575,17 @@ func (m *gitSession) SelectCommit(hash string) {
 	m.startDetail(hash)
 }
 
+// HighlightCommit moves the graph selection without reading the commit.
+// Page, Home, and End use it so the highlight follows the scroll.
+func (m *gitSession) HighlightCommit(hash string) {
+	if hash == "" || hash == m.sel {
+		return
+	}
+	m.sel = hash
+	m.generation++
+	guigui.RequestRebuild()
+}
+
 // RevealCommit selects hash and asks the graph to bring that row into view.
 func (m *gitSession) RevealCommit(hash string) {
 	if hash == "" || hash == gitcli.Uncommitted {
