@@ -158,7 +158,7 @@ func TestLayoutGraphMerge(t *testing.T) {
 	if rows[2].Lane != 0 {
 		t.Fatalf("P lane = %d", rows[2].Lane)
 	}
-	if !hasEdge(rows[0].Outgoing, 0, 0) || !hasEdge(rows[0].Outgoing, 0, 1) {
+	if !hasEdge(rows[0].Outgoing, 0, 0) || !edgeLock(rows[0].Outgoing, 0, 1) {
 		t.Fatalf("M outgoing = %#v", rows[0].Outgoing)
 	}
 	if !hasEdge(rows[1].Outgoing, 1, 0) || !hasEdge(rows[1].Outgoing, 0, 0) {
@@ -187,24 +187,21 @@ func TestWithUncommitted(t *testing.T) {
 		}
 	}
 
-	// A newer commit stays above HEAD. Uncommitted sits on the row directly
-	// above HEAD and sprouts into it, without taking that commit's edge.
+	// Uncommitted is the first row. A newer commit on another branch sits
+	// beside the gray line that runs down to HEAD.
 	ahead := []Commit{
 		{Hash: "f", Parents: []string{"h"}},
 		{Hash: "h"},
 	}
 	rows = WithUncommitted(ahead, "h")
-	if rows[0].Commit.Hash != "f" || rows[1].Commit.Hash != Uncommitted || rows[2].Commit.Hash != "h" {
+	if rows[0].Commit.Hash != Uncommitted || rows[1].Commit.Hash != "f" || rows[2].Commit.Hash != "h" {
 		t.Fatalf("order = %s %s %s", rows[0].Commit.Hash, rows[1].Commit.Hash, rows[2].Commit.Hash)
 	}
-	if rows[1].Lane == rows[2].Lane {
-		t.Fatalf("uncommitted stole HEAD's lane: %d", rows[1].Lane)
+	if !grayReaches(rows, Uncommitted, "h") {
+		t.Fatalf("gray line does not reach HEAD: %#v", rows)
 	}
-	if !edgeGray(rows[1].Outgoing, rows[1].Lane, rows[2].Lane) || !edgeGray(rows[2].Incoming, rows[1].Lane, rows[2].Lane) {
-		t.Fatalf("sprout outgoing=%#v incoming=%#v", rows[1].Outgoing, rows[2].Incoming)
-	}
-	if !hasEdge(rows[2].Incoming, rows[2].Lane, rows[2].Lane) {
-		t.Fatalf("newer commit no longer reaches HEAD: %#v", rows[2].Incoming)
+	if rowByHash(t, rows, "f").Lane == rowByHash(t, rows, "h").Lane {
+		t.Fatalf("newer commit stayed on HEAD's lane %d", rowByHash(t, rows, "h").Lane)
 	}
 }
 
@@ -238,21 +235,21 @@ func TestLayoutGraphTwoTips(t *testing.T) {
 	}
 }
 
-func TestLayoutGraphCheckedOutBranchStaysStraight(t *testing.T) {
-	// E is newer than the checked-out tip D. Both descend from C.
-	// D's line stays in one lane and E folds into it.
+func TestLayoutGraphBranches(t *testing.T) {
+	// The first parent keeps the branch color. A second parent is a new
+	// color that curves in.
 	tips := []Commit{
 		{Hash: "E", Parents: []string{"C"}},
 		{Hash: "D", Parents: []string{"C"}},
 		{Hash: "C"},
 	}
 	rows := LayoutGraph(tips, "D")
-	if lane := mainlineLane(t, rows, "D", "C"); rows[0].Lane == lane {
-		t.Fatalf("newer tip stayed on the checked-out lane %d", lane)
+	expectLanes(t, rows, "E", 0, "D", 1, "C", 0)
+	expectColors(t, rows, "E", 0, "D", 1, "C", 0)
+	if !hasEdge(rows[0].Outgoing, 0, 0) || !hasEdge(rowByHash(t, rows, "D").Outgoing, 1, 0) {
+		t.Fatalf("tips edges %#v / %#v", rows[0].Outgoing, rowByHash(t, rows, "D").Outgoing)
 	}
 
-	// The side branch is committed after the merge, so it reserves P
-	// before the checked-out first parent A is drawn. A must keep M's lane.
 	merged := []Commit{
 		{Hash: "M", Parents: []string{"A", "B"}},
 		{Hash: "B", Parents: []string{"P"}},
@@ -260,15 +257,15 @@ func TestLayoutGraphCheckedOutBranchStaysStraight(t *testing.T) {
 		{Hash: "P"},
 	}
 	rows = LayoutGraph(merged, "M")
-	lane := mainlineLane(t, rows, "M", "A", "P")
-	if !hasEdge(rowByHash(t, rows, "A").Outgoing, lane, lane) {
-		t.Fatalf("A left the checked-out lane: %#v", rowByHash(t, rows, "A").Outgoing)
+	expectLanes(t, rows, "M", 0, "B", 1, "A", 0, "P", 0)
+	expectColors(t, rows, "M", 0, "B", 1, "A", 0, "P", 0)
+	if !hasEdge(rowByHash(t, rows, "A").Outgoing, 0, 0) {
+		t.Fatalf("A outgoing = %#v", rowByHash(t, rows, "A").Outgoing)
 	}
-	if rowByHash(t, rows, "B").Lane == lane {
-		t.Fatalf("merged parent B stayed on the checked-out lane %d", lane)
+	if !hasEdge(rowByHash(t, rows, "B").Outgoing, 1, 1) {
+		t.Fatalf("B outgoing = %#v", rowByHash(t, rows, "B").Outgoing)
 	}
 
-	// A newer branch interleaves with a merge on the checked-out branch.
 	interleaved := []Commit{
 		{Hash: "F2", Parents: []string{"F1"}},
 		{Hash: "M2", Parents: []string{"M1"}},
@@ -279,23 +276,93 @@ func TestLayoutGraphCheckedOutBranchStaysStraight(t *testing.T) {
 		{Hash: "P"},
 	}
 	rows = LayoutGraph(interleaved, "M2")
-	mainlineLane(t, rows, "M2", "M1", "A", "P")
+	expectLanes(t, rows, "F2", 0, "M2", 1, "F1", 0, "M1", 1, "B", 2, "A", 0, "P", 0)
+	expectColors(t, rows, "F2", 0, "M2", 1, "F1", 0, "M1", 1, "B", 2, "A", 0, "P", 0)
 }
 
-func mainlineLane(t *testing.T, rows []GraphRow, hashes ...string) int {
+func TestLayoutGraphUnloadedParent(t *testing.T) {
+	// A parent that is not loaded yet still occupies a column through the
+	// rows below it, so the next page can continue that line.
+	rows := LayoutGraph([]Commit{
+		{Hash: "A", Parents: []string{"P"}},
+		{Hash: "B", Parents: []string{"Q"}},
+	}, "")
+	expectLanes(t, rows, "A", 0, "B", 1)
+	if !hasEdge(rows[0].Outgoing, 0, 0) {
+		t.Fatalf("A's unloaded parent left no line: %#v", rows[0].Outgoing)
+	}
+	if len(rows[1].Outgoing) != 0 {
+		t.Fatalf("line continued past the last row: %#v", rows[1].Outgoing)
+	}
+
+	loaded := LayoutGraph([]Commit{
+		{Hash: "A", Parents: []string{"P"}},
+		{Hash: "B", Parents: []string{"Q"}},
+		{Hash: "P"},
+		{Hash: "Q"},
+	}, "")
+	if !hasEdge(rowByHash(t, loaded, "A").Outgoing, 0, 0) || !hasEdge(rowByHash(t, loaded, "B").Outgoing, 0, 0) {
+		t.Fatalf("loaded parent did not continue A's line: %#v", loaded)
+	}
+	if rowByHash(t, loaded, "P").Lane != 0 || rowByHash(t, loaded, "Q").Lane != 0 {
+		t.Fatalf("lanes P=%d Q=%d", rowByHash(t, loaded, "P").Lane, rowByHash(t, loaded, "Q").Lane)
+	}
+	if !hasEdge(rowByHash(t, loaded, "P").Outgoing, 1, 0) {
+		t.Fatalf("B's line did not curve into Q: %#v", rowByHash(t, loaded, "P").Outgoing)
+	}
+}
+
+func expectLanes(t *testing.T, rows []GraphRow, hashLane ...any) {
 	t.Helper()
-	lane := -1
-	for _, hash := range hashes {
-		got := rowByHash(t, rows, hash).Lane
-		if lane < 0 {
-			lane = got
-			continue
-		}
-		if got != lane {
-			t.Fatalf("commit %s lane = %d, want %d", hash, got, lane)
+	for i := 0; i < len(hashLane); i += 2 {
+		hash := hashLane[i].(string)
+		want := hashLane[i+1].(int)
+		if got := rowByHash(t, rows, hash).Lane; got != want {
+			t.Fatalf("commit %s lane = %d, want %d", hash, got, want)
 		}
 	}
-	return lane
+}
+
+func expectColors(t *testing.T, rows []GraphRow, hashColor ...any) {
+	t.Helper()
+	for i := 0; i < len(hashColor); i += 2 {
+		hash := hashColor[i].(string)
+		want := hashColor[i+1].(int)
+		if got := rowByHash(t, rows, hash).Color; got != want {
+			t.Fatalf("commit %s color = %d, want %d", hash, got, want)
+		}
+	}
+}
+
+func grayReaches(rows []GraphRow, from, to string) bool {
+	start, target := -1, -1
+	for i, r := range rows {
+		if r.Commit.Hash == from {
+			start = i
+		}
+		if r.Commit.Hash == to {
+			target = i
+		}
+	}
+	if start < 0 || target <= start {
+		return false
+	}
+	lane := rows[start].Lane
+	for i := start; i < target; i++ {
+		next, ok := -1, false
+		for _, e := range rows[i].Outgoing {
+			if e.Gray && e.From == lane {
+				next = e.To
+				ok = true
+				break
+			}
+		}
+		if !ok {
+			return false
+		}
+		lane = next
+	}
+	return lane == rows[target].Lane
 }
 
 func rowByHash(t *testing.T, rows []GraphRow, hash string) GraphRow {
@@ -307,6 +374,15 @@ func rowByHash(t *testing.T, rows []GraphRow, hash string) GraphRow {
 	}
 	t.Fatalf("missing commit %s", hash)
 	return GraphRow{}
+}
+
+func edgeLock(edges []Edge, from, to int) bool {
+	for _, e := range edges {
+		if e.From == from && e.To == to && e.LockTop {
+			return true
+		}
+	}
+	return false
 }
 
 func hasEdge(edges []Edge, from, to int) bool {

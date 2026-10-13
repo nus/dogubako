@@ -400,3 +400,17 @@ func TestHistoryEndHold(t *testing.T) {
 		t.Fatal("another repository should release")
 	}
 }
+
+func TestGitCurveHalfMeets(t *testing.T) {
+	_, _, _, _, _, _, mx, my := gitCurveHalf(0, 0, 16, 24, true)
+	sx, sy, _, _, _, _, ex, ey := gitCurveHalf(0, 0, 16, 24, false)
+	if mx != sx || my != sy {
+		t.Fatalf("halves meet at (%v,%v) and (%v,%v)", mx, my, sx, sy)
+	}
+	if mx != 8 || my != 12 {
+		t.Fatalf("midpoint = (%v,%v)", mx, my)
+	}
+	if ex != 16 || ey != 24 {
+		t.Fatalf("end = (%v,%v)", ex, ey)
+	}
+}

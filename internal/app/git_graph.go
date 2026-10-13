@@ -14,27 +14,29 @@ import (
 
 	"github.com/guigui-gui/guigui"
 	"github.com/guigui-gui/guigui/basicwidget"
+	"github.com/guigui-gui/guigui/basicwidget/basicwidgetdraw"
 
 	"github.com/nus/dogubako/internal/gitcli"
 	"github.com/nus/dogubako/internal/i18n"
 )
 
+// gitLaneColors is the commit-graph palette. Colors repeat after the last one.
 var gitLaneColors = []color.NRGBA{
-	{R: 0x4e, G: 0xc9, B: 0xb0, A: 0xff},
-	{R: 0x56, G: 0x9c, B: 0xd6, A: 0xff},
-	{R: 0xc5, G: 0x86, B: 0xc0, A: 0xff},
-	{R: 0xce, G: 0x91, B: 0x78, A: 0xff},
-	{R: 0xd7, G: 0xba, B: 0x7d, A: 0xff},
-	{R: 0x6a, G: 0x99, B: 0x55, A: 0xff},
-	{R: 0xf4, G: 0x47, B: 0x47, A: 0xff},
-	{R: 0x9c, G: 0xdc, B: 0xfe, A: 0xff},
+	{R: 0x4a, G: 0x68, B: 0xee, A: 0xff},
+	{R: 0x4a, G: 0xed, B: 0x67, A: 0xff},
+	{R: 0xed, G: 0xc4, B: 0x4a, A: 0xff},
+	{R: 0xed, G: 0x4a, B: 0x67, A: 0xff},
+	{R: 0x76, G: 0xed, B: 0xd1, A: 0xff},
+	{R: 0xed, G: 0xe8, B: 0x77, A: 0xff},
+	{R: 0xed, G: 0x94, B: 0x77, A: 0xff},
+	{R: 0xa3, G: 0x77, B: 0xed, A: 0xff},
 }
 
-func gitLaneColor(lane int) color.NRGBA {
-	if lane < 0 {
-		lane = 0
+func gitLaneColor(index int) color.NRGBA {
+	if index < 0 {
+		index = 0
 	}
-	return gitLaneColors[lane%len(gitLaneColors)]
+	return gitLaneColors[index%len(gitLaneColors)]
 }
 
 func gitLaneWidth(u int) int {
@@ -165,22 +167,42 @@ func gitLaneStep(colW, lanes, u int) int {
 type gitGraphGlyph struct {
 	guigui.DefaultWidget
 
-	row   gitcli.GraphRow
-	lanes int
-	head  bool
+	row         gitcli.GraphRow
+	lanes       int
+	head        bool
+	expandAbove bool
+	expandBelow bool
 }
 
-func (g *gitGraphGlyph) Set(row gitcli.GraphRow, lanes int, head bool) {
+func (g *gitGraphGlyph) Set(row gitcli.GraphRow, lanes int, head, expandAbove, expandBelow bool) {
 	g.row = row
 	g.lanes = lanes
 	g.head = head
+	g.expandAbove = expandAbove
+	g.expandBelow = expandBelow
 }
 
 func (g *gitGraphGlyph) WriteStateKey(context *guigui.Context, w *guigui.StateKeyWriter) {
 	w.WriteString(g.row.Commit.Hash)
 	w.WriteInt(g.row.Lane)
+	w.WriteInt(g.row.Color)
 	w.WriteInt(g.lanes)
 	w.WriteBool(g.head)
+	w.WriteBool(g.expandAbove)
+	w.WriteBool(g.expandBelow)
+	writeGitEdges(w, g.row.Incoming)
+	writeGitEdges(w, g.row.Outgoing)
+}
+
+func writeGitEdges(w *guigui.StateKeyWriter, edges []gitcli.Edge) {
+	w.WriteInt(len(edges))
+	for _, e := range edges {
+		w.WriteInt(e.From)
+		w.WriteInt(e.To)
+		w.WriteInt(e.Color)
+		w.WriteBool(e.Gray)
+		w.WriteBool(e.LockTop)
+	}
 }
 
 func (g *gitGraphGlyph) Measure(context *guigui.Context, constraints guigui.Constraints) image.Point {
@@ -216,47 +238,59 @@ func (g *gitGraphGlyph) Draw(context *guigui.Context, widgetBounds *guigui.Widge
 	laneX := func(lane int) float32 {
 		return float32(b.Min.X) + float32(lw)/2 + float32(lane*lw)
 	}
-	stroke := float32(2)
-	if u >= 28 {
-		stroke = 2.5
-	}
-	nodeR := gitNodeRadius(lw)
-	// A lane change is one rounded elbow on the upper row. It meets the next
-	// row already on the destination lane, so the line does not bend again.
-	for _, e := range g.row.Outgoing {
-		if e.From == e.To {
-			continue
-		}
-		strokeGitBend(dst, laneX(e.From), midY, laneX(e.To), bot, nodeR, stroke, gitEdgeColor(e))
-	}
+	stroke := gitGraphStroke(u)
+	bg := basicwidgetdraw.BackgroundColor(context.ColorMode())
+	// A lane change is one cubic from this commit's center to the next,
+	// split on the row boundary.
+	H := float32(b.Dy())
 	for _, e := range g.row.Incoming {
-		vector.StrokeLine(dst, laneX(e.To), top, laneX(e.To), midY, stroke, gitEdgeColor(e), true)
-	}
-	for _, e := range g.row.Outgoing {
-		if e.From != e.To {
+		if e.From == e.To || (g.expandAbove && e.LockTop) {
+			strokeGitSegment(dst, laneX(e.To), top, laneX(e.To), midY, stroke, gitEdgeColor(e), bg)
 			continue
 		}
-		vector.StrokeLine(dst, laneX(e.From), midY, laneX(e.From), bot, stroke, gitEdgeColor(e), true)
+		strokeGitCurve(dst, laneX(e.From), midY-H, laneX(e.To), midY, stroke, gitEdgeColor(e), bg, false)
+	}
+	for _, e := range g.row.Outgoing {
+		if e.From == e.To || (g.expandBelow && !e.LockTop) {
+			strokeGitSegment(dst, laneX(e.From), midY, laneX(e.From), bot, stroke, gitEdgeColor(e), bg)
+			continue
+		}
+		strokeGitCurve(dst, laneX(e.From), midY, laneX(e.To), midY+H, stroke, gitEdgeColor(e), bg, true)
 	}
 	x := laneX(g.row.Lane)
-	r := nodeR
-	node := gitLaneColor(g.row.Lane)
-	if g.row.Commit.Hash == gitcli.Uncommitted {
+	r := gitNodeRadius(lw)
+	node := gitLaneColor(g.row.Color)
+	open := g.row.Commit.Hash == gitcli.Uncommitted
+	if open {
 		node = gitUncommittedColor
+		vector.DrawFilledCircle(dst, x, midY, r, bg, true)
+		vector.StrokeCircle(dst, x, midY, r, stroke, node, true)
+		return
 	}
 	vector.DrawFilledCircle(dst, x, midY, r, node, true)
-	if g.head {
-		vector.StrokeCircle(dst, x, midY, r+2.5, stroke, node, true)
-	}
+	vector.StrokeCircle(dst, x, midY, r, 1, gitFade(bg, 0xbf), true)
 }
 
-var gitUncommittedColor = color.NRGBA{R: 0x9a, G: 0x9a, B: 0x9a, A: 0xff}
+var gitUncommittedColor = color.NRGBA{R: 0x80, G: 0x80, B: 0x80, A: 0xff}
+
+func gitGraphStroke(u int) float32 {
+	if u >= 28 {
+		return 2.5
+	}
+	return 2
+}
 
 func gitEdgeColor(e gitcli.Edge) color.NRGBA {
 	if e.Gray {
 		return gitUncommittedColor
 	}
-	return gitLaneColor(e.To)
+	return gitLaneColor(e.Color)
+}
+
+func gitFade(c color.Color, a uint8) color.NRGBA {
+	n := color.NRGBAModel.Convert(c).(color.NRGBA)
+	n.A = uint8(int(n.A) * int(a) / 255)
+	return n
 }
 
 // gitGraphBridge continues a commit's outgoing lanes through the detail
@@ -275,12 +309,7 @@ func (g *gitGraphBridge) Set(lanes int, edges []gitcli.Edge) {
 
 func (g *gitGraphBridge) WriteStateKey(context *guigui.Context, w *guigui.StateKeyWriter) {
 	w.WriteInt(g.lanes)
-	w.WriteInt(len(g.edges))
-	for _, e := range g.edges {
-		w.WriteInt(e.From)
-		w.WriteInt(e.To)
-		w.WriteBool(e.Gray)
-	}
+	writeGitEdges(w, g.edges)
 }
 
 func (g *gitGraphBridge) Measure(context *guigui.Context, constraints guigui.Constraints) image.Point {
@@ -306,15 +335,39 @@ func (g *gitGraphBridge) Draw(context *guigui.Context, widgetBounds *guigui.Widg
 	}
 	u := basicwidget.UnitSize(context)
 	lw := gitLaneStep(b.Dx(), g.lanes, u)
-	stroke := float32(2)
-	if u >= 28 {
-		stroke = 2.5
-	}
+	stroke := gitGraphStroke(u)
+	bg := basicwidgetdraw.BackgroundColor(context.ColorMode())
 	top := float32(b.Min.Y)
 	bot := float32(b.Max.Y)
-	for _, e := range bridgeEdges(g.edges) {
-		x := float32(b.Min.X) + float32(lw)/2 + float32(e.To*lw)
-		vector.StrokeLine(dst, x, top, x, bot, stroke, gitEdgeColor(e), true)
+	rh := float32(u)
+	laneX := func(lane int) float32 {
+		return float32(b.Min.X) + float32(lw)/2 + float32(lane*lw)
+	}
+	// The open commit stretches the graph. A lane change keeps its normal
+	// row of curve, either just under the commit or just above the next one.
+	for pass := 0; pass < 2; pass++ {
+		for _, e := range g.edges {
+			if (pass == 0) != e.Gray {
+				continue
+			}
+			x0 := laneX(e.From)
+			x1 := laneX(e.To)
+			if e.From == e.To {
+				strokeGitSegment(dst, x1, top, x1, bot, stroke, gitEdgeColor(e), bg)
+				continue
+			}
+			if e.LockTop {
+				strokeGitCurve(dst, x0, top-rh/2, x1, top+rh/2, stroke, gitEdgeColor(e), bg, false)
+				if top+rh/2 < bot {
+					strokeGitSegment(dst, x1, top+rh/2, x1, bot, stroke, gitEdgeColor(e), bg)
+				}
+				continue
+			}
+			if top < bot-rh/2 {
+				strokeGitSegment(dst, x0, top, x0, bot-rh/2, stroke, gitEdgeColor(e), bg)
+			}
+			strokeGitCurve(dst, x0, bot-rh/2, x1, bot+rh/2, stroke, gitEdgeColor(e), bg, true)
+		}
 	}
 }
 
@@ -343,59 +396,62 @@ func gitNodeRadius(laneWidth int) float32 {
 	return r
 }
 
-// gitBendRadius is the fillet for a shift of dx across a vertical run of dy.
-// Two quarter-circles fit in the shift, and a stem of at least nodeR stays
-// clear of the commit dot.
-func gitBendRadius(dx, dy, nodeR float32) float32 {
-	if dx < 0 {
-		dx = -dx
-	}
-	if dy <= 0 {
-		return 0
-	}
-	rad := dx / 2
-	if room := (dy - nodeR) / 2; rad > room {
-		rad = room
-	}
-	if rad < 1 {
-		return 0
-	}
-	return rad
-}
-
 func strokeGitPath(dst *ebiten.Image, p *vector.Path, stroke float32, clr color.Color) {
 	op := &vector.DrawPathOptions{AntiAlias: true}
 	op.ColorScale.ScaleWithColor(clr)
-	vector.StrokePath(dst, p, &vector.StrokeOptions{Width: stroke}, op)
+	vector.StrokePath(dst, p, &vector.StrokeOptions{
+		Width:    stroke,
+		LineCap:  vector.LineCapButt,
+		LineJoin: vector.LineJoinRound,
+	}, op)
 }
 
-// strokeGitBend draws one rounded elbow from (x0, y0) to (x1, y1), with y1
-// below y0. The path leaves vertically, turns once onto the horizontal, turns
-// back to vertical, and ends at (x1, y1).
-func strokeGitBend(dst *ebiten.Image, x0, y0, x1, y1, nodeR, stroke float32, clr color.Color) {
-	dx := x1 - x0
-	rad := gitBendRadius(dx, y1-y0, nodeR)
-	if rad == 0 {
-		var p vector.Path
-		p.MoveTo(x0, y0)
-		p.LineTo(x0, y1)
-		p.LineTo(x1, y1)
-		strokeGitPath(dst, &p, stroke, clr)
+func strokeGitSegment(dst *ebiten.Image, x0, y0, x1, y1, stroke float32, clr, bg color.Color) {
+	vector.StrokeLine(dst, x0, y0, x1, y1, stroke+2, gitFade(bg, 0xbf), true)
+	vector.StrokeLine(dst, x0, y0, x1, y1, stroke, clr, true)
+}
+
+// strokeGitCurve draws one half of a rounded lane change.
+// The full curve runs from (x0, y0) to (x1, y1). first selects the upper half.
+func strokeGitCurve(dst *ebiten.Image, x0, y0, x1, y1, stroke float32, clr, bg color.Color, first bool) {
+	if x0 == x1 {
+		mid := (y0 + y1) / 2
+		if first {
+			strokeGitSegment(dst, x0, y0, x0, mid, stroke, clr, bg)
+		} else {
+			strokeGitSegment(dst, x0, mid, x0, y1, stroke, clr, bg)
+		}
 		return
 	}
-	dir := float32(1)
-	if dx < 0 {
-		dir = -1
-	}
-	yH := y1 - rad
+	ax, ay, bx, by, cx, cy, dx, dy := gitCurveHalf(x0, y0, x1, y1, first)
 	var p vector.Path
-	p.MoveTo(x0, y0)
-	p.LineTo(x0, yH-rad)
-	p.ArcTo(x0, yH, x0+dir*rad, yH, rad)
-	p.LineTo(x1-dir*rad, yH)
-	p.ArcTo(x1, yH, x1, y1, rad)
-	p.LineTo(x1, y1)
+	p.MoveTo(ax, ay)
+	p.CubicTo(bx, by, cx, cy, dx, dy)
+	strokeGitPath(dst, &p, stroke+2, gitFade(bg, 0xbf))
 	strokeGitPath(dst, &p, stroke, clr)
+}
+
+// gitCurveHalf splits the cubic C x0,y0+0.8H x1,y1-0.8H x1,y1 at its midpoint.
+func gitCurveHalf(x0, y0, x1, y1 float32, first bool) (ax, ay, bx, by, cx, cy, dx, dy float32) {
+	H := y1 - y0
+	p1y := y0 + 0.8*H
+	p2y := y1 - 0.8*H
+	aX := x0
+	aY := (y0 + p1y) / 2
+	bX := (x0 + x1) / 2
+	bY := (p1y + p2y) / 2
+	cX := x1
+	cY := (p2y + y1) / 2
+	dX := (aX + bX) / 2
+	dY := (aY + bY) / 2
+	eX := (bX + cX) / 2
+	eY := (bY + cY) / 2
+	fX := (dX + eX) / 2
+	fY := (dY + eY) / 2
+	if first {
+		return x0, y0, aX, aY, dX, dY, fX, fY
+	}
+	return fX, fY, eX, eY, cX, cY, x1, y1
 }
 
 func gitMetaCols(u int) (author, hash, date int) {
@@ -999,9 +1055,9 @@ type gitCommitRow struct {
 	layout      guigui.LinearLayout
 }
 
-func (r *gitCommitRow) Set(row gitcli.GraphRow, lanes int, head bool, lang i18n.Lang, onSwitch func(gitcli.Ref), onMenu func(gitcli.Ref)) {
+func (r *gitCommitRow) Set(row gitcli.GraphRow, lanes int, head, expandAbove, expandBelow bool, lang i18n.Lang, onSwitch func(gitcli.Ref), onMenu func(gitcli.Ref)) {
 	r.uncommitted = row.Commit.Hash == gitcli.Uncommitted
-	r.graph.Set(row, lanes, head)
+	r.graph.Set(row, lanes, head, expandAbove, expandBelow)
 	r.badges.Set(row.Commit.Decorations, row.Commit.Hash, onSwitch, onMenu)
 	if r.uncommitted {
 		r.subject.SetValue(i18n.T(lang, i18n.GitUncommitted))

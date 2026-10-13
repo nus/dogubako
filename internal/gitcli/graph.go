@@ -1,241 +1,53 @@
 package gitcli
 
 // Uncommitted is the synthetic graph node for a dirty working tree.
-// It is not a Git object.
+// It is not a Git object. It is drawn as the first row, with a gray
+// line down to the checked-out commit.
 const Uncommitted = "uncommitted"
 
 // Edge connects a lane on one row to a lane on the next row.
-// Gray marks the segment from the uncommitted node to HEAD.
+// Color is the branch colour index. Gray marks the uncommitted line.
+// LockTop keeps a lane change against the upper commit when a detail
+// panel opens between the two rows.
 type Edge struct {
 	From, To int
+	Color    int
 	Gray     bool
+	LockTop  bool
 }
 
 // GraphRow is one commit plus the lanes needed to draw it.
+// Color is the branch colour of the commit dot.
 type GraphRow struct {
 	Commit   Commit
 	Lane     int
+	Color    int
 	Incoming []Edge
 	Outgoing []Edge
 }
 
-// LayoutGraph assigns columns (lanes) for a newest-first commit list.
-// head is the checked-out commit. Its first-parent chain stays in the lane
-// that commit lands in, so the checked-out branch draws as one vertical line.
-// An empty head, or a head that is not in commits, keeps the unpinned layout.
+// LayoutGraph assigns columns for a newest-first commit list.
+// A branch keeps one color, and the first parent continues that branch.
+// A parent that is not in commits still reserves a column down to the
+// last loaded row. head is accepted so callers can pass the checked-out
+// commit; the columns themselves do not depend on it.
 func LayoutGraph(commits []Commit, head string) []GraphRow {
 	if len(commits) == 0 {
 		return nil
 	}
-	known := make(map[string]struct{}, len(commits))
-	for _, c := range commits {
-		known[c.Hash] = struct{}{}
-	}
-	mainline := headFirstParents(commits, head)
-
-	active := []string{}
-	mainLane := -1
-	rows := make([]GraphRow, len(commits))
-	for i, c := range commits {
-		lane := indexOf(active, c.Hash)
-		if lane < 0 {
-			lane = firstEmpty(active)
-			if lane < 0 {
-				lane = len(active)
-				active = append(active, c.Hash)
-			} else {
-				active[lane] = c.Hash
-			}
-		}
-		if _, onMain := mainline[c.Hash]; onMain && mainLane < 0 {
-			mainLane = lane
-		}
-
-		parents := make([]string, 0, len(c.Parents))
-		for _, p := range c.Parents {
-			if _, ok := known[p]; ok {
-				parents = append(parents, p)
-			}
-		}
-
-		next := append([]string(nil), active...)
-		_, onMain := mainline[c.Hash]
-		stick := onMain && lane == mainLane && len(parents) > 0 && c.Parents[0] == parents[0]
-		if len(parents) == 0 {
-			next[lane] = ""
-		} else if stick {
-			// Another line may already be carrying the next commit on this
-			// branch. Fold that line in, instead of bending this branch over
-			// to the lane that reached the parent first.
-			first := parents[0]
-			if j := indexOf(next, first); j >= 0 && j != lane {
-				next[j] = ""
-			}
-			next[lane] = first
-		} else if j := indexOf(active, parents[0]); j >= 0 && j != lane {
-			next[lane] = ""
-		} else {
-			next[lane] = parents[0]
-		}
-		if len(parents) > 1 {
-			for _, p := range parents[1:] {
-				if indexOf(next, p) >= 0 {
-					continue
-				}
-				e := firstEmpty(next)
-				if e < 0 {
-					next = append(next, p)
-				} else {
-					next[e] = p
-				}
-			}
-		}
-
-		var outgoing []Edge
-		seen := map[Edge]bool{}
-		add := func(e Edge) {
-			if seen[e] {
-				return
-			}
-			seen[e] = true
-			outgoing = append(outgoing, e)
-		}
-		for _, p := range parents {
-			if j := indexOf(next, p); j >= 0 {
-				add(Edge{From: lane, To: j})
-			}
-		}
-		for l, h := range active {
-			if h == "" || l == lane {
-				continue
-			}
-			if j := indexOf(next, h); j >= 0 {
-				add(Edge{From: l, To: j})
-			}
-		}
-
-		rows[i] = GraphRow{Commit: c, Lane: lane, Outgoing: outgoing}
-		active = next
-	}
-	for i := 1; i < len(rows); i++ {
-		rows[i].Incoming = rows[i-1].Outgoing
-	}
-	return rows
+	return layoutGraph(commits)
 }
 
-// headFirstParents is the checked-out commit and the commits reached by
-// following only first parents. Those are the commits drawn on its line.
-func headFirstParents(commits []Commit, head string) map[string]struct{} {
-	if head == "" {
-		return nil
-	}
-	by := make(map[string]Commit, len(commits))
-	for _, c := range commits {
-		by[c.Hash] = c
-	}
-	chain := map[string]struct{}{}
-	for h := head; ; {
-		c, ok := by[h]
-		if !ok {
-			return chain
-		}
-		if _, seen := chain[h]; seen {
-			return chain
-		}
-		chain[h] = struct{}{}
-		if len(c.Parents) == 0 {
-			return chain
-		}
-		h = c.Parents[0]
-	}
-}
-
-// WithUncommitted inserts a synthetic node on the row directly above head,
-// with a gray edge into that commit. Other commits keep their own edges.
+// WithUncommitted inserts the uncommitted node as the first row, with
+// head as its parent. The gray line runs down to that commit.
 func WithUncommitted(commits []Commit, head string) []GraphRow {
-	rows := LayoutGraph(commits, head)
-	if head == "" {
-		return rows
+	if head == "" || len(commits) == 0 {
+		return LayoutGraph(commits, head)
 	}
-	return insertUncommitted(rows, head)
-}
-
-// insertUncommitted places the uncommitted node immediately above head.
-// When head is not the newest commit, the node uses a side lane so the
-// commits above head stay connected to head.
-func insertUncommitted(rows []GraphRow, head string) []GraphRow {
-	idx := -1
-	for i := range rows {
-		if rows[i].Commit.Hash == head {
-			idx = i
-			break
-		}
-	}
-	if idx < 0 {
-		return rows
-	}
-	headLane := rows[idx].Lane
-	if idx == 0 {
-		node := GraphRow{
-			Commit:   Commit{Hash: Uncommitted, Parents: []string{head}},
-			Lane:     headLane,
-			Outgoing: []Edge{{From: headLane, To: headLane, Gray: true}},
-		}
-		rows[0].Incoming = []Edge{{From: headLane, To: headLane, Gray: true}}
-		return append([]GraphRow{node}, rows...)
-	}
-
-	uLane := maxLane(rows) + 1
-	incoming := append([]Edge(nil), rows[idx].Incoming...)
-	seen := map[[2]int]bool{}
-	outgoing := make([]Edge, 0, len(incoming)+1)
-	for _, e := range incoming {
-		key := [2]int{e.To, e.To}
-		if seen[key] {
-			continue
-		}
-		seen[key] = true
-		outgoing = append(outgoing, Edge{From: e.To, To: e.To})
-	}
-	outgoing = append(outgoing, Edge{From: uLane, To: headLane, Gray: true})
-	node := GraphRow{
-		Commit:   Commit{Hash: Uncommitted, Parents: []string{head}},
-		Lane:     uLane,
-		Incoming: incoming,
-		Outgoing: outgoing,
-	}
-	rows[idx].Incoming = append([]Edge(nil), outgoing...)
-	out := make([]GraphRow, 0, len(rows)+1)
-	out = append(out, rows[:idx]...)
-	out = append(out, node)
-	out = append(out, rows[idx:]...)
-	return out
-}
-
-func maxLane(rows []GraphRow) int {
-	maxLane := 0
-	for _, r := range rows {
-		if r.Lane > maxLane {
-			maxLane = r.Lane
-		}
-		for _, e := range r.Incoming {
-			if e.From > maxLane {
-				maxLane = e.From
-			}
-			if e.To > maxLane {
-				maxLane = e.To
-			}
-		}
-		for _, e := range r.Outgoing {
-			if e.From > maxLane {
-				maxLane = e.From
-			}
-			if e.To > maxLane {
-				maxLane = e.To
-			}
-		}
-	}
-	return maxLane
+	all := make([]Commit, len(commits)+1)
+	all[0] = Commit{Hash: Uncommitted, Parents: []string{head}}
+	copy(all[1:], commits)
+	return LayoutGraph(all, head)
 }
 
 // LaneCount is the number of columns needed to draw rows.
@@ -265,20 +77,262 @@ func LaneCount(rows []GraphRow) int {
 	return maxLane + 1
 }
 
-func indexOf(lanes []string, hash string) int {
-	for i, h := range lanes {
-		if h == hash {
-			return i
-		}
-	}
-	return -1
+const graphNull = -1
+
+type graphVertex struct {
+	id         int
+	parents    []int
+	nextParent int
+	branch     int
+	x          int
+	nextX      int
+	conns      []graphConn
+	committed  bool
 }
 
-func firstEmpty(lanes []string) int {
-	for i, h := range lanes {
-		if h == "" {
+type graphConn struct {
+	to     int
+	branch int
+	set    bool
+}
+
+type graphLine struct {
+	x1, y1 int
+	x2, y2 int
+	locked bool
+}
+
+type graphBranch struct {
+	color          int
+	end            int
+	lines          []graphLine
+	numUncommitted int
+}
+
+func layoutGraph(commits []Commit) []GraphRow {
+	index := make(map[string]int, len(commits))
+	for i, c := range commits {
+		if _, ok := index[c.Hash]; !ok {
+			index[c.Hash] = i
+		}
+	}
+	vertices := make([]graphVertex, len(commits))
+	for i, c := range commits {
+		parents := make([]int, len(c.Parents))
+		for j, p := range c.Parents {
+			if id, ok := index[p]; ok {
+				parents[j] = id
+			} else {
+				parents[j] = graphNull
+			}
+		}
+		vertices[i] = graphVertex{
+			id:        i,
+			parents:   parents,
+			branch:    -1,
+			committed: c.Hash != Uncommitted,
+		}
+	}
+
+	var branches []graphBranch
+	available := []int{}
+	i := 0
+	steps := 0
+	limit := len(vertices)*len(vertices) + 1
+	for i < len(vertices) {
+		v := &vertices[i]
+		if v.nextParent < len(v.parents) || v.branch < 0 {
+			before := v.nextParent
+			onBranch := v.branch >= 0
+			determinePath(vertices, &branches, &available, i)
+			steps++
+			if steps > limit {
+				break
+			}
+			if v.nextParent == before && onBranch == (v.branch >= 0) {
+				// A parent above this row cannot be reached. Skip it
+				// instead of laying the same path out forever.
+				if v.nextParent < len(v.parents) {
+					v.nextParent++
+				} else if v.branch < 0 {
+					v.branch = 0
+				}
+			}
+			continue
+		}
+		i++
+	}
+
+	rows := make([]GraphRow, len(commits))
+	for i, c := range commits {
+		v := &vertices[i]
+		color := 0
+		if v.branch >= 0 && v.branch < len(branches) {
+			color = branches[v.branch].color
+		}
+		rows[i] = GraphRow{Commit: c, Lane: v.x, Color: color}
+	}
+	for bi := range branches {
+		b := &branches[bi]
+		for li, line := range b.lines {
+			if line.y2 != line.y1+1 || line.y1 < 0 || line.y2 >= len(rows) {
+				continue
+			}
+			edge := Edge{
+				From:    line.x1,
+				To:      line.x2,
+				Color:   b.color,
+				Gray:    li < b.numUncommitted,
+				LockTop: line.locked,
+			}
+			rows[line.y1].Outgoing = append(rows[line.y1].Outgoing, edge)
+			rows[line.y2].Incoming = append(rows[line.y2].Incoming, edge)
+		}
+	}
+	return rows
+}
+
+func determinePath(vertices []graphVertex, branches *[]graphBranch, available *[]int, startAt int) {
+	null := &graphVertex{id: graphNull, branch: -1}
+	vertex := &vertices[startAt]
+	parent := vertex.parentOf(vertices, null)
+	last := vertex.point()
+	if vertex.branch < 0 {
+		last = vertex.nextPoint()
+	}
+
+	if parent != nil && parent.id != graphNull && vertex.merge() && vertex.branch >= 0 && parent.branch >= 0 {
+		found := false
+		parentBranch := parent.branch
+		for i := startAt + 1; i < len(vertices); i++ {
+			cur := &vertices[i]
+			curPoint, ok := cur.pointConnecting(parent.id, parentBranch)
+			if ok {
+				found = true
+			} else {
+				curPoint = cur.nextPoint()
+			}
+			locked := true
+			if !found && cur.id != parent.id {
+				locked = last.x < curPoint.x
+			}
+			(*branches)[parentBranch].addLine(last, curPoint, vertex.committed, locked)
+			cur.reserve(curPoint.x, parent.id, parentBranch)
+			last = curPoint
+			if found {
+				vertex.registerParent()
+				break
+			}
+		}
+		return
+	}
+
+	color := availableColor(available, startAt)
+	branchID := len(*branches)
+	*branches = append(*branches, graphBranch{color: color})
+	vertex.addToBranch(branchID, last.x)
+	vertex.reserve(last.x, vertex.id, branchID)
+	i := startAt + 1
+	for ; i < len(vertices); i++ {
+		cur := &vertices[i]
+		curPoint := cur.nextPoint()
+		if parent != nil && cur.id == parent.id && parent.branch >= 0 {
+			curPoint = parent.point()
+		}
+		(*branches)[branchID].addLine(last, curPoint, vertex.committed, last.x < curPoint.x)
+		connect := graphNull
+		if parent != nil {
+			connect = parent.id
+		}
+		cur.reserve(curPoint.x, connect, branchID)
+		last = curPoint
+		if parent != nil && cur.id == parent.id {
+			vertex.registerParent()
+			parentOnBranch := parent.branch >= 0
+			parent.addToBranch(branchID, curPoint.x)
+			vertex = parent
+			parent = vertex.parentOf(vertices, null)
+			if parent == nil || parentOnBranch {
+				break
+			}
+		}
+	}
+	if i == len(vertices) && parent != nil && parent.id == graphNull {
+		vertex.registerParent()
+	}
+	(*branches)[branchID].end = i
+	(*available)[color] = i
+}
+
+// parentOf is the next parent still to be drawn. A parent that is not in
+// the loaded commits is the shared null vertex.
+func (v *graphVertex) parentOf(vertices []graphVertex, null *graphVertex) *graphVertex {
+	if v.nextParent >= len(v.parents) {
+		return nil
+	}
+	id := v.parents[v.nextParent]
+	if id == graphNull {
+		return null
+	}
+	return &vertices[id]
+}
+
+func (v *graphVertex) merge() bool { return len(v.parents) > 1 }
+
+func (v *graphVertex) point() graphPoint { return graphPoint{v.x, v.id} }
+
+func (v *graphVertex) nextPoint() graphPoint { return graphPoint{v.nextX, v.id} }
+
+func (v *graphVertex) pointConnecting(to, branch int) (graphPoint, bool) {
+	for x, c := range v.conns {
+		if c.set && c.to == to && c.branch == branch {
+			return graphPoint{x, v.id}, true
+		}
+	}
+	return graphPoint{}, false
+}
+
+func (v *graphVertex) reserve(x, to, branch int) {
+	if x != v.nextX {
+		return
+	}
+	if x >= len(v.conns) {
+		conns := make([]graphConn, x+1)
+		copy(conns, v.conns)
+		v.conns = conns
+	}
+	v.conns[x] = graphConn{to: to, branch: branch, set: true}
+	v.nextX = x + 1
+}
+
+func (v *graphVertex) addToBranch(branch, x int) {
+	if v.branch < 0 {
+		v.branch = branch
+		v.x = x
+	}
+}
+
+func (v *graphVertex) registerParent() { v.nextParent++ }
+
+type graphPoint struct{ x, y int }
+
+func (b *graphBranch) addLine(p1, p2 graphPoint, committed, locked bool) {
+	b.lines = append(b.lines, graphLine{p1.x, p1.y, p2.x, p2.y, locked})
+	if committed {
+		if p2.x == 0 && p2.y < b.numUncommitted {
+			b.numUncommitted = p2.y
+		}
+		return
+	}
+	b.numUncommitted++
+}
+
+func availableColor(available *[]int, startAt int) int {
+	for i, end := range *available {
+		if startAt > end {
 			return i
 		}
 	}
-	return -1
+	*available = append(*available, 0)
+	return len(*available) - 1
 }

@@ -426,7 +426,7 @@ func (t *GitTool) Build(context *guigui.Context, adder *guigui.ChildAdder) error
 		for i, row := range rows {
 			r := t.commitRows.At(i)
 			r.tool = t
-			r.Set(row, lanes, row.Commit.Hash == snap.HEAD, lang, func(ref gitcli.Ref) {
+			r.Set(row, lanes, row.Commit.Hash == snap.HEAD, i > 0 && rows[i-1].Commit.Hash == t.openHash, row.Commit.Hash == t.openHash, lang, func(ref gitcli.Ref) {
 				t.switchBranch(lang, model, ref)
 			}, onMenu)
 			r.graphUnits = t.graphUnits
