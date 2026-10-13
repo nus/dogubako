@@ -160,10 +160,8 @@ type GitTool struct {
 	bodyBounds   image.Rectangle
 
 	rightItems []guigui.LinearLayoutItem
-	msgItems   []guigui.LinearLayoutItem
 	netItems   []guigui.LinearLayoutItem
 	rightCol   guigui.LinearLayout
-	msgRow     guigui.LinearLayout
 	netRow     guigui.LinearLayout
 }
 
@@ -252,17 +250,22 @@ func (t *GitTool) Build(context *guigui.Context, adder *guigui.ChildAdder) error
 			t.workTree.SetMultiline(true)
 			t.workTree.SetWrapMode(basicwidget.WrapModeNormal)
 			t.workTree.SetSelectable(false)
+			t.workTree.SetVerticalAlign(basicwidget.VerticalAlignMiddle)
+			t.workTree.SetHorizontalAlign(basicwidget.HorizontalAlignCenter)
 		}
+		t.workPanes.commitInput = &t.msgInput
+		t.workPanes.stageBtn = &t.stageBtn
+		t.workPanes.unstageBtn = &t.unstageBtn
+		t.workPanes.amendBtn = &t.amendBtn
+		t.workPanes.commitBtn = &t.commitBtn
 		if t.showChanges {
-			adder.AddWidget(&t.workPanes)
+			t.workPanes.empty = nil
+			t.workPanes.showDiff = true
 		} else {
-			adder.AddWidget(&t.workTree)
+			t.workPanes.empty = &t.workTree
+			t.workPanes.showDiff = false
 		}
-		adder.AddWidget(&t.msgInput)
-		adder.AddWidget(&t.stageBtn)
-		adder.AddWidget(&t.unstageBtn)
-		adder.AddWidget(&t.commitBtn)
-		adder.AddWidget(&t.amendBtn)
+		adder.AddWidget(&t.workPanes)
 	}
 
 	repoPath := model.Path()
@@ -819,25 +822,9 @@ func (t *GitTool) layoutHistoryColumn(u int) {
 
 func (t *GitTool) layoutCommitColumn(u int) {
 	t.msgInput.SetIntrinsicSize()
-	t.msgItems = slices.Delete(t.msgItems, 0, len(t.msgItems))
-	t.msgItems = append(t.msgItems,
-		guigui.LinearLayoutItem{Widget: &t.stageBtn},
-		guigui.LinearLayoutItem{Widget: &t.unstageBtn},
-		guigui.LinearLayoutItem{Size: guigui.FlexibleSize(1)},
-		guigui.LinearLayoutItem{Widget: &t.amendBtn},
-		guigui.LinearLayoutItem{Widget: &t.commitBtn},
-	)
-	t.msgRow = guigui.LinearLayout{Direction: guigui.LayoutDirectionHorizontal, Items: t.msgItems, Gap: u / 4}
-
 	t.rightItems = slices.Delete(t.rightItems, 0, len(t.rightItems))
-	if t.showChanges {
-		t.rightItems = append(t.rightItems, guigui.LinearLayoutItem{Widget: &t.workPanes, Size: guigui.FlexibleSize(3)})
-	} else {
-		t.rightItems = append(t.rightItems, guigui.LinearLayoutItem{Widget: &t.workTree, Size: guigui.FlexibleSize(3)})
-	}
 	t.rightItems = append(t.rightItems,
-		guigui.LinearLayoutItem{Widget: &t.msgInput, Size: guigui.FlexibleSize(1)},
-		guigui.LinearLayoutItem{Size: guigui.FixedSize(u), Layout: &t.msgRow},
+		guigui.LinearLayoutItem{Widget: &t.workPanes, Size: guigui.FlexibleSize(1)},
 		guigui.LinearLayoutItem{Widget: &t.status, Size: guigui.FixedSize(u * 3 / 4)},
 		guigui.LinearLayoutItem{Widget: &t.hint, Size: guigui.FixedSize(u * 3 / 4)},
 	)
