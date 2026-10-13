@@ -192,6 +192,13 @@ func (m *gitSession) historyPage() int {
 	return gitcli.HistoryPage
 }
 
+func (m *gitSession) historyMore() int {
+	if m.histPage > 0 {
+		return m.histPage
+	}
+	return gitcli.HistoryMore
+}
+
 func (m *gitSession) historyLimit() int {
 	if m.histLimit > 0 {
 		return m.histLimit
@@ -292,7 +299,7 @@ func (m *gitSession) loadMoreHistory() {
 		return
 	}
 	prev := m.historyLimit()
-	next := prev + m.historyPage()
+	next := prev + m.historyMore()
 	m.histLimit = next
 	m.histGen++
 	gen := m.histGen

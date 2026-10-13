@@ -18,8 +18,10 @@ import (
 )
 
 const (
-	// HistoryPage is the number of commits loaded at a time.
+	// HistoryPage is the number of commits loaded with the graph.
+	// HistoryMore is how many older commits each additional load fetches.
 	HistoryPage   = 300
+	HistoryMore   = 100
 	defaultMaxLog = HistoryPage
 	// maxWalk caps a single history read so a huge repository stays bounded.
 	maxWalk = 20000

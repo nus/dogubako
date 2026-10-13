@@ -429,23 +429,11 @@ func TestCheckoutOverwriteKeepsBranch(t *testing.T) {
 	if snap.Branch != "main" || snap.Detached {
 		t.Fatalf("branch = %s detached=%v", snap.Branch, snap.Detached)
 	}
-	found := false
-	for i := range snap.Graph {
-		if snap.Graph[i].Commit.Hash != Uncommitted {
-			continue
-		}
-		if i+1 >= len(snap.Graph) || snap.Graph[i+1].Commit.Hash != snap.HEAD {
-			t.Fatalf("uncommitted is not directly above HEAD")
-		}
-		u := snap.Graph[i]
-		h := snap.Graph[i+1]
-		if !edgeGray(u.Outgoing, u.Lane, h.Lane) || !edgeGray(h.Incoming, u.Lane, h.Lane) {
-			t.Fatalf("sprout %#v -> %#v", u.Outgoing, h.Incoming)
-		}
-		found = true
+	if len(snap.Graph) == 0 || snap.Graph[0].Commit.Hash != Uncommitted {
+		t.Fatal("uncommitted is not the first row")
 	}
-	if !found {
-		t.Fatal("missing uncommitted node")
+	if !grayReaches(snap.Graph, Uncommitted, snap.HEAD) {
+		t.Fatalf("gray line does not reach HEAD %s", snap.HEAD)
 	}
 	body, err := os.ReadFile(filepath.Join(dir, "a.txt"))
 	if err != nil {
