@@ -1,6 +1,7 @@
 package gitcli
 
 import (
+	"sort"
 	"strings"
 	"time"
 )
@@ -57,6 +58,12 @@ func (r Ref) IsTag() bool {
 type Remote struct {
 	Name string
 	URL  string
+}
+
+// Submodule is a gitlink recorded in the index.
+type Submodule struct {
+	Path string
+	Hash string
 }
 
 // Status is porcelain v1 plus branch header.
@@ -362,6 +369,51 @@ func extractCount(s, key string) int {
 		n = n*10 + int(r-'0')
 	}
 	return n
+}
+
+// parseGitlinks reads `git ls-files -z -s` and returns stage-0 gitlinks.
+func parseGitlinks(out string) []Submodule {
+	var subs []Submodule
+	for _, rec := range strings.Split(out, "\x00") {
+		sm, ok := parseGitlink(rec)
+		if ok {
+			subs = append(subs, sm)
+		}
+	}
+	sort.Slice(subs, func(i, j int) bool { return subs[i].Path < subs[j].Path })
+	return subs
+}
+
+func parseGitlink(rec string) (Submodule, bool) {
+	if rec == "" {
+		return Submodule{}, false
+	}
+	meta, file, ok := strings.Cut(rec, "\t")
+	if !ok || file == "" {
+		return Submodule{}, false
+	}
+	mode, rest, ok := strings.Cut(meta, " ")
+	if !ok || mode != "160000" {
+		return Submodule{}, false
+	}
+	hash, stage, ok := strings.Cut(rest, " ")
+	if !ok || stage != "0" || !isFullHash(hash) {
+		return Submodule{}, false
+	}
+	return Submodule{Path: file, Hash: hash}, true
+}
+
+func isFullHash(s string) bool {
+	if len(s) != 40 && len(s) != 64 {
+		return false
+	}
+	for i := 0; i < len(s); i++ {
+		c := s[i]
+		if (c < '0' || c > '9') && (c < 'a' || c > 'f') && (c < 'A' || c > 'F') {
+			return false
+		}
+	}
+	return true
 }
 
 func parseNameStatus(stdout string) []string {

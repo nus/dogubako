@@ -14,7 +14,7 @@ import (
 
 const gitSideDefaultUnits = 9
 
-// gitSidePane is the scrolling left column: workspace, branches, tags, and remotes.
+// gitSidePane is the scrolling left column: workspace, branches, tags, remotes, and submodules.
 type gitSidePane struct {
 	guigui.DefaultWidget
 
@@ -161,20 +161,22 @@ func (t *GitTool) setSideDragPassthrough(context *guigui.Context, pass bool) {
 }
 
 // gitSideBody lays out the left column at the height of its contents.
-// Branches, tags, and remotes each use their full list height. The pane scrolls.
+// Branches, tags, remotes, and submodules each use their full list height. The pane scrolls.
 type gitSideBody struct {
 	guigui.DefaultWidget
 
 	owner *GitTool
 	items []guigui.LinearLayoutItem
 
-	branchHead gitSectionHead
-	tagHead    gitSectionHead
-	remoteHead gitSectionHead
+	branchHead    gitSectionHead
+	tagHead       gitSectionHead
+	remoteHead    gitSectionHead
+	submoduleHead gitSectionHead
 
-	branchRows guigui.WidgetSlice[*gitNavRow]
-	tagRows    guigui.WidgetSlice[*gitNavRow]
-	remoteRows guigui.WidgetSlice[*gitNavRow]
+	branchRows    guigui.WidgetSlice[*gitNavRow]
+	tagRows       guigui.WidgetSlice[*gitNavRow]
+	remoteRows    guigui.WidgetSlice[*gitNavRow]
+	submoduleRows guigui.WidgetSlice[*gitNavRow]
 }
 
 func (b *gitSideBody) Build(context *guigui.Context, adder *guigui.ChildAdder) error {
@@ -245,6 +247,23 @@ func (b *gitSideBody) Build(context *guigui.Context, adder *guigui.ChildAdder) e
 			}
 		}, func(value string, expanded bool) {
 			t.setTreeFold(&t.remoteFold, value, expanded)
+		})
+	}
+	b.submoduleHead.Set(i18n.T(lang, i18n.GitSubmodules), t.submoduleClosed, func() {
+		t.submoduleClosed = !t.submoduleClosed
+		guigui.RequestRebuild()
+	})
+	adder.AddWidget(&b.submoduleHead)
+	if t.submoduleClosed {
+		b.submoduleRows.SetLen(0)
+	} else {
+		b.syncRows(context, adder, &b.submoduleRows, visibleTreeItems(t.submoduleItems), enabled, func(value string) {
+			t.navSel = value
+			if model != nil {
+				t.selectRef(model, value)
+			}
+		}, func(value string, expanded bool) {
+			t.setTreeFold(&t.submoduleFold, value, expanded)
 		})
 	}
 	return nil
@@ -346,6 +365,13 @@ func (b *gitSideBody) stack(context *guigui.Context, width, u int) {
 	if !t.remoteClosed {
 		for i := 0; i < b.remoteRows.Len(); i++ {
 			add(b.remoteRows.At(i), u)
+		}
+	}
+	space()
+	add(&b.submoduleHead, u)
+	if !t.submoduleClosed {
+		for i := 0; i < b.submoduleRows.Len(); i++ {
+			add(b.submoduleRows.At(i), u)
 		}
 	}
 }

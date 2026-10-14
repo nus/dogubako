@@ -20,10 +20,12 @@ const (
 	gitNavIconFolder
 	gitNavIconBranch
 	gitNavIconTag
+	gitNavIconSubmodule
 )
 
 // gitNavIconKind is the glyph for a sidebar row. Folders use a folder,
-// local and remote branch names use a branch, and tags use a tag.
+// local and remote branch names use a branch, tags use a tag, and
+// submodules use a nested repository.
 func gitNavIconKind(folder bool, value string) gitNavIcon {
 	if folder {
 		return gitNavIconFolder
@@ -31,6 +33,8 @@ func gitNavIconKind(folder bool, value string) gitNavIcon {
 	switch {
 	case strings.HasPrefix(value, "tag:"):
 		return gitNavIconTag
+	case strings.HasPrefix(value, "submodule:"):
+		return gitNavIconSubmodule
 	case strings.HasPrefix(value, "local:"), strings.HasPrefix(value, "remote:"):
 		return gitNavIconBranch
 	default:
@@ -83,7 +87,7 @@ func gitNavLeadLayout(indent int, folder bool, u int) gitNavLead {
 	return lead
 }
 
-// gitNavRow is one branch, tag, or remote line in the scrolling sidebar.
+// gitNavRow is one branch, tag, remote, or submodule line in the scrolling sidebar.
 type gitNavRow struct {
 	guigui.DefaultWidget
 
@@ -164,6 +168,8 @@ func (r *gitNavRow) Draw(context *guigui.Context, widgetBounds *guigui.WidgetBou
 		drawBranchGlyph(dst, box)
 	case gitNavIconTag:
 		drawTagGlyph(dst, box, clr)
+	case gitNavIconSubmodule:
+		drawSubmoduleGlyph(dst, box)
 	}
 }
 
@@ -364,6 +370,20 @@ func drawTagGlyph(dst *ebiten.Image, bounds image.Rectangle, fg color.Color) {
 	vector.FillCircle(dst, body+w*0.16, mid, hole, fg, true)
 }
 
+func drawSubmoduleGlyph(dst *ebiten.Image, bounds image.Rectangle) {
+	r := iconInner(bounds)
+	if r.Dx() < 4 || r.Dy() < 4 {
+		return
+	}
+	col := color.NRGBA{R: 0x6d, G: 0x5e, B: 0xc7, A: 0xff}
+	w := float32(r.Dx())
+	h := float32(r.Dy())
+	x := float32(r.Min.X)
+	y := float32(r.Min.Y)
+	vector.StrokeRect(dst, x, y+h*0.22, w*0.72, h*0.72, 1.25, col, true)
+	vector.StrokeRect(dst, x+w*0.28, y, w*0.72, h*0.72, 1.25, col, true)
+}
+
 func drawNavArrow(dst *ebiten.Image, x, y, size int, expanded bool, clr color.Color) {
 	if size < 2 {
 		return
@@ -387,7 +407,7 @@ func drawNavArrow(dst *ebiten.Image, x, y, size int, expanded bool, clr color.Co
 	vector.FillPath(dst, &p, nil, op)
 }
 
-// gitSectionHead is the accordion title for branches, tags, or remotes.
+// gitSectionHead is the accordion title for branches, tags, remotes, or submodules.
 type gitSectionHead struct {
 	guigui.DefaultWidget
 

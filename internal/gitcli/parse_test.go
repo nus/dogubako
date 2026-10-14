@@ -376,6 +376,37 @@ func rowByHash(t *testing.T, rows []GraphRow, hash string) GraphRow {
 	return GraphRow{}
 }
 
+func TestParseGitlinks(t *testing.T) {
+	const (
+		lib  = "0123456789abcdef0123456789abcdef01234567"
+		util = "abcdef0123456789abcdef0123456789abcdef01"
+		sha2 = "0123456789abcdef0123456789abcdef0123456789abcdef0123456789abcdef"
+	)
+	out := "" +
+		"100644 " + lib + " 0\tREADME\x00" +
+		"160000 " + util + " 0\tvendor/util\x00" +
+		"160000 " + lib + " 1\tvendor/util\x00" +
+		"160000 " + lib + " 0\tlibs/foo bar\x00" +
+		"160000 " + sha2 + " 0\tnested/deep\x00"
+	got := parseGitlinks(out)
+	want := []Submodule{
+		{Path: "libs/foo bar", Hash: lib},
+		{Path: "nested/deep", Hash: sha2},
+		{Path: "vendor/util", Hash: util},
+	}
+	if len(got) != len(want) {
+		t.Fatalf("gitlinks = %#v", got)
+	}
+	for i := range want {
+		if got[i] != want[i] {
+			t.Fatalf("gitlink %d = %#v, want %#v", i, got[i], want[i])
+		}
+	}
+	if len(parseGitlinks("")) != 0 {
+		t.Fatal("empty output should have no submodules")
+	}
+}
+
 func edgeLock(edges []Edge, from, to int) bool {
 	for _, e := range edges {
 		if e.From == from && e.To == to && e.LockTop {

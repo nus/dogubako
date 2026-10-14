@@ -1036,6 +1036,30 @@ func commitEmptyAt(t *testing.T, dir, msg, when string) {
 	}
 }
 
+func TestSnapshotListsSubmodules(t *testing.T) {
+	parent := initRepo(t)
+	writeCommit(t, parent, "README", "parent")
+	const hash = "0123456789abcdef0123456789abcdef01234567"
+	gitAt(t, parent, "update-index", "--add", "--cacheinfo", "160000,"+hash+",vendor/lib")
+
+	ctx, cancel := context.WithTimeout(context.Background(), 15*time.Second)
+	defer cancel()
+	repo, err := Open(ctx, parent)
+	if err != nil {
+		t.Fatal(err)
+	}
+	snap, err := repo.Snapshot(ctx, SnapshotOpts{})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(snap.Submodules) != 1 || snap.Submodules[0].Path != "vendor/lib" || snap.Submodules[0].Hash != hash {
+		t.Fatalf("submodules = %#v", snap.Submodules)
+	}
+	if !strings.Contains(snap.RefDigest, "gitlink "+hash+" vendor/lib") {
+		t.Fatalf("digest = %q", snap.RefDigest)
+	}
+}
+
 func commitHasDecoration(cs []Commit, kind, name string) bool {
 	for _, c := range cs {
 		if hasDecoration(c.Decorations, kind, name) {

@@ -54,6 +54,24 @@ func TestGitCmdRemote(t *testing.T) {
 	}
 }
 
+func TestLocChild(t *testing.T) {
+	base := Loc{Dir: "/work/app"}
+	got, ok := base.Child("vendor/lib")
+	if !ok || got.Dir != "/work/app/vendor/lib" || got.IsRemote() {
+		t.Fatalf("local = %#v ok=%v", got, ok)
+	}
+	remote := Loc{Dest: "dev", Port: "22", Dir: "/work/app"}
+	got, ok = remote.Child("vendor/lib")
+	if !ok || got != (Loc{Dest: "dev", Port: "22", Dir: "/work/app/vendor/lib"}) {
+		t.Fatalf("remote = %#v ok=%v", got, ok)
+	}
+	for _, rel := range []string{"", "../x", "/etc", "foo/../../x", ".."} {
+		if _, ok := base.Child(rel); ok {
+			t.Fatalf("accepted %q", rel)
+		}
+	}
+}
+
 func TestLocDisplay(t *testing.T) {
 	if got := (Loc{Dest: "dev", Dir: "/work"}).Display(); got != "dev:/work" {
 		t.Fatalf("display = %q", got)

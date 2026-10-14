@@ -2,6 +2,18 @@ package app
 
 import "testing"
 
+func TestGitTreeItemsShowsLeafNote(t *testing.T) {
+	items := gitTreeItems([]gitTreeEntry{
+		{Name: "vendor/lib", Value: "submodule:vendor/lib", Note: "0123456"},
+	}, nil)
+	if len(items) != 2 {
+		t.Fatalf("len = %d", len(items))
+	}
+	if items[1].Text != "lib  0123456" || items[1].Value != "submodule:vendor/lib" || items[1].Unselectable {
+		t.Fatalf("leaf = %+v", items[1])
+	}
+}
+
 func TestGitTreeItemsNestsSlashes(t *testing.T) {
 	items := gitTreeItems([]gitTreeEntry{
 		{Name: "main", Value: "local:main", Current: true},
