@@ -407,6 +407,41 @@ func TestParseGitlinks(t *testing.T) {
 	}
 }
 
+func TestParseWorktrees(t *testing.T) {
+	out := "" +
+		"worktree /repo\n" +
+		"HEAD abcdef\n" +
+		"branch refs/heads/main\n" +
+		"\n" +
+		"worktree /repo-feature\n" +
+		"HEAD 1234567890\n" +
+		"detached\n" +
+		"\n" +
+		"worktree /repo-fix\n" +
+		"HEAD fff\n" +
+		"branch refs/heads/fix\n"
+	got := parseWorktrees(out)
+	if len(got) != 3 {
+		t.Fatalf("len = %d", len(got))
+	}
+	if got[0].Path != "/repo" || got[0].Branch != "main" || got[0].Detached {
+		t.Fatalf("main = %+v", got[0])
+	}
+	if got[1].Path != "/repo-feature" || !got[1].Detached || got[1].Branch != "" || got[1].Head != "1234567890" {
+		t.Fatalf("detached = %+v", got[1])
+	}
+	others := filterCurrentWorktree(got, "/repo", true)
+	if len(others) != 2 || others[0].Path != "/repo-feature" || others[1].Branch != "fix" {
+		t.Fatalf("others = %+v", others)
+	}
+	if WorktreeKey(others) == WorktreeKey(got) {
+		t.Fatal("digest should change when the current tree is omitted")
+	}
+	if len(filterCurrentWorktree(got, "/missing", false)) != 3 {
+		t.Fatal("unknown current should keep every tree")
+	}
+}
+
 func edgeLock(edges []Edge, from, to int) bool {
 	for _, e := range edges {
 		if e.From == from && e.To == to && e.LockTop {

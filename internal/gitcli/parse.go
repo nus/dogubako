@@ -66,6 +66,71 @@ type Submodule struct {
 	Hash string
 }
 
+// Worktree is a linked working tree other than the one a snapshot was read from.
+type Worktree struct {
+	Path     string
+	Branch   string // short name; empty when detached
+	Head     string
+	Detached bool
+}
+
+// parseWorktrees reads `git worktree list --porcelain`.
+// Blank lines and unknown keys are ignored. The current tree is included.
+func parseWorktrees(out string) []Worktree {
+	var trees []Worktree
+	var cur *Worktree
+	flush := func() {
+		if cur == nil || cur.Path == "" {
+			cur = nil
+			return
+		}
+		trees = append(trees, *cur)
+		cur = nil
+	}
+	for _, line := range splitLines(out) {
+		if strings.TrimSpace(line) == "" {
+			continue
+		}
+		key, val, _ := strings.Cut(line, " ")
+		switch key {
+		case "worktree":
+			flush()
+			cur = &Worktree{Path: val}
+		case "HEAD":
+			if cur != nil {
+				cur.Head = val
+			}
+		case "branch":
+			if cur != nil {
+				cur.Branch = strings.TrimPrefix(val, "refs/heads/")
+			}
+		case "detached":
+			if cur != nil {
+				cur.Detached = true
+			}
+		}
+	}
+	flush()
+	return trees
+}
+
+// WorktreeKey is a stable digest of linked worktrees for polling.
+func WorktreeKey(trees []Worktree) string {
+	var b strings.Builder
+	for _, wt := range trees {
+		b.WriteString(wt.Path)
+		b.WriteByte(0)
+		b.WriteString(wt.Branch)
+		b.WriteByte(0)
+		b.WriteString(wt.Head)
+		if wt.Detached {
+			b.WriteString("\x00d")
+		}
+		b.WriteByte('\n')
+	}
+	return b.String()
+}
+
 // Status is porcelain v1 plus branch header.
 type Status struct {
 	Branch   string

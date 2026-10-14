@@ -97,8 +97,10 @@ type Snapshot struct {
 	RemoteBranches []Ref
 	Tags           []Ref
 	Submodules     []Submodule
-	Status         Status
-	RefDigest      string
+	// Worktrees are linked working trees other than this one.
+	Worktrees []Worktree
+	Status    Status
+	RefDigest string
 	// MoreCommits reports that older commits exist beyond Commits.
 	MoreCommits bool
 }
@@ -106,9 +108,10 @@ type Snapshot struct {
 // State is the part of a repository that the graph must follow.
 // It is cheaper than a full Snapshot and is safe to poll.
 type State struct {
-	Head   string
-	Refs   string
-	Status Status
+	Head      string
+	Refs      string
+	Status    Status
+	Worktrees string
 }
 
 func (s Snapshot) RefList() []Ref {
@@ -143,6 +146,10 @@ func (r *Repo) Snapshot(ctx context.Context, opts SnapshotOpts) (Snapshot, error
 	s.RemoteBranches = remoteBranches
 	s.Tags = tags
 	s.Submodules, err = r.submodules(ctx)
+	if err != nil {
+		return s, err
+	}
+	s.Worktrees, err = r.otherWorktrees(ctx)
 	if err != nil {
 		return s, err
 	}
@@ -216,7 +223,15 @@ func (r *Repo) State(ctx context.Context) (State, error) {
 		return State{}, err
 	}
 	st.Status, err = r.status(ctx)
-	return st, err
+	if err != nil {
+		return State{}, err
+	}
+	trees, err := r.otherWorktrees(ctx)
+	if err != nil {
+		return State{}, err
+	}
+	st.Worktrees = WorktreeKey(trees)
+	return st, nil
 }
 
 func (r *Repo) refDigest(ctx context.Context) (string, error) {
@@ -331,6 +346,43 @@ func (r *Repo) submodules(ctx context.Context) ([]Submodule, error) {
 		return nil, err
 	}
 	return parseGitlinks(out), nil
+}
+
+// otherWorktrees lists linked working trees except this one.
+func (r *Repo) otherWorktrees(ctx context.Context) ([]Worktree, error) {
+	if err := ctx.Err(); err != nil {
+		return nil, err
+	}
+	out, err := r.output(ctx, "worktree", "list", "--porcelain")
+	if err != nil {
+		return nil, err
+	}
+	return filterCurrentWorktree(parseWorktrees(out), r.Dir, r.IsRemote()), nil
+}
+
+// filterCurrentWorktree drops the working tree at current.
+func filterCurrentWorktree(trees []Worktree, current string, remote bool) []Worktree {
+	if len(trees) == 0 {
+		return nil
+	}
+	out := make([]Worktree, 0, len(trees)-1)
+	for _, wt := range trees {
+		if sameWorktree(wt.Path, current, remote) {
+			continue
+		}
+		out = append(out, wt)
+	}
+	if len(out) == 0 {
+		return nil
+	}
+	return out
+}
+
+func sameWorktree(a, b string, remote bool) bool {
+	if remote {
+		return path.Clean(a) == path.Clean(b)
+	}
+	return evalPath(a) == evalPath(b)
 }
 
 // ApplyWorkTree rebuilds the graph lanes from the commits already loaded,
