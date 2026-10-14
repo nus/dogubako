@@ -18,6 +18,9 @@ func TestGitNavIconKind(t *testing.T) {
 	if got := gitNavIconKind(false, "submodule:vendor/lib"); got != gitNavIconSubmodule {
 		t.Fatalf("submodule = %d", got)
 	}
+	if got := gitNavIconKind(false, "worktree:/tmp/feature"); got != gitNavIconWorktree {
+		t.Fatalf("worktree = %d", got)
+	}
 }
 
 func TestGitNavLeadAlignsLeafWithFolder(t *testing.T) {

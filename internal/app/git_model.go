@@ -371,7 +371,7 @@ func (m *gitSession) drainStatus() {
 // A new commit, checkout, or branch edit reloads the graph.
 // A worktree edit updates the file list and the uncommitted node.
 func (m *gitSession) applyWatched(st gitcli.State) {
-	if st.Head != m.snap.HEAD || st.Refs != m.snap.RefDigest {
+	if st.Head != m.snap.HEAD || st.Refs != m.snap.RefDigest || st.Worktrees != gitcli.WorktreeKey(m.snap.Worktrees) {
 		m.refresh()
 		return
 	}

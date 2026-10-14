@@ -11,6 +11,7 @@ import (
 
 	"github.com/guigui-gui/guigui"
 	"github.com/guigui-gui/guigui/basicwidget"
+	"github.com/guigui-gui/guigui/basicwidget/basicwidgetdraw"
 )
 
 type gitNavIcon int
@@ -21,6 +22,7 @@ const (
 	gitNavIconBranch
 	gitNavIconTag
 	gitNavIconSubmodule
+	gitNavIconWorktree
 )
 
 // gitNavIconKind is the glyph for a sidebar row. Folders use a folder,
@@ -35,6 +37,8 @@ func gitNavIconKind(folder bool, value string) gitNavIcon {
 		return gitNavIconTag
 	case strings.HasPrefix(value, "submodule:"):
 		return gitNavIconSubmodule
+	case strings.HasPrefix(value, "worktree:"):
+		return gitNavIconWorktree
 	case strings.HasPrefix(value, "local:"), strings.HasPrefix(value, "remote:"):
 		return gitNavIconBranch
 	default:
@@ -168,7 +172,7 @@ func (r *gitNavRow) Draw(context *guigui.Context, widgetBounds *guigui.WidgetBou
 		drawBranchGlyph(dst, box)
 	case gitNavIconTag:
 		drawTagGlyph(dst, box, clr)
-	case gitNavIconSubmodule:
+	case gitNavIconSubmodule, gitNavIconWorktree:
 		drawSubmoduleGlyph(dst, box)
 	}
 }
@@ -415,11 +419,14 @@ type gitSectionHead struct {
 	mark  basicwidget.Text
 	style basicwidget.TextStyle
 
+	title     string
 	collapsed bool
+	bar       bool
 	onToggle  func()
 }
 
 func (h *gitSectionHead) Set(text string, collapsed bool, onToggle func()) {
+	h.title = text
 	h.collapsed = collapsed
 	h.onToggle = onToggle
 	h.style.SetBold(true)
@@ -467,8 +474,18 @@ func (h *gitSectionHead) Layout(context *guigui.Context, widgetBounds *guigui.Wi
 	layouter.LayoutWidget(&h.label, label)
 }
 
+// mirror copies a section title onto the sticky header and paints it as a bar.
+func (h *gitSectionHead) mirror(src *gitSectionHead) {
+	h.Set(src.title, src.collapsed, src.onToggle)
+	h.bar = true
+}
+
 func (h *gitSectionHead) Draw(context *guigui.Context, widgetBounds *guigui.WidgetBounds, dst *ebiten.Image) {
 	b := widgetBounds.Bounds()
+	if h.bar {
+		fillRect(dst, b, basicwidgetdraw.BackgroundSecondaryColor(context.ColorMode()))
+		fillRect(dst, image.Rect(b.Min.X, b.Max.Y-1, b.Max.X, b.Max.Y), gitHistSplitColor(context.ColorMode()))
+	}
 	if image.Pt(ebiten.CursorPosition()).In(b) {
 		fillRect(dst, b, gitTabHoverColor(context.ColorMode()))
 	}

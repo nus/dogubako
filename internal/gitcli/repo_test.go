@@ -1036,6 +1036,49 @@ func commitEmptyAt(t *testing.T, dir, msg, when string) {
 	}
 }
 
+func TestSnapshotListsOtherWorktrees(t *testing.T) {
+	dir := initRepo(t)
+	writeCommit(t, dir, "README", "root")
+	other := filepath.Join(t.TempDir(), "feature")
+	gitAt(t, dir, "worktree", "add", "-b", "feature", other)
+
+	ctx, cancel := context.WithTimeout(context.Background(), 15*time.Second)
+	defer cancel()
+	repo, err := Open(ctx, dir)
+	if err != nil {
+		t.Fatal(err)
+	}
+	snap, err := repo.Snapshot(ctx, SnapshotOpts{})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(snap.Worktrees) != 1 || snap.Worktrees[0].Branch != "feature" {
+		t.Fatalf("worktrees = %+v", snap.Worktrees)
+	}
+	if !sameWorktree(snap.Worktrees[0].Path, other, false) {
+		t.Fatalf("path = %q want %q", snap.Worktrees[0].Path, other)
+	}
+	st, err := repo.State(ctx)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if st.Worktrees != WorktreeKey(snap.Worktrees) {
+		t.Fatalf("state digest = %q snap %q", st.Worktrees, WorktreeKey(snap.Worktrees))
+	}
+
+	linked, err := Open(ctx, other)
+	if err != nil {
+		t.Fatal(err)
+	}
+	fromOther, err := linked.Snapshot(ctx, SnapshotOpts{})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(fromOther.Worktrees) != 1 || fromOther.Worktrees[0].Branch != "main" {
+		t.Fatalf("from feature = %+v", fromOther.Worktrees)
+	}
+}
+
 func TestSnapshotListsSubmodules(t *testing.T) {
 	parent := initRepo(t)
 	writeCommit(t, parent, "README", "parent")
