@@ -40,6 +40,8 @@ type gitOpResult struct {
 	errKey     i18n.Key
 	err        error
 	clearDraft bool
+	// openPath is a repository to open after the operation succeeds.
+	openPath string
 }
 
 type gitDetailResult struct {
@@ -545,6 +547,9 @@ func (m *gitSession) drainOp() {
 			}
 			m.SetStatus(res.okKey)
 			m.reload()
+			if res.openPath != "" && m.owner != nil {
+				m.owner.Open(res.openPath)
+			}
 		}
 		guigui.RequestRebuild()
 	default:
@@ -816,6 +821,59 @@ func (m *gitSession) DoAmend() {
 	m.startOp(i18n.StatusGitAmendOk, i18n.StatusGitAmendFailed, func(ctx context.Context, repo *gitcli.Repo) error {
 		return repo.Commit(ctx, msg, stage, true)
 	})
+}
+
+// OpenSubmodule opens rel in a tab. An uninitialized submodule is checked
+// out first. Opening the path before that would resolve to this repository
+// and the new tab would be closed as a duplicate.
+func (m *GitModel) OpenSubmodule(rel string) {
+	m.ensure()
+	s := m.gitSession
+	if s == nil || !s.HasRepo() || s.Busy() {
+		return
+	}
+	child, ok := gitcli.ParseLoc(s.path).Child(rel)
+	if !ok {
+		return
+	}
+	if !s.repo.IsRemote() {
+		if _, err := os.Stat(filepath.Join(child.Dir, ".git")); err == nil {
+			m.Open(child.Key())
+			return
+		}
+	}
+	repo := s.repo
+	key := child.Key()
+	s.SetStatus(i18n.StatusGitSubmoduleInit)
+	ch := make(chan gitOpResult, 1)
+	s.pendingOp = ch
+	s.generation++
+	guigui.RequestRebuild()
+	go func() {
+		ctx, cancel := context.WithTimeout(context.Background(), 10*time.Minute)
+		defer cancel()
+		ready, err := repo.OwnWorkTree(ctx, rel)
+		if err != nil {
+			ch <- gitOpResult{errKey: i18n.StatusGitSubmoduleErr, err: err}
+			return
+		}
+		if !ready {
+			if err := repo.InitSubmodule(ctx, rel); err != nil {
+				ch <- gitOpResult{errKey: i18n.StatusGitSubmoduleErr, err: err}
+				return
+			}
+			ready, err = repo.OwnWorkTree(ctx, rel)
+			if err != nil {
+				ch <- gitOpResult{errKey: i18n.StatusGitSubmoduleErr, err: err}
+				return
+			}
+			if !ready {
+				ch <- gitOpResult{errKey: i18n.StatusGitSubmoduleErr, err: fmt.Errorf("not checked out")}
+				return
+			}
+		}
+		ch <- gitOpResult{okKey: i18n.StatusGitSubmoduleReady, openPath: key}
+	}()
 }
 
 func (m *gitSession) DoFetch() {

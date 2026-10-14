@@ -392,6 +392,71 @@ func graphHeads(snap gitcli.Snapshot) string {
 	return strings.Join(parts, " ")
 }
 
+func TestOpenSubmoduleKeepsTab(t *testing.T) {
+	requireGitBin(t)
+	cfg := t.TempDir()
+	restore := overrideSidebarConfigDir(func() (string, error) { return cfg, nil })
+	t.Cleanup(restore)
+
+	remote := initRepo(t, "lib")
+	parent := initRepo(t, "app")
+	gitRun(t, parent, "-c", "protocol.file.allow=always", "submodule", "add", "--", remote, "vendor/lib")
+	gitRun(t, parent, "commit", "-m", "add submodule")
+
+	var m GitModel
+	m.Open(parent)
+	waitGit(t, &m)
+	if len(m.Snapshot().Submodules) != 1 || m.Snapshot().Submodules[0].Path != "vendor/lib" {
+		t.Fatalf("submodules = %#v", m.Snapshot().Submodules)
+	}
+	m.OpenSubmodule(m.Snapshot().Submodules[0].Path)
+	waitGit(t, &m)
+	if m.TabCount() != 2 {
+		t.Fatalf("tabs = %d path = %s parent = %s", m.TabCount(), m.Path(), canonicalPath(parent))
+	}
+	if canonicalPath(m.Path()) == canonicalPath(parent) {
+		t.Fatalf("active path collapsed to parent %s", m.Path())
+	}
+	if !strings.HasSuffix(filepath.ToSlash(m.Path()), "vendor/lib") {
+		t.Fatalf("active path = %s", m.Path())
+	}
+}
+
+func TestOpenUninitializedSubmoduleKeepsTab(t *testing.T) {
+	requireGitBin(t)
+	t.Setenv("GIT_CONFIG_COUNT", "1")
+	t.Setenv("GIT_CONFIG_KEY_0", "protocol.file.allow")
+	t.Setenv("GIT_CONFIG_VALUE_0", "always")
+
+	cfg := t.TempDir()
+	restore := overrideSidebarConfigDir(func() (string, error) { return cfg, nil })
+	t.Cleanup(restore)
+
+	lib := initRepo(t, "lib")
+	parent := initRepo(t, "app")
+	gitRun(t, parent, "config", "-f", ".gitmodules", "submodule.lib.path", "vendor/lib")
+	gitRun(t, parent, "config", "-f", ".gitmodules", "submodule.lib.url", lib)
+	gitRun(t, parent, "add", ".gitmodules")
+	hash := strings.TrimSpace(gitOutput(t, lib, "rev-parse", "HEAD"))
+	gitRun(t, parent, "update-index", "--add", "--cacheinfo", "160000,"+hash+",vendor/lib")
+	gitRun(t, parent, "commit", "-m", "add submodule")
+	if err := os.MkdirAll(filepath.Join(parent, "vendor", "lib"), 0o755); err != nil {
+		t.Fatal(err)
+	}
+
+	var m GitModel
+	m.Open(parent)
+	waitGit(t, &m)
+	m.OpenSubmodule("vendor/lib")
+	waitGit(t, &m)
+	if m.TabCount() != 2 {
+		t.Fatalf("tabs = %d path = %s err = %s", m.TabCount(), m.Path(), m.StatusText(i18n.EN))
+	}
+	if !strings.HasSuffix(filepath.ToSlash(m.Path()), "vendor/lib") {
+		t.Fatalf("active path = %s", m.Path())
+	}
+}
+
 func TestGitTabsKeepRepos(t *testing.T) {
 	requireGitBin(t)
 	dirA := initRepo(t, "a")
@@ -763,6 +828,11 @@ func requireGitBin(t *testing.T) {
 
 func gitRun(t *testing.T, dir string, args ...string) {
 	t.Helper()
+	gitOutput(t, dir, args...)
+}
+
+func gitOutput(t *testing.T, dir string, args ...string) string {
+	t.Helper()
 	cmd := exec.Command("git", args...)
 	cmd.Dir = dir
 	cmd.Env = append(os.Environ(),
@@ -777,6 +847,7 @@ func gitRun(t *testing.T, dir string, args ...string) {
 	if err != nil {
 		t.Fatalf("git %s: %v\n%s", strings.Join(args, " "), err, out)
 	}
+	return strings.TrimSpace(string(out))
 }
 
 func TestHighlightCommitLeavesDetail(t *testing.T) {

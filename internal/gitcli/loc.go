@@ -3,6 +3,7 @@ package gitcli
 import (
 	"net/url"
 	"path"
+	"path/filepath"
 	"strings"
 )
 
@@ -38,6 +39,26 @@ func (l Loc) Display() string {
 		head += ":" + l.Port
 	}
 	return head + ":" + l.Dir
+}
+
+// Child is a relative path inside this working tree.
+// rel must stay inside the tree.
+func (l Loc) Child(rel string) (Loc, bool) {
+	rel = strings.TrimSpace(filepath.ToSlash(rel))
+	if rel == "" || strings.HasPrefix(rel, "/") {
+		return Loc{}, false
+	}
+	cleaned := path.Clean(rel)
+	if cleaned == "." || cleaned == ".." || strings.HasPrefix(cleaned, "../") {
+		return Loc{}, false
+	}
+	out := l
+	if l.IsRemote() {
+		out.Dir = path.Join(path.Clean(l.Dir), cleaned)
+		return out, true
+	}
+	out.Dir = filepath.Join(l.Dir, filepath.FromSlash(cleaned))
+	return out, true
 }
 
 // ParseLoc decodes a tab path. Paths without the ssh: prefix are local.

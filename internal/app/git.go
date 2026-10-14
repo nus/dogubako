@@ -45,18 +45,21 @@ type GitTool struct {
 	workRow        gitWorkspaceRow
 	histRow        gitWorkspaceRow
 
-	branchItems  []basicwidget.ListItem[string]
-	branchFold   map[string]bool
-	branchClosed bool
-	tagItems     []basicwidget.ListItem[string]
-	showTags     bool
-	tagClosed    bool
-	tagClicks    gitClickCount
-	tagClick     string
-	remoteItems  []basicwidget.ListItem[string]
-	remoteFold   map[string]bool
-	remoteClosed bool
-	navSel       string
+	branchItems     []basicwidget.ListItem[string]
+	branchFold      map[string]bool
+	branchClosed    bool
+	tagItems        []basicwidget.ListItem[string]
+	showTags        bool
+	tagClosed       bool
+	tagClicks       gitClickCount
+	tagClick        string
+	remoteItems     []basicwidget.ListItem[string]
+	remoteFold      map[string]bool
+	remoteClosed    bool
+	submoduleItems  []basicwidget.ListItem[string]
+	submoduleFold   map[string]bool
+	submoduleClosed bool
+	navSel          string
 
 	commitList     basicwidget.List[string]
 	commitRows     guigui.WidgetSlice[*gitCommitRow]
@@ -376,6 +379,23 @@ func (t *GitTool) Build(context *guigui.Context, adder *guigui.ChildAdder) error
 		t.remoteItems[i].TextStyle = monoItem
 	}
 
+	subEntries := make([]gitTreeEntry, 0, len(snap.Submodules))
+	for _, sm := range snap.Submodules {
+		note := sm.Hash
+		if len(note) >= 7 {
+			note = note[:7]
+		}
+		subEntries = append(subEntries, gitTreeEntry{
+			Name:  sm.Path,
+			Value: "submodule:" + sm.Path,
+			Note:  note,
+		})
+	}
+	t.submoduleItems = gitTreeItems(subEntries, t.submoduleFold)
+	for i := range t.submoduleItems {
+		t.submoduleItems[i].TextStyle = monoItem
+	}
+
 	rows := snap.Graph
 	t.showEmpty = !has || len(rows) == 0
 	t.graphLanes = 0
@@ -648,12 +668,21 @@ func (t *GitTool) selectRef(model *GitModel, value string) {
 		}
 		return
 	}
+	if kind == "submodule" {
+		t.openSubmodule(model, name)
+		return
+	}
 	for _, ref := range snap.RemoteBranches {
 		if ref.Name == name {
 			t.revealCommit(model, ref.Hash)
 			return
 		}
 	}
+}
+
+// openSubmodule opens the submodule working tree in a tab.
+func (t *GitTool) openSubmodule(model *GitModel, rel string) {
+	model.OpenSubmodule(rel)
 }
 
 // revealCommit shows History and scrolls the graph to hash.

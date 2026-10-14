@@ -9,10 +9,12 @@ import (
 const gitTreeFolderPrefix = "folder:"
 
 // gitTreeEntry is one branch placed in a slash-separated tree.
+// Note is extra text shown on a leaf, such as a submodule commit.
 type gitTreeEntry struct {
 	Name    string
 	Value   string
 	Current bool
+	Note    string
 }
 
 type gitTreeNode struct {
@@ -20,6 +22,7 @@ type gitTreeNode struct {
 	path    string
 	value   string
 	current bool
+	note    string
 	kids    []*gitTreeNode
 	index   map[string]int
 }
@@ -68,6 +71,7 @@ func gitTreeItems(entries []gitTreeEntry, folded map[string]bool) []basicwidget.
 		}
 		node.value = e.Value
 		node.current = e.Current
+		node.note = e.Note
 	}
 
 	items := make([]basicwidget.ListItem[string], 0, len(entries))
@@ -78,6 +82,8 @@ func gitTreeItems(entries []gitTreeEntry, folded map[string]bool) []basicwidget.
 			text := c.seg
 			if c.current {
 				text += "  HEAD"
+			} else if !dir && c.note != "" {
+				text += "  " + c.note
 			}
 			value := c.value
 			if dir {

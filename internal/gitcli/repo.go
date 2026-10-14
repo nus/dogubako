@@ -84,7 +84,7 @@ type SnapshotOpts struct {
 	MaxCommits    int
 }
 
-// Snapshot is the graph, branches, remotes, and working-tree status.
+// Snapshot is the graph, branches, remotes, submodules, and working-tree status.
 type Snapshot struct {
 	HEAD           string
 	Branch         string
@@ -96,6 +96,7 @@ type Snapshot struct {
 	Remotes        []Remote
 	RemoteBranches []Ref
 	Tags           []Ref
+	Submodules     []Submodule
 	Status         Status
 	RefDigest      string
 	// MoreCommits reports that older commits exist beyond Commits.
@@ -141,6 +142,10 @@ func (r *Repo) Snapshot(ctx context.Context, opts SnapshotOpts) (Snapshot, error
 	s.Locals = locals
 	s.RemoteBranches = remoteBranches
 	s.Tags = tags
+	s.Submodules, err = r.submodules(ctx)
+	if err != nil {
+		return s, err
+	}
 
 	max := opts.MaxCommits
 	if max <= 0 {
@@ -236,8 +241,96 @@ func (r *Repo) refDigest(ctx context.Context) (string, error) {
 	} else if err := ctx.Err(); err != nil {
 		return "", err
 	}
+	links, err := r.output(ctx, "ls-files", "-z", "-s")
+	if err != nil {
+		return "", err
+	}
+	for _, sm := range parseGitlinks(links) {
+		lines = append(lines, "gitlink "+sm.Hash+" "+sm.Path)
+	}
 	sort.Strings(lines)
 	return strings.Join(lines, "\n"), nil
+}
+
+// OwnWorkTree reports whether rel is a git work tree rooted at that path.
+// A folder inside this repository, including an uninitialized submodule, is false.
+func (r *Repo) OwnWorkTree(ctx context.Context, rel string) (bool, error) {
+	child, ok := r.loc().Child(rel)
+	if !ok {
+		return false, fmt.Errorf("invalid submodule path")
+	}
+	if err := ctx.Err(); err != nil {
+		return false, err
+	}
+	top, err := gitOutput(ctx, child, "rev-parse", "--show-toplevel")
+	if err != nil {
+		if ctx.Err() != nil {
+			return false, ctx.Err()
+		}
+		return false, nil
+	}
+	top = strings.TrimSpace(top)
+	got := child
+	if r.IsRemote() {
+		got.Dir = path.Clean(top)
+	} else {
+		got.Dir = filepath.Clean(top)
+	}
+	return samePlace(child, got), nil
+}
+
+// InitSubmodule checks out rel at the commit recorded by this repository.
+func (r *Repo) InitSubmodule(ctx context.Context, rel string) error {
+	if err := ctx.Err(); err != nil {
+		return err
+	}
+	cleaned, ok := cleanSubmodulePath(rel)
+	if !ok {
+		return fmt.Errorf("invalid submodule path")
+	}
+	return r.run(ctx, "submodule", "update", "--init", "--", cleaned)
+}
+
+func cleanSubmodulePath(rel string) (string, bool) {
+	rel = strings.TrimSpace(filepath.ToSlash(rel))
+	if rel == "" || strings.HasPrefix(rel, "/") {
+		return "", false
+	}
+	cleaned := path.Clean(rel)
+	if cleaned == "." || cleaned == ".." || strings.HasPrefix(cleaned, "../") {
+		return "", false
+	}
+	return cleaned, true
+}
+
+func samePlace(a, b Loc) bool {
+	if a.Dest != b.Dest || a.Port != b.Port {
+		return false
+	}
+	if a.IsRemote() {
+		return path.Clean(a.Dir) == path.Clean(b.Dir)
+	}
+	return evalPath(a.Dir) == evalPath(b.Dir)
+}
+
+func evalPath(p string) string {
+	p = filepath.Clean(p)
+	resolved, err := filepath.EvalSymlinks(p)
+	if err != nil || resolved == "" {
+		return p
+	}
+	return filepath.Clean(resolved)
+}
+
+func (r *Repo) submodules(ctx context.Context) ([]Submodule, error) {
+	if err := ctx.Err(); err != nil {
+		return nil, err
+	}
+	out, err := r.output(ctx, "ls-files", "-z", "-s")
+	if err != nil {
+		return nil, err
+	}
+	return parseGitlinks(out), nil
 }
 
 // ApplyWorkTree rebuilds the graph lanes from the commits already loaded,

@@ -155,6 +155,7 @@ const (
 	GitUncommitted      Key = "git.uncommitted"
 	GitAheadBehind      Key = "git.ahead_behind"
 	GitRemotes          Key = "git.remotes"
+	GitSubmodules       Key = "git.submodules"
 	GitAuthor           Key = "git.author"
 	GitRefs             Key = "git.refs"
 	GitSHA              Key = "git.sha"
@@ -265,6 +266,9 @@ const (
 	StatusGitLoading        Key = "status.git_loading"
 	StatusGitOpened         Key = "status.git_opened"
 	StatusGitOpenFailed     Key = "status.git_open_failed"
+	StatusGitSubmoduleInit  Key = "status.git_submodule_init"
+	StatusGitSubmoduleReady Key = "status.git_submodule_ready"
+	StatusGitSubmoduleErr   Key = "status.git_submodule_err"
 	StatusGitWorking        Key = "status.git_working"
 	StatusGitOpFailed       Key = "status.git_op_failed"
 	StatusGitCommitOk       Key = "status.git_commit_ok"
@@ -462,6 +466,7 @@ var catalogs = map[Lang]map[Key]string{
 		GitUncommitted:                 "未コミットの変更",
 		GitAheadBehind:                 "ahead %d / behind %d",
 		GitRemotes:                     "リモート",
+		GitSubmodules:                  "サブモジュール",
 		GitAuthor:                      "作者",
 		GitRefs:                        "参照",
 		GitSHA:                         "SHA",
@@ -559,6 +564,9 @@ var catalogs = map[Lang]map[Key]string{
 		StatusGitLoading:               "読み込んでいます…",
 		StatusGitOpened:                "%s を開きました（コミット %d 件）",
 		StatusGitOpenFailed:            "リポジトリを開けません: %v",
+		StatusGitSubmoduleInit:         "サブモジュールを準備しています…",
+		StatusGitSubmoduleReady:        "サブモジュールを開きました",
+		StatusGitSubmoduleErr:          "サブモジュールを準備できません: %v",
 		StatusGitWorking:               "Git を実行しています…",
 		StatusGitOpFailed:              "Git の操作に失敗しました: %v",
 		StatusGitCommitOk:              "コミットしました",
@@ -754,6 +762,7 @@ var catalogs = map[Lang]map[Key]string{
 		GitUncommitted:                 "Uncommitted changes",
 		GitAheadBehind:                 "ahead %d / behind %d",
 		GitRemotes:                     "Remotes",
+		GitSubmodules:                  "Submodules",
 		GitAuthor:                      "Author",
 		GitRefs:                        "Refs",
 		GitSHA:                         "SHA",
@@ -851,6 +860,9 @@ var catalogs = map[Lang]map[Key]string{
 		StatusGitLoading:               "Loading…",
 		StatusGitOpened:                "Opened %s (%d commits)",
 		StatusGitOpenFailed:            "Could not open the repository: %v",
+		StatusGitSubmoduleInit:         "Preparing the submodule…",
+		StatusGitSubmoduleReady:        "Opened the submodule",
+		StatusGitSubmoduleErr:          "Could not prepare the submodule: %v",
 		StatusGitWorking:               "Running git…",
 		StatusGitOpFailed:              "Git operation failed: %v",
 		StatusGitCommitOk:              "Committed",
