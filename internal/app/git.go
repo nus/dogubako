@@ -60,6 +60,8 @@ type GitTool struct {
 	submoduleFold   map[string]bool
 	submoduleClosed bool
 	navSel          string
+	// refFilter narrows branches, tags, and remote branches in the sidebar.
+	refFilter string
 
 	commitList     basicwidget.List[string]
 	commitRows     guigui.WidgetSlice[*gitCommitRow]
@@ -181,6 +183,7 @@ func (t *GitTool) WriteStateKey(context *guigui.Context, w *guigui.StateKeyWrite
 	w.WriteUint64(m.Generation())
 	w.WriteString(m.Path())
 	w.WriteString(m.Selected())
+	w.WriteString(t.refFilter)
 	w.WriteBool(m.Busy())
 	w.WriteBool(m.HistoryLoading())
 	w.WriteBool(m.HasMoreHistory())
@@ -734,8 +737,9 @@ func (t *GitTool) Layout(context *guigui.Context, widgetBounds *guigui.WidgetBou
 		pref = int(t.sideUnits*float64(u) + 0.5)
 	}
 	sideW := gitSideWidth(inner.Dx(), splitW, pref, 6*u, 16*u)
-	sideR := image.Rect(inner.Min.X, inner.Min.Y, inner.Min.X+sideW, inner.Max.Y)
-	splitR := image.Rect(sideR.Max.X, inner.Min.Y, sideR.Max.X+splitW, inner.Max.Y)
+	// The filter field sits on the bottom edge. The right column keeps its margin.
+	sideR := image.Rect(inner.Min.X, inner.Min.Y, inner.Min.X+sideW, rest.Max.Y)
+	splitR := image.Rect(sideR.Max.X, inner.Min.Y, sideR.Max.X+splitW, rest.Max.Y)
 	rightR := image.Rect(splitR.Max.X, inner.Min.Y, inner.Max.X, inner.Max.Y)
 	layouter.LayoutWidget(&t.sidePane, sideR)
 	layouter.LayoutWidget(&t.sideSplit, splitR)

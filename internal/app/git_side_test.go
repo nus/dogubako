@@ -1,7 +1,10 @@
 package app
 
 import (
+	"image"
 	"testing"
+
+	"github.com/guigui-gui/guigui/basicwidget"
 
 	"github.com/nus/dogubako/internal/gitcli"
 )
@@ -60,6 +63,87 @@ func TestGitStickyScrollTarget(t *testing.T) {
 	}
 	if got := gitStickyScrollTarget(10, 3, h); got != 0 {
 		t.Fatalf("clamp = %d", got)
+	}
+}
+
+func TestGitSideRefLists(t *testing.T) {
+	tool := &GitTool{
+		branchClosed: true,
+		showTags:     true,
+		branchItems: gitTreeItems([]gitTreeEntry{
+			{Name: "main", Value: "local:main"},
+			{Name: "feature/list", Value: "local:feature/list"},
+		}, nil),
+		tagItems: []basicwidget.ListItem[string]{
+			{Text: "v1", Value: "tag:v1"},
+		},
+		remoteItems: gitTreeItems([]gitTreeEntry{
+			{Name: "origin/main", Value: "remote:origin/main"},
+		}, nil),
+		submoduleItems: gitTreeItems([]gitTreeEntry{
+			{Name: "vendor/lib", Value: "submodule:vendor/lib"},
+			{Name: "extras/tool", Value: "submodule:extras/tool"},
+		}, nil),
+	}
+	closed := gitSideRefLists(tool)
+	if !closed.branchHead || closed.branchOpen || len(closed.branch) != 0 {
+		t.Fatalf("closed branches = %+v", closed)
+	}
+	if !closed.tagHead || !closed.remoteHead || !closed.subHead {
+		t.Fatalf("other sections = %+v", closed)
+	}
+	if closed.stickyCount() != 4 {
+		t.Fatalf("sticky = %d", closed.stickyCount())
+	}
+
+	tool.refFilter = "list"
+	filtered := gitSideRefLists(tool)
+	if !filtered.branchHead || !filtered.branchOpen {
+		t.Fatalf("filter opens matches = %+v", filtered)
+	}
+	if len(filtered.branch) != 2 || filtered.branch[1].Value != "local:feature/list" {
+		t.Fatalf("branch rows = %+v", filtered.branch)
+	}
+	if !filtered.tagHead || !filtered.remoteHead || !filtered.subHead {
+		t.Fatalf("empty sections hidden = %+v", filtered)
+	}
+	if len(filtered.tag) != 0 || len(filtered.remote) != 0 || len(filtered.sub) != 0 {
+		t.Fatalf("unmatched rows = %+v", filtered)
+	}
+	if filtered.stickyCount() != 4 {
+		t.Fatalf("filtered sticky = %d", filtered.stickyCount())
+	}
+
+	tool.refFilter = "lib"
+	got := gitSideRefLists(tool)
+	if len(got.sub) != 2 || got.sub[1].Value != "submodule:vendor/lib" {
+		t.Fatalf("submodule = %+v", got.sub)
+	}
+	if !got.branchHead || len(got.branch) != 0 {
+		t.Fatalf("empty branches = %+v", got)
+	}
+
+	tool.refFilter = "   "
+	if got := gitSideRefLists(tool); !got.tagHead || !got.remoteHead {
+		t.Fatalf("blank filter = %+v", got)
+	}
+}
+
+func TestGitSideFilterInputSitsOnBottom(t *testing.T) {
+	b := image.Rect(0, 0, 200, 48)
+	in := gitSideFilterInputBounds(b, 24)
+	if gap := b.Max.Y - in.Max.Y; gap != gitSideFilterBottom(24) {
+		t.Fatalf("bottom gap = %d, want %d", gap, gitSideFilterBottom(24))
+	}
+	if in.Min.Y <= b.Min.Y || in.Min.X <= b.Min.X || in.Max.X >= b.Max.X {
+		t.Fatalf("insets = %v", in)
+	}
+	box := gitFilterClearBounds(in, 24)
+	if !box.In(in) || box.Empty() {
+		t.Fatalf("clear = %v field = %v", box, in)
+	}
+	if box.Max.X > in.Max.X-2 {
+		t.Fatalf("clear touches the edge: %v", box)
 	}
 }
 

@@ -157,6 +157,7 @@ const (
 	GitRemotes          Key = "git.remotes"
 	GitSubmodules       Key = "git.submodules"
 	GitWorktrees        Key = "git.worktrees"
+	GitFilter           Key = "git.filter"
 	GitAuthor           Key = "git.author"
 	GitRefs             Key = "git.refs"
 	GitSHA              Key = "git.sha"
@@ -469,6 +470,7 @@ var catalogs = map[Lang]map[Key]string{
 		GitRemotes:                     "リモート",
 		GitSubmodules:                  "サブモジュール",
 		GitWorktrees:                   "別のワークツリー",
+		GitFilter:                      "フィルタ",
 		GitAuthor:                      "作者",
 		GitRefs:                        "参照",
 		GitSHA:                         "SHA",
@@ -766,6 +768,7 @@ var catalogs = map[Lang]map[Key]string{
 		GitRemotes:                     "Remotes",
 		GitSubmodules:                  "Submodules",
 		GitWorktrees:                   "Other Worktrees",
+		GitFilter:                      "Filter",
 		GitAuthor:                      "Author",
 		GitRefs:                        "Refs",
 		GitSHA:                         "SHA",
