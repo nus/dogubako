@@ -238,6 +238,15 @@ func (e *gitCommitExpand) Measure(context *guigui.Context, constraints guigui.Co
 	return image.Pt(w, h)
 }
 
+// Draw marks the bottom of the open commit so the next row stays separate.
+func (e *gitCommitExpand) Draw(context *guigui.Context, widgetBounds *guigui.WidgetBounds, dst *ebiten.Image) {
+	b := widgetBounds.Bounds()
+	if b.Empty() {
+		return
+	}
+	fillRect(dst, image.Rect(b.Min.X, b.Max.Y-1, b.Max.X, b.Max.Y), gitHistSplitColor(context.ColorMode()))
+}
+
 func configureExpandPanel(p *basicwidget.Panel) {
 	p.SetAutoBorder(false)
 	p.SetBorders(basicwidget.PanelBorders{})
