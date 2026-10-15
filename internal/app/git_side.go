@@ -8,9 +8,11 @@ import (
 
 	"github.com/hajimehoshi/ebiten/v2"
 	"github.com/hajimehoshi/ebiten/v2/inpututil"
+	"github.com/hajimehoshi/ebiten/v2/vector"
 
 	"github.com/guigui-gui/guigui"
 	"github.com/guigui-gui/guigui/basicwidget"
+	"github.com/guigui-gui/guigui/basicwidget/basicwidgetdraw"
 
 	"github.com/nus/dogubako/internal/gitcli"
 	"github.com/nus/dogubako/internal/i18n"
@@ -20,17 +22,20 @@ const gitSideDefaultUnits = 9
 
 // gitSidePane is the left column. The workspace, including other worktrees,
 // stays put. Branches, tags, remotes, and submodules scroll beneath it.
+// A filter box stays fixed along the bottom.
 type gitSidePane struct {
 	guigui.DefaultWidget
 
-	fixed gitSideFixed
-	panel basicwidget.Panel
-	body  gitSideBody
+	fixed  gitSideFixed
+	panel  basicwidget.Panel
+	body   gitSideBody
+	filter gitSideFilter
 }
 
 func (p *gitSidePane) setOwner(t *GitTool) {
 	p.fixed.owner = t
 	p.body.owner = t
+	p.filter.owner = t
 	p.body.scrollTo = func(contentY float64) {
 		p.panel.SetScrollOffset(0, -contentY)
 	}
@@ -40,6 +45,7 @@ func (p *gitSidePane) Build(context *guigui.Context, adder *guigui.ChildAdder) e
 	context.SetClipChildren(p, true)
 	adder.AddWidget(&p.fixed)
 	adder.AddWidget(&p.panel)
+	adder.AddWidget(&p.filter)
 	p.panel.SetBackgroundStyle(basicwidget.PanelBackgroundStyleNone)
 	p.panel.SetAutoBorder(false)
 	p.panel.SetBorders(basicwidget.PanelBorders{})
@@ -50,21 +56,35 @@ func (p *gitSidePane) Build(context *guigui.Context, adder *guigui.ChildAdder) e
 
 func (p *gitSidePane) Layout(context *guigui.Context, widgetBounds *guigui.WidgetBounds, layouter *guigui.ChildLayouter) {
 	bounds := widgetBounds.Bounds()
-	fixedH := p.fixed.Measure(context, guigui.FixedWidthConstraints(bounds.Dx())).Y
-	if fixedH > bounds.Dy() {
-		fixedH = bounds.Dy()
+	filterH := p.filter.Measure(context, guigui.FixedWidthConstraints(bounds.Dx())).Y
+	if filterH > bounds.Dy() {
+		filterH = bounds.Dy()
+	}
+	if filterH < 0 {
+		filterH = 0
+	}
+	filterB := image.Rect(bounds.Min.X, bounds.Max.Y-filterH, bounds.Max.X, bounds.Max.Y)
+	restMaxY := filterB.Min.Y
+	if restMaxY < bounds.Min.Y {
+		restMaxY = bounds.Min.Y
+	}
+	rest := image.Rect(bounds.Min.X, bounds.Min.Y, bounds.Max.X, restMaxY)
+	fixedH := p.fixed.Measure(context, guigui.FixedWidthConstraints(rest.Dx())).Y
+	if fixedH > rest.Dy() {
+		fixedH = rest.Dy()
 	}
 	if fixedH < 0 {
 		fixedH = 0
 	}
-	fixedB := image.Rect(bounds.Min.X, bounds.Min.Y, bounds.Max.X, bounds.Min.Y+fixedH)
-	scrollB := image.Rect(bounds.Min.X, fixedB.Max.Y, bounds.Max.X, bounds.Max.Y)
+	fixedB := image.Rect(rest.Min.X, rest.Min.Y, rest.Max.X, rest.Min.Y+fixedH)
+	scrollB := image.Rect(rest.Min.X, fixedB.Max.Y, rest.Max.X, rest.Max.Y)
 	if scrollB.Max.Y < scrollB.Min.Y {
 		scrollB.Max.Y = scrollB.Min.Y
 	}
 	p.body.viewport = scrollB
 	layouter.LayoutWidget(&p.fixed, fixedB)
 	layouter.LayoutWidget(&p.panel, scrollB)
+	layouter.LayoutWidget(&p.filter, filterB)
 }
 
 // gitSideWidth is the left column width. preferred is the dragged width;
@@ -223,6 +243,202 @@ func worktreeTitle(wt gitcli.Worktree) string {
 	return name + " (" + short + ")"
 }
 
+// gitSideFilter is the text box fixed to the bottom of the left column.
+// Its text keeps branches, tags, and remote branches that contain it.
+// A short gap sits under the field. A clear mark sits inside it.
+type gitSideFilter struct {
+	guigui.DefaultWidget
+
+	owner *GitTool
+	input basicwidget.TextInput
+	clear gitFilterClear
+}
+
+func (f *gitSideFilter) Build(context *guigui.Context, adder *guigui.ChildAdder) error {
+	context.SetClipChildren(f, true)
+	adder.AddWidget(&f.input)
+	var lang i18n.Lang
+	if v, ok := context.Env(f, EnvKeyModel); ok {
+		lang = v.(*Model).Lang()
+	}
+	f.input.SetPlaceholder(i18n.T(lang, i18n.GitFilter))
+	f.input.OnValueChanged(func(_ *guigui.Context, text string, _ bool) {
+		if f.owner == nil || f.owner.refFilter == text {
+			return
+		}
+		f.owner.refFilter = text
+		guigui.RequestRebuild()
+	})
+	f.clear.clear = f.clearText
+	if f.input.HasValue() {
+		adder.AddWidget(&f.clear)
+	}
+	return nil
+}
+
+func (f *gitSideFilter) clearText() {
+	f.input.ForceSetValue("")
+	if f.owner != nil {
+		f.owner.refFilter = ""
+	}
+	guigui.RequestRebuild()
+}
+
+func (f *gitSideFilter) Layout(context *guigui.Context, widgetBounds *guigui.WidgetBounds, layouter *guigui.ChildLayouter) {
+	u := basicwidget.UnitSize(context)
+	field := gitSideFilterInputBounds(widgetBounds.Bounds(), u)
+	layouter.LayoutWidget(&f.input, field)
+	layouter.LayoutWidget(&f.clear, gitFilterClearBounds(field, u))
+}
+
+func (f *gitSideFilter) Measure(context *guigui.Context, constraints guigui.Constraints) image.Point {
+	u := basicwidget.UnitSize(context)
+	w, ok := constraints.FixedWidth()
+	if !ok || w < 1 {
+		w = gitSideDefaultUnits * u
+	}
+	px, top := gitSideFilterPad(u)
+	inner := w - 2*px
+	if inner < 1 {
+		inner = 1
+	}
+	h := f.input.Measure(context, guigui.FixedWidthConstraints(inner)).Y
+	return image.Pt(w, h+top+gitSideFilterBottom(u))
+}
+
+func (f *gitSideFilter) Draw(context *guigui.Context, widgetBounds *guigui.WidgetBounds, dst *ebiten.Image) {
+	b := widgetBounds.Bounds()
+	if b.Empty() {
+		return
+	}
+	fillRect(dst, b, basicwidgetdraw.BackgroundColor(context.ColorMode()))
+	fillRect(dst, image.Rect(b.Min.X, b.Min.Y, b.Max.X, b.Min.Y+1), gitHistSplitColor(context.ColorMode()))
+}
+
+func gitSideFilterPad(u int) (x, top int) {
+	x = u / 2
+	top = u / 4
+	if x < 1 {
+		x = 1
+	}
+	if top < 1 {
+		top = 1
+	}
+	return x, top
+}
+
+// gitSideFilterBottom is the gap under the field, about a fifth of a line.
+func gitSideFilterBottom(u int) int {
+	if u < 1 {
+		return 0
+	}
+	return (u*2 + 5) / 10
+}
+
+// gitSideFilterInputBounds keeps a gap above the field and a short one below it.
+func gitSideFilterInputBounds(b image.Rectangle, u int) image.Rectangle {
+	px, top := gitSideFilterPad(u)
+	in := image.Rect(b.Min.X+px, b.Min.Y+top, b.Max.X-px, b.Max.Y-gitSideFilterBottom(u))
+	if in.Max.X < in.Min.X {
+		in.Max.X = in.Min.X
+	}
+	if in.Max.Y < in.Min.Y {
+		in.Max.Y = in.Min.Y
+	}
+	return in
+}
+
+// gitFilterClearBounds is the clear mark inside the field, on the trailing edge.
+func gitFilterClearBounds(field image.Rectangle, u int) image.Rectangle {
+	if u < 1 {
+		u = 1
+	}
+	inset := u / 6
+	if inset < 2 {
+		inset = 2
+	}
+	size := u * 2 / 3
+	if size < 12 {
+		size = 12
+	}
+	limit := field.Dy() - 2*inset
+	if limit < 1 {
+		limit = 1
+	}
+	if size > limit {
+		size = limit
+	}
+	x := field.Max.X - inset - size
+	if x < field.Min.X {
+		x = field.Min.X
+	}
+	y := field.Min.Y + (field.Dy()-size)/2
+	return image.Rect(x, y, x+size, y+size)
+}
+
+// gitFilterClear is the × inside the filter field. It empties the field.
+type gitFilterClear struct {
+	guigui.DefaultWidget
+
+	mark  basicwidget.Text
+	hover bool
+	clear func()
+}
+
+func (c *gitFilterClear) Build(context *guigui.Context, adder *guigui.ChildAdder) error {
+	adder.AddWidget(&c.mark)
+	context.SetPassthrough(&c.mark, true)
+	c.mark.SetValue("×")
+	c.mark.SetHorizontalAlign(basicwidget.HorizontalAlignCenter)
+	c.mark.SetVerticalAlign(basicwidget.VerticalAlignMiddle)
+	c.mark.SetScale(0.85)
+	c.mark.SetSelectable(false)
+	return nil
+}
+
+func (c *gitFilterClear) Layout(context *guigui.Context, widgetBounds *guigui.WidgetBounds, layouter *guigui.ChildLayouter) {
+	layouter.LayoutWidget(&c.mark, widgetBounds.Bounds())
+}
+
+func (c *gitFilterClear) Draw(context *guigui.Context, widgetBounds *guigui.WidgetBounds, dst *ebiten.Image) {
+	if !c.hover {
+		return
+	}
+	b := widgetBounds.Bounds()
+	if b.Empty() {
+		return
+	}
+	cx := float32(b.Min.X + b.Dx()/2)
+	cy := float32(b.Min.Y + b.Dy()/2)
+	vector.FillCircle(dst, cx, cy, float32(b.Dx())*0.5, gitTabCloseHoverColor(context.ColorMode()), true)
+}
+
+func (c *gitFilterClear) Tick(context *guigui.Context, widgetBounds *guigui.WidgetBounds) error {
+	c.hover = widgetBounds.IsHitAtCursor()
+	return nil
+}
+
+func (c *gitFilterClear) WriteStateKey(context *guigui.Context, w *guigui.StateKeyWriter) {
+	w.WriteBool(c.hover)
+}
+
+func (c *gitFilterClear) HandlePointingInput(context *guigui.Context, widgetBounds *guigui.WidgetBounds) guigui.HandleInputResult {
+	if !widgetBounds.IsHitAtCursor() || !inpututil.IsMouseButtonJustPressed(ebiten.MouseButtonLeft) {
+		return guigui.HandleInputResult{}
+	}
+	if c.clear != nil {
+		c.clear()
+	}
+	return guigui.HandleInputByWidget(c)
+}
+
+func (c *gitFilterClear) CursorShape(context *guigui.Context, widgetBounds *guigui.WidgetBounds) (ebiten.CursorShapeType, bool) {
+	if widgetBounds.IsHitAtCursor() {
+		return ebiten.CursorShapePointer, true
+	}
+	return 0, false
+}
+
 // gitSideFixed is the part of the left column that does not scroll:
 // the repository path, the workspace, and any other worktrees.
 type gitSideFixed struct {
@@ -373,6 +589,8 @@ type gitSideBody struct {
 	tagRows       guigui.WidgetSlice[*gitNavRow]
 	remoteRows    guigui.WidgetSlice[*gitNavRow]
 	submoduleRows guigui.WidgetSlice[*gitNavRow]
+
+	lists gitSideLists
 }
 
 func (b *gitSideBody) Build(context *guigui.Context, adder *guigui.ChildAdder) error {
@@ -389,15 +607,16 @@ func (b *gitSideBody) Build(context *guigui.Context, adder *guigui.ChildAdder) e
 		lang = appModel.Lang()
 		enabled = model.HasRepo() && !model.Busy()
 	}
-	b.branchHead.Set(i18n.T(lang, i18n.GitBranches), t.branchClosed, func() {
-		t.branchClosed = !t.branchClosed
-		guigui.RequestRebuild()
-	})
-	adder.AddWidget(&b.branchHead)
-	if t.branchClosed {
-		b.branchRows.SetLen(0)
-	} else {
-		b.syncRows(context, adder, &b.branchRows, visibleTreeItems(t.branchItems), enabled, func(value string) {
+	b.lists = gitSideRefLists(t)
+	if b.lists.branchHead {
+		b.branchHead.Set(i18n.T(lang, i18n.GitBranches), !b.lists.branchOpen, func() {
+			t.branchClosed = !t.branchClosed
+			guigui.RequestRebuild()
+		})
+		adder.AddWidget(&b.branchHead)
+	}
+	if b.lists.branchOpen {
+		b.syncRows(context, adder, &b.branchRows, b.lists.branch, enabled, func(value string) {
 			t.navSel = value
 			if model != nil {
 				t.selectRef(model, value)
@@ -405,35 +624,35 @@ func (b *gitSideBody) Build(context *guigui.Context, adder *guigui.ChildAdder) e
 		}, func(value string, expanded bool) {
 			t.setTreeFold(&t.branchFold, value, expanded)
 		})
+	} else {
+		b.branchRows.SetLen(0)
 	}
-	if t.showTags {
-		b.tagHead.Set(i18n.T(lang, i18n.GitTags), t.tagClosed, func() {
+	if b.lists.tagHead {
+		b.tagHead.Set(i18n.T(lang, i18n.GitTags), !b.lists.tagOpen, func() {
 			t.tagClosed = !t.tagClosed
 			guigui.RequestRebuild()
 		})
 		adder.AddWidget(&b.tagHead)
-		if t.tagClosed {
-			b.tagRows.SetLen(0)
-		} else {
-			b.syncRows(context, adder, &b.tagRows, t.tagItems, enabled, func(value string) {
-				t.navSel = value
-				if model != nil {
-					t.selectRef(model, value)
-				}
-			}, nil)
-		}
+	}
+	if b.lists.tagOpen {
+		b.syncRows(context, adder, &b.tagRows, b.lists.tag, enabled, func(value string) {
+			t.navSel = value
+			if model != nil {
+				t.selectRef(model, value)
+			}
+		}, nil)
 	} else {
 		b.tagRows.SetLen(0)
 	}
-	b.remoteHead.Set(i18n.T(lang, i18n.GitRemotes), t.remoteClosed, func() {
-		t.remoteClosed = !t.remoteClosed
-		guigui.RequestRebuild()
-	})
-	adder.AddWidget(&b.remoteHead)
-	if t.remoteClosed {
-		b.remoteRows.SetLen(0)
-	} else {
-		b.syncRows(context, adder, &b.remoteRows, visibleTreeItems(t.remoteItems), enabled, func(value string) {
+	if b.lists.remoteHead {
+		b.remoteHead.Set(i18n.T(lang, i18n.GitRemotes), !b.lists.remoteOpen, func() {
+			t.remoteClosed = !t.remoteClosed
+			guigui.RequestRebuild()
+		})
+		adder.AddWidget(&b.remoteHead)
+	}
+	if b.lists.remoteOpen {
+		b.syncRows(context, adder, &b.remoteRows, b.lists.remote, enabled, func(value string) {
 			t.navSel = value
 			if model != nil {
 				t.selectRef(model, value)
@@ -441,16 +660,18 @@ func (b *gitSideBody) Build(context *guigui.Context, adder *guigui.ChildAdder) e
 		}, func(value string, expanded bool) {
 			t.setTreeFold(&t.remoteFold, value, expanded)
 		})
-	}
-	b.submoduleHead.Set(i18n.T(lang, i18n.GitSubmodules), t.submoduleClosed, func() {
-		t.submoduleClosed = !t.submoduleClosed
-		guigui.RequestRebuild()
-	})
-	adder.AddWidget(&b.submoduleHead)
-	if t.submoduleClosed {
-		b.submoduleRows.SetLen(0)
 	} else {
-		b.syncRows(context, adder, &b.submoduleRows, visibleTreeItems(t.submoduleItems), enabled, func(value string) {
+		b.remoteRows.SetLen(0)
+	}
+	if b.lists.subHead {
+		b.submoduleHead.Set(i18n.T(lang, i18n.GitSubmodules), !b.lists.subOpen, func() {
+			t.submoduleClosed = !t.submoduleClosed
+			guigui.RequestRebuild()
+		})
+		adder.AddWidget(&b.submoduleHead)
+	}
+	if b.lists.subOpen {
+		b.syncRows(context, adder, &b.submoduleRows, b.lists.sub, enabled, func(value string) {
 			t.navSel = value
 			if model != nil {
 				t.selectRef(model, value)
@@ -458,13 +679,10 @@ func (b *gitSideBody) Build(context *guigui.Context, adder *guigui.ChildAdder) e
 		}, func(value string, expanded bool) {
 			t.setTreeFold(&t.submoduleFold, value, expanded)
 		})
+	} else {
+		b.submoduleRows.SetLen(0)
 	}
-	nSticky := 1
-	if t.showTags {
-		nSticky++
-	}
-	nSticky += 2
-	b.sticky.SetLen(nSticky)
+	b.sticky.SetLen(b.lists.stickyCount())
 	for i := 0; i < b.sticky.Len(); i++ {
 		adder.AddWidget(b.sticky.At(i))
 	}
@@ -559,35 +777,98 @@ func (b *gitSideBody) stack(context *guigui.Context, width, u int) {
 		b.marks = append(b.marks, gitSideMark{y: y, head: head})
 		add(head, u)
 	}
-	mark(&b.branchHead)
-	if !t.branchClosed {
-		for i := 0; i < b.branchRows.Len(); i++ {
-			add(b.branchRows.At(i), u)
+	addSection := func(on bool, head *gitSectionHead, open bool, rows *guigui.WidgetSlice[*gitNavRow]) {
+		if !on {
+			return
+		}
+		if len(b.items) > 0 {
+			space()
+		}
+		mark(head)
+		if !open {
+			return
+		}
+		for i := 0; i < rows.Len(); i++ {
+			add(rows.At(i), u)
 		}
 	}
-	space()
+	addSection(b.lists.branchHead, &b.branchHead, b.lists.branchOpen, &b.branchRows)
+	addSection(b.lists.tagHead, &b.tagHead, b.lists.tagOpen, &b.tagRows)
+	addSection(b.lists.remoteHead, &b.remoteHead, b.lists.remoteOpen, &b.remoteRows)
+	addSection(b.lists.subHead, &b.submoduleHead, b.lists.subOpen, &b.submoduleRows)
+}
+
+// gitSideLists is which branch, tag, remote, and submodule rows the sidebar shows.
+// A non-empty filter keeps only names that contain it. Section headers stay up
+// even when every row is filtered out.
+type gitSideLists struct {
+	branch     []basicwidget.ListItem[string]
+	tag        []basicwidget.ListItem[string]
+	remote     []basicwidget.ListItem[string]
+	sub        []basicwidget.ListItem[string]
+	branchHead bool
+	tagHead    bool
+	remoteHead bool
+	subHead    bool
+	branchOpen bool
+	tagOpen    bool
+	remoteOpen bool
+	subOpen    bool
+}
+
+func gitSideRefLists(t *GitTool) gitSideLists {
+	var out gitSideLists
+	if t == nil {
+		return out
+	}
+	query := strings.TrimSpace(t.refFilter)
+	out.branch, out.branchHead, out.branchOpen = gitSideSection(t.branchItems, query, t.branchClosed, true)
 	if t.showTags {
-		mark(&b.tagHead)
-		if !t.tagClosed {
-			for i := 0; i < b.tagRows.Len(); i++ {
-				add(b.tagRows.At(i), u)
-			}
-		}
-		space()
+		out.tag, out.tagHead, out.tagOpen = gitSideSection(t.tagItems, query, t.tagClosed, false)
 	}
-	mark(&b.remoteHead)
-	if !t.remoteClosed {
-		for i := 0; i < b.remoteRows.Len(); i++ {
-			add(b.remoteRows.At(i), u)
+	out.remote, out.remoteHead, out.remoteOpen = gitSideSection(t.remoteItems, query, t.remoteClosed, true)
+	out.sub, out.subHead, out.subOpen = gitSideSection(t.submoduleItems, query, t.submoduleClosed, true)
+	return out
+}
+
+// gitSideSection keeps the header. A filter narrows the rows. A closed section
+// stays shut when nothing matches, and opens when a row does.
+func gitSideSection(items []basicwidget.ListItem[string], query string, closed, tree bool) (rows []basicwidget.ListItem[string], head, open bool) {
+	head = true
+	if strings.TrimSpace(query) != "" {
+		rows = gitFilterRefItems(items, query)
+		open = !closed || len(rows) > 0
+		if !open {
+			rows = nil
 		}
+		return rows, head, open
 	}
-	space()
-	mark(&b.submoduleHead)
-	if !t.submoduleClosed {
-		for i := 0; i < b.submoduleRows.Len(); i++ {
-			add(b.submoduleRows.At(i), u)
-		}
+	open = !closed
+	if !open {
+		return nil, head, open
 	}
+	if tree {
+		return visibleTreeItems(items), head, open
+	}
+	return items, head, open
+}
+
+// stickyCount is the section headers that can pin to the top of the list.
+func (l gitSideLists) stickyCount() int {
+	n := 0
+	if l.branchHead {
+		n++
+	}
+	if l.tagHead {
+		n++
+	}
+	if l.remoteHead {
+		n++
+	}
+	if l.subHead {
+		n++
+	}
+	return n
 }
 
 // placeSticky keeps every section header that has scrolled past, piled at the

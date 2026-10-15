@@ -1,6 +1,10 @@
 package app
 
-import "testing"
+import (
+	"testing"
+
+	"github.com/guigui-gui/guigui/basicwidget"
+)
 
 func TestGitTreeItemsShowsLeafNote(t *testing.T) {
 	items := gitTreeItems([]gitTreeEntry{
@@ -72,6 +76,63 @@ func TestVisibleTreeItemsHidesCollapsedChildren(t *testing.T) {
 	vis := visibleTreeItems(items)
 	if len(vis) != 1 || vis[0].Text != "origin" {
 		t.Fatalf("visible = %+v", vis)
+	}
+}
+
+func TestGitFilterRefItems(t *testing.T) {
+	items := gitTreeItems([]gitTreeEntry{
+		{Name: "main", Value: "local:main", Current: true},
+		{Name: "feature/admin-dashboard/list", Value: "local:feature/admin-dashboard/list"},
+		{Name: "feature/order-processing", Value: "local:feature/order-processing"},
+	}, map[string]bool{"feature": true})
+
+	if got := gitFilterRefItems(items, "  "); len(got) != len(items) || !got[1].Collapsed {
+		t.Fatalf("blank query = %+v", got)
+	}
+
+	got := gitFilterRefItems(items, "  List ")
+	if len(got) != 3 {
+		t.Fatalf("list len = %d", len(got))
+	}
+	if got[0].Value != "folder:feature" || got[0].Collapsed {
+		t.Fatalf("feature = %+v", got[0])
+	}
+	if got[1].Value != "folder:feature/admin-dashboard" || got[1].Collapsed {
+		t.Fatalf("admin = %+v", got[1])
+	}
+	if got[2].Value != "local:feature/admin-dashboard/list" {
+		t.Fatalf("leaf = %+v", got[2])
+	}
+
+	got = gitFilterRefItems(items, "MAIN")
+	if len(got) != 1 || got[0].Value != "local:main" {
+		t.Fatalf("main = %+v", got)
+	}
+
+	if got = gitFilterRefItems(items, "zzz"); len(got) != 0 {
+		t.Fatalf("none = %+v", got)
+	}
+
+	tags := []basicwidget.ListItem[string]{
+		{Text: "v1.0", Value: "tag:v1.0"},
+		{Text: "v2.0", Value: "tag:v2.0"},
+	}
+	got = gitFilterRefItems(tags, "v2")
+	if len(got) != 1 || got[0].Value != "tag:v2.0" {
+		t.Fatalf("tag = %+v", got)
+	}
+
+	remotes := gitTreeItems([]gitTreeEntry{
+		{Name: "origin/main", Value: "remote:origin/main"},
+		{Name: "origin/feature/foo", Value: "remote:origin/feature/foo"},
+	}, nil)
+	got = gitFilterRefItems(remotes, "foo")
+	if len(got) != 3 || got[2].Value != "remote:origin/feature/foo" {
+		t.Fatalf("remote = %+v", got)
+	}
+	got = gitFilterRefItems(remotes, "main")
+	if len(got) != 2 || got[0].Value != "folder:origin" || got[1].Value != "remote:origin/main" {
+		t.Fatalf("origin/main = %+v", got)
 	}
 }
 
