@@ -147,7 +147,7 @@ func (r *gitNavRow) Draw(context *guigui.Context, widgetBounds *guigui.WidgetBou
 	cursor := image.Pt(ebiten.CursorPosition())
 	if r.selected {
 		fillRect(dst, b, gitNavSelectedColor(mode))
-	} else if cursor.In(b) {
+	} else if cursor.In(widgetBounds.VisibleBounds()) {
 		fillRect(dst, b, gitTabHoverColor(mode))
 	}
 	u := basicwidget.UnitSize(context)
@@ -486,16 +486,15 @@ func (h *gitSectionHead) Draw(context *guigui.Context, widgetBounds *guigui.Widg
 		fillRect(dst, b, basicwidgetdraw.BackgroundSecondaryColor(context.ColorMode()))
 		fillRect(dst, image.Rect(b.Min.X, b.Max.Y-1, b.Max.X, b.Max.Y), gitHistSplitColor(context.ColorMode()))
 	}
-	if image.Pt(ebiten.CursorPosition()).In(b) {
+	if image.Pt(ebiten.CursorPosition()).In(widgetBounds.VisibleBounds()) {
 		fillRect(dst, b, gitTabHoverColor(context.ColorMode()))
 	}
 }
 
 func (h *gitSectionHead) HandlePointingInput(context *guigui.Context, widgetBounds *guigui.WidgetBounds) guigui.HandleInputResult {
-	if !inpututil.IsMouseButtonJustPressed(ebiten.MouseButtonLeft) {
-		return guigui.HandleInputResult{}
-	}
-	if !image.Pt(ebiten.CursorPosition()).In(widgetBounds.Bounds()) {
+	// Bounds stay put after a scroll, so a header can sit over the tab bar
+	// while the panel clips it away. Only the visible part may take the click.
+	if !widgetBounds.IsHitAtCursor() || !inpututil.IsMouseButtonJustPressed(ebiten.MouseButtonLeft) {
 		return guigui.HandleInputResult{}
 	}
 	if h.onToggle != nil {
@@ -505,10 +504,9 @@ func (h *gitSectionHead) HandlePointingInput(context *guigui.Context, widgetBoun
 }
 
 func (r *gitNavRow) HandlePointingInput(context *guigui.Context, widgetBounds *guigui.WidgetBounds) guigui.HandleInputResult {
-	if !inpututil.IsMouseButtonJustPressed(ebiten.MouseButtonLeft) {
-		return guigui.HandleInputResult{}
-	}
-	if !image.Pt(ebiten.CursorPosition()).In(widgetBounds.Bounds()) {
+	// A row scrolled above the list keeps its layout rectangle and would
+	// otherwise take clicks meant for the tab strip.
+	if !widgetBounds.IsHitAtCursor() || !inpututil.IsMouseButtonJustPressed(ebiten.MouseButtonLeft) {
 		return guigui.HandleInputResult{}
 	}
 	if !context.IsEnabled(r) {
