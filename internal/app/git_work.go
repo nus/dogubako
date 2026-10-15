@@ -2,6 +2,7 @@ package app
 
 import (
 	"image"
+	"image/color"
 	"slices"
 	"strings"
 
@@ -582,7 +583,7 @@ func (s *gitFileSection) setFiles(context *guigui.Context, entries []gitcli.Stat
 	for i, e := range entries {
 		have[e.Path] = true
 		row := s.rows.At(i)
-		row.Set(e.String(), e.Path, checked, enabled, onCheck)
+		row.Set(e, checked, enabled, onCheck)
 		s.fileItems = append(s.fileItems, basicwidget.ListItem[string]{
 			Content: row,
 			Value:   e.Path,
@@ -673,63 +674,242 @@ func (s *gitFileSection) Measure(context *guigui.Context, constraints guigui.Con
 	return image.Pt(w, 6*u)
 }
 
-// gitFileRow is one working-copy file, with a checkbox on the left.
-// Checking stages the file. Unchecking unstages it.
+// gitChangeRenamed reports a rename or copy in either porcelain column.
+func gitChangeRenamed(code string) bool {
+	for i := 0; i < len(code) && i < 2; i++ {
+		if code[i] == 'R' || code[i] == 'C' {
+			return true
+		}
+	}
+	return false
+}
+
+// gitChangeFileLabel splits a porcelain path into the file name and the
+// directory that contains it. A rename or copy uses the destination. A file
+// at the repository root has an empty directory.
+func gitChangeFileLabel(code, path string) (name, dir string) {
+	if gitChangeRenamed(code) {
+		// Porcelain joins a rename as "old -> new". A path can itself contain
+		// the separator, so the destination is the last piece.
+		if i := strings.LastIndex(path, " -> "); i >= 0 {
+			path = path[i+len(" -> "):]
+		}
+	}
+	path = strings.TrimSuffix(path, "/")
+	if path == "" || path == "." {
+		return path, ""
+	}
+	i := strings.LastIndex(path, "/")
+	if i < 0 {
+		return path, ""
+	}
+	return path[i+1:], path[:i]
+}
+
+// gitChangeMark is the one-letter status drawn at the right of a row.
+// staged selects the index column; otherwise the work-tree column.
+func gitChangeMark(code string, staged bool) string {
+	if code == "" {
+		return ""
+	}
+	var c byte
+	if staged || len(code) == 1 {
+		c = code[0]
+	} else {
+		c = code[1]
+	}
+	if c == ' ' || c == 0 {
+		return ""
+	}
+	return string(c)
+}
+
+func gitChangeMarkColor(mark string, dark bool) color.NRGBA {
+	switch mark {
+	case "A", "?", "C":
+		if dark {
+			return color.NRGBA{R: 0x73, G: 0xc9, B: 0x91, A: 0xff}
+		}
+		return color.NRGBA{R: 0x1a, G: 0x7f, B: 0x37, A: 0xff}
+	case "D":
+		if dark {
+			return color.NRGBA{R: 0xf8, G: 0x51, B: 0x49, A: 0xff}
+		}
+		return color.NRGBA{R: 0xcf, G: 0x22, B: 0x2e, A: 0xff}
+	default:
+		if dark {
+			return color.NRGBA{R: 0xe2, G: 0xc0, B: 0x8d, A: 0xff}
+		}
+		return color.NRGBA{R: 0x9a, G: 0x67, B: 0x00, A: 0xff}
+	}
+}
+
+// gitChangeLabelWidths splits the space after the icon between the file name
+// and its directory. The name keeps its natural width. The directory takes
+// what remains and can ellipsize. When the name alone fills the row, the
+// directory width is zero.
+func gitChangeLabelWidths(avail, nameW, dirW, gap int) (name, dir int) {
+	if avail < 0 {
+		avail = 0
+	}
+	if dirW <= 0 {
+		if nameW > avail {
+			return avail, 0
+		}
+		return nameW, 0
+	}
+	if nameW+gap+dirW <= avail {
+		return nameW, dirW
+	}
+	if nameW >= avail {
+		return avail, 0
+	}
+	room := avail - nameW - gap
+	if room < 1 {
+		return nameW, 0
+	}
+	return nameW, room
+}
+
+// gitFileRow is one working-copy file.
+// A checkbox stages or unstages it. The label is the file name, then the
+// directory that contains it. Every file uses the same glyph.
 type gitFileRow struct {
 	guigui.DefaultWidget
 
-	box   basicwidget.Checkbox
-	label basicwidget.Text
-	style basicwidget.TextStyle
+	box  basicwidget.Checkbox
+	icon fileKindIcon
+	name basicwidget.Text
+	dir  basicwidget.Text
+	mark basicwidget.Text
+
+	nameStyle basicwidget.TextStyle
+	dirStyle  basicwidget.TextStyle
+	markStyle basicwidget.TextStyle
 
 	path    string
 	onCheck func(paths []string, checked bool)
 }
 
-func (r *gitFileRow) Set(text, path string, checked, sync bool, onCheck func([]string, bool)) {
-	r.path = path
+func (r *gitFileRow) Set(entry gitcli.StatusEntry, checked, sync bool, onCheck func([]string, bool)) {
+	r.path = entry.Path
 	r.onCheck = onCheck
-	r.label.SetValue(text)
+	name, dir := gitChangeFileLabel(entry.Code, entry.Path)
+	r.name.SetValue(name)
+	r.dir.SetValue(dir)
+	r.mark.SetValue(gitChangeMark(entry.Code, checked))
+	r.icon.SetFolder(false)
 	if sync {
 		r.box.SetValue(checked)
 	}
 }
 
 func (r *gitFileRow) Build(context *guigui.Context, adder *guigui.ChildAdder) error {
-	r.label.SetVerticalAlign(basicwidget.VerticalAlignMiddle)
-	r.label.SetWrapMode(basicwidget.WrapModeNone)
+	r.name.SetVerticalAlign(basicwidget.VerticalAlignMiddle)
+	r.name.SetWrapMode(basicwidget.WrapModeNone)
+	r.name.SetEllipsisString("…")
+	r.name.SetSelectable(false)
+	r.dir.SetVerticalAlign(basicwidget.VerticalAlignMiddle)
+	r.dir.SetWrapMode(basicwidget.WrapModeNone)
+	r.dir.SetEllipsisString("…")
+	r.dir.SetSelectable(false)
+	r.dir.SetOpacity(0.62)
+	r.mark.SetVerticalAlign(basicwidget.VerticalAlignMiddle)
+	r.mark.SetHorizontalAlign(basicwidget.HorizontalAlignEnd)
+	r.mark.SetWrapMode(basicwidget.WrapModeNone)
+	r.mark.SetSelectable(false)
 	r.box.OnValueChanged(func(context *guigui.Context, value bool) {
 		if r.onCheck != nil && r.path != "" {
 			r.onCheck([]string{r.path}, value)
 		}
 	})
 	adder.AddWidget(&r.box)
-	adder.AddWidget(&r.label)
+	adder.AddWidget(&r.icon)
+	adder.AddWidget(&r.name)
+	if r.dir.Value() != "" {
+		adder.AddWidget(&r.dir)
+	}
+	if r.mark.Value() != "" {
+		adder.AddWidget(&r.mark)
+	}
 	return nil
 }
 
 func (r *gitFileRow) Layout(context *guigui.Context, widgetBounds *guigui.WidgetBounds, layouter *guigui.ChildLayouter) {
-	r.style = basicwidget.TextStyle{}
-	useGitMono(&r.style)
+	r.nameStyle = basicwidget.TextStyle{}
+	useGitMono(&r.nameStyle)
+	r.dirStyle = basicwidget.TextStyle{}
+	useGitMono(&r.dirStyle)
 	if v, ok := context.Env(r, basicwidget.EnvKeyListItemColorType); ok {
 		if ct, ok := v.(basicwidget.ListItemColorType); ok {
 			if c := ct.TextColor(context); c != nil {
-				r.style.SetColor(c)
+				r.nameStyle.SetColor(c)
+				r.dirStyle.SetColor(c)
 			}
 		}
 	}
-	r.label.SetBaseStyle(&r.style)
+	r.name.SetBaseStyle(&r.nameStyle)
+	r.dir.SetBaseStyle(&r.dirStyle)
+
+	r.markStyle = basicwidget.TextStyle{}
+	useGitMono(&r.markStyle)
+	r.markStyle.SetColor(gitChangeMarkColor(r.mark.Value(), context.ColorMode() == ebiten.ColorModeDark))
+	r.mark.SetBaseStyle(&r.markStyle)
 
 	b := widgetBounds.Bounds()
 	u := basicwidget.UnitSize(context)
 	box := r.box.Measure(context, guigui.Constraints{}).X
 	gap := u / 4
+	if gap < 2 {
+		gap = 2
+	}
 	// Keep the selection highlight's rounded left edge visible beside the checkbox.
 	inset := u / 2
 	y := b.Min.Y + (b.Dy()-box)/2
 	x := b.Min.X + inset
 	layouter.LayoutWidget(&r.box, image.Rect(x, y, x+box, y+box))
-	layouter.LayoutWidget(&r.label, image.Rect(x+box+gap, b.Min.Y, b.Max.X, b.Max.Y))
+	x += box + gap
+
+	icon := u * 2 / 3
+	if icon < 8 {
+		icon = 8
+	}
+	iy := b.Min.Y + (b.Dy()-icon)/2
+	layouter.LayoutWidget(&r.icon, image.Rect(x, iy, x+icon, iy+icon))
+	x += icon + gap
+
+	right := b.Max.X - gap
+	if r.mark.Value() != "" {
+		markW := r.mark.Measure(context, guigui.Constraints{}).X
+		if markW < u/2 {
+			markW = u / 2
+		}
+		if right-markW < x {
+			markW = right - x
+		}
+		if markW < 0 {
+			markW = 0
+		}
+		layouter.LayoutWidget(&r.mark, image.Rect(right-markW, b.Min.Y, right, b.Max.Y))
+		right -= markW + gap
+	}
+	if right < x {
+		right = x
+	}
+	nameW := r.name.Measure(context, guigui.Constraints{}).X
+	dirW := 0
+	if r.dir.Value() != "" {
+		dirW = r.dir.Measure(context, guigui.Constraints{}).X
+	}
+	nameUsed, dirUsed := gitChangeLabelWidths(right-x, nameW, dirW, gap)
+	layouter.LayoutWidget(&r.name, image.Rect(x, b.Min.Y, x+nameUsed, b.Max.Y))
+	if r.dir.Value() != "" {
+		dx := x + nameUsed
+		if dirUsed > 0 {
+			dx += gap
+		}
+		layouter.LayoutWidget(&r.dir, image.Rect(dx, b.Min.Y, dx+dirUsed, b.Max.Y))
+	}
 }
 
 func (r *gitFileRow) Measure(context *guigui.Context, constraints guigui.Constraints) image.Point {
