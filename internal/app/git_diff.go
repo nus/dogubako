@@ -22,6 +22,7 @@ type gitFileDiff struct {
 
 // gitDiffView shows a diff in the compact layout or the split layout.
 // Compact keeps the unified patch with old and new line numbers beside it.
+// Hunk markers stay visible in their own column, outside the text selection.
 // Split puts the old file on the left and the new file on the right.
 // Each split column scrolls horizontally on its own. Vertical scrolling stays in step.
 type gitDiffView struct {
@@ -40,6 +41,10 @@ type gitDiffView struct {
 	dark  bool
 
 	gutter                string
+	compactMarks          string
+	compactBody           string
+	compactKinds          []byte
+	compactSpans          []diffSpan
 	leftNum, leftBody     string
 	rightNum, rightBody   string
 	leftKinds, rightKinds []byte
@@ -67,6 +72,7 @@ func (v *gitDiffView) Set(text string, dark, split bool) {
 		v.gutter = ""
 	} else {
 		v.gutter = diffGutter(text)
+		v.compactMarks, v.compactBody, v.compactSpans, v.compactKinds = compactDiff(text)
 	}
 	v.ResetScroll()
 }
@@ -107,6 +113,9 @@ func (v *gitDiffView) Patch(unstage bool) (string, bool, bool) {
 	} else if start, end := v.compact.body.Selection(); end > start {
 		selected = true
 		ranges = [][2]int{{start, end}}
+		if len(v.compactSpans) > 0 {
+			ranges = overlappingSources(v.compactSpans, start, end)
+		}
 	}
 	if !selected {
 		return "", false, false
@@ -176,7 +185,14 @@ func (v *gitDiffView) Build(context *guigui.Context, adder *guigui.ChildAdder) e
 	}
 	adder.AddWidget(&v.panel)
 	configureDiffPanel(&v.panel)
-	v.compact.prepare(v.gutter, v.text, styleDiffGutter(v.gutter, v.text, v.dark), styleDiff(v.text, v.dark))
+	var bodyStyle, markStyle basicwidget.TextStyles
+	if v.compactMarks != "" {
+		bodyStyle = styleSplit(v.compactBody, v.compactKinds, v.dark, false)
+		markStyle = styleSplit(v.compactMarks, v.compactKinds, v.dark, false)
+	} else {
+		bodyStyle = styleDiff(v.compactBody, v.dark)
+	}
+	v.compact.prepareMarked(v.gutter, v.compactMarks, v.compactBody, styleDiffGutter(v.gutter, v.text, v.dark), markStyle, bodyStyle)
 	v.panel.SetContent(&v.compact)
 	v.bindMenu(&v.compact.body, false)
 	return nil
@@ -447,6 +463,60 @@ func diffMetaLine(line string) bool {
 		strings.HasPrefix(line, "\\") ||
 		strings.HasPrefix(line, "---") ||
 		strings.HasPrefix(line, "+++")
+}
+
+// compactDiff splits a unified diff into a marker column and a selectable body.
+// Inside a hunk, the leading '+', '-', or context space is the marker: it is
+// drawn, and it is not part of the body a selection can cover. Other lines
+// stay whole in the body. A diff with no hunk body returns an empty marker
+// column and the original text, so there is nothing to peel off.
+func compactDiff(text string) (marks, body string, spans []diffSpan, kinds []byte) {
+	lines := scanDiffLines(text)
+	if len(lines) == 0 {
+		return "", "", nil, nil
+	}
+	var mb, bb strings.Builder
+	inHunk := false
+	marked := false
+	for _, ln := range lines {
+		kind := byte('m')
+		payload := ln.content
+		if strings.HasPrefix(ln.content, "diff --git ") {
+			inHunk = false
+		} else if _, _, ok := parseHunkStarts(ln.content); ok {
+			inHunk = true
+			kind = '@'
+		} else if inHunk && ln.content != "" {
+			switch ln.content[0] {
+			case ' ', '+', '-':
+				kind = ln.content[0]
+				payload = ln.content[1:]
+				marked = true
+			}
+		}
+		mark := byte(' ')
+		if kind == ' ' || kind == '+' || kind == '-' {
+			mark = kind
+		}
+		mb.WriteByte(mark)
+		viewStart := bb.Len()
+		bb.WriteString(payload)
+		if ln.end > ln.start+len(ln.content) {
+			mb.WriteByte('\n')
+			bb.WriteByte('\n')
+		}
+		spans = append(spans, diffSpan{
+			viewStart: viewStart,
+			viewEnd:   bb.Len(),
+			srcStart:  ln.start,
+			srcEnd:    ln.end,
+		})
+		kinds = append(kinds, kind)
+	}
+	if !marked {
+		return "", text, nil, nil
+	}
+	return mb.String(), bb.String(), spans, kinds
 }
 
 // diffNumMinWidth is the digit width of each line-number column.

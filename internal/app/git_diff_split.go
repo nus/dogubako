@@ -289,27 +289,39 @@ func splitLineLook(kind byte, pal diffColors) (fg, bg color.NRGBA) {
 }
 
 // gitDiffSide is one column of a diff: line numbers beside the code.
+// Compact view also has a marker column. Those characters are drawn and are not selectable.
 type gitDiffSide struct {
 	guigui.DefaultWidget
 
-	nums basicwidget.Text
-	body gitDiffText
+	nums  basicwidget.Text
+	marks basicwidget.Text
+	body  gitDiffText
 
 	numText   string
+	markText  string
 	bodyText  string
 	numStyle  basicwidget.TextStyles
+	markStyle basicwidget.TextStyles
 	bodyStyle basicwidget.TextStyles
 	showNums  bool
+	showMarks bool
 
 	items []guigui.LinearLayoutItem
 }
 
 func (s *gitDiffSide) prepare(num, body string, numStyle, bodyStyle basicwidget.TextStyles) {
+	s.prepareMarked(num, "", body, numStyle, basicwidget.TextStyles{}, bodyStyle)
+}
+
+func (s *gitDiffSide) prepareMarked(num, marks, body string, numStyle, markStyle, bodyStyle basicwidget.TextStyles) {
 	s.numText = num
+	s.markText = marks
 	s.bodyText = body
 	s.numStyle = numStyle
+	s.markStyle = markStyle
 	s.bodyStyle = bodyStyle
 	s.showNums = num != ""
+	s.showMarks = marks != ""
 }
 
 func (s *gitDiffSide) Build(context *guigui.Context, adder *guigui.ChildAdder) error {
@@ -321,6 +333,15 @@ func (s *gitDiffSide) Build(context *guigui.Context, adder *guigui.ChildAdder) e
 		setGitDiffFont(&s.nums)
 		s.nums.SetValue(s.numText)
 		s.nums.SetOverrideStyles(&s.numStyle, false)
+	}
+	if s.showMarks {
+		adder.AddWidget(&s.marks)
+		s.marks.SetMultiline(true)
+		s.marks.SetWrapMode(basicwidget.WrapModeNone)
+		s.marks.SetSelectable(false)
+		setGitDiffFont(&s.marks)
+		s.marks.SetValue(s.markText)
+		s.marks.SetOverrideStyles(&s.markStyle, false)
 	}
 	adder.AddWidget(&s.body)
 	s.body.SetMultiline(true)
@@ -346,6 +367,9 @@ func (s *gitDiffSide) row() guigui.LinearLayout {
 	s.items = s.items[:0]
 	if s.showNums {
 		s.items = append(s.items, guigui.LinearLayoutItem{Widget: &s.nums})
+	}
+	if s.showMarks {
+		s.items = append(s.items, guigui.LinearLayoutItem{Widget: &s.marks})
 	}
 	s.items = append(s.items, guigui.LinearLayoutItem{Widget: &s.body})
 	return guigui.LinearLayout{
