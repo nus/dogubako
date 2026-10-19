@@ -171,6 +171,61 @@ func TestStyleDiffColors(t *testing.T) {
 	}
 }
 
+func TestCompactDiffMarkersStayOutOfBody(t *testing.T) {
+	diff := "" +
+		"diff --git a/a.txt b/a.txt\n" +
+		"--- a/a.txt\n" +
+		"+++ b/a.txt\n" +
+		"@@ -1,3 +1,3 @@\n" +
+		" ctx\n" +
+		"-old\n" +
+		"+new\n"
+	marks, body, spans, kinds := compactDiff(diff)
+	if strings.Join(splitLines(marks), ",") != " , , , , ,-,+" {
+		t.Fatalf("marks %q", marks)
+	}
+	wantBody := []string{
+		"diff --git a/a.txt b/a.txt",
+		"--- a/a.txt",
+		"+++ b/a.txt",
+		"@@ -1,3 +1,3 @@",
+		"ctx",
+		"old",
+		"new",
+	}
+	if strings.Join(splitLines(body), "\n") != strings.Join(wantBody, "\n") {
+		t.Fatalf("body %q", body)
+	}
+	if string(kinds) != "mmm@ -+" {
+		t.Fatalf("kinds %q", kinds)
+	}
+	old := lineRange(diff, "-old\n")
+	sel := strings.Index(body, "old")
+	got := overlappingSources(spans, sel, sel+len("old"))
+	if len(got) != 1 || got[0] != old {
+		t.Fatalf("old selection = %v, want %v", got, old)
+	}
+	if body[spans[5].viewStart:spans[5].viewEnd] != "old\n" {
+		t.Fatalf("selectable old line %q", body[spans[5].viewStart:spans[5].viewEnd])
+	}
+
+	open := "@@ -1 +1 @@\n-a\n+b"
+	marks, body, _, _ = compactDiff(open)
+	if marks != " \n-\n+" || body != "@@ -1 +1 @@\na\nb" {
+		t.Fatalf("open marks %q body %q", marks, body)
+	}
+
+	binary := "diff --git a/b.jpg b/b.jpg\nBinary files a/b.jpg and b/b.jpg differ\n"
+	marks, body, spans, kinds = compactDiff(binary)
+	if marks != "" || body != binary || spans != nil || kinds != nil {
+		t.Fatalf("binary marks %q body %q spans %v kinds %q", marks, body, spans, kinds)
+	}
+	marks, body, spans, kinds = compactDiff("")
+	if marks != "" || body != "" || spans != nil || kinds != nil {
+		t.Fatalf("empty marks %q body %q", marks, body)
+	}
+}
+
 func TestDiffGutter(t *testing.T) {
 	const edit = "" +
 		"diff --git a/a.txt b/a.txt\n" +
