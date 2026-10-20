@@ -853,6 +853,152 @@ func TestStageUnstage(t *testing.T) {
 	}
 }
 
+func TestDiscardPaths(t *testing.T) {
+	if got := discardPaths([]string{"a.txt", "a.txt", " ", "."}, false); len(got) != 1 || got[0] != "a.txt" {
+		t.Fatalf("worktree paths = %#v", got)
+	}
+	got := discardPaths([]string{"old.txt -> new.txt"}, true)
+	if len(got) != 2 || got[0] != "old.txt" || got[1] != "new.txt" {
+		t.Fatalf("staged rename = %#v", got)
+	}
+	got = discardPaths([]string{"old.txt -> new.txt"}, false)
+	if len(got) != 1 || got[0] != "new.txt" {
+		t.Fatalf("worktree rename = %#v", got)
+	}
+}
+
+func TestDiscard(t *testing.T) {
+	dir := initRepo(t)
+	writeCommit(t, dir, "a.txt", "base")
+	writeCommit(t, dir, "gone.txt", "keep")
+	if err := os.WriteFile(filepath.Join(dir, "a.txt"), []byte("staged\n"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	gitAt(t, dir, "add", "a.txt")
+	if err := os.WriteFile(filepath.Join(dir, "a.txt"), []byte("worktree\n"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(filepath.Join(dir, "new.txt"), []byte("extra\n"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.Remove(filepath.Join(dir, "gone.txt")); err != nil {
+		t.Fatal(err)
+	}
+
+	ctx, cancel := context.WithTimeout(context.Background(), 15*time.Second)
+	defer cancel()
+	repo, err := Open(ctx, dir)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if err := repo.Discard(ctx, []string{"a.txt", "new.txt", "gone.txt"}, false); err != nil {
+		t.Fatal(err)
+	}
+	body, err := os.ReadFile(filepath.Join(dir, "a.txt"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	if string(body) != "staged\n" {
+		t.Fatalf("worktree discard = %q", body)
+	}
+	if _, err := os.Stat(filepath.Join(dir, "new.txt")); !os.IsNotExist(err) {
+		t.Fatalf("untracked file remains: %v", err)
+	}
+	if _, err := os.Stat(filepath.Join(dir, "gone.txt")); err != nil {
+		t.Fatalf("deleted file not restored: %v", err)
+	}
+	st, err := repo.Status(ctx)
+	if err != nil {
+		t.Fatal(err)
+	}
+	assertEntry(t, st, "a.txt", true, false)
+
+	if err := repo.Discard(ctx, []string{"a.txt"}, true); err != nil {
+		t.Fatal(err)
+	}
+	body, err = os.ReadFile(filepath.Join(dir, "a.txt"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	if string(body) != "base\n" {
+		t.Fatalf("staged discard = %q", body)
+	}
+	st, err = repo.Status(ctx)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if st.Dirty() {
+		t.Fatalf("status after staged discard: %v", st.Entries)
+	}
+}
+
+func TestDiscardAddedAndRename(t *testing.T) {
+	dir := initRepo(t)
+	writeCommit(t, dir, "old.txt", "from")
+	gitAt(t, dir, "mv", "old.txt", "new.txt")
+	if err := os.WriteFile(filepath.Join(dir, "added.txt"), []byte("added\n"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	gitAt(t, dir, "add", "added.txt")
+
+	ctx, cancel := context.WithTimeout(context.Background(), 15*time.Second)
+	defer cancel()
+	repo, err := Open(ctx, dir)
+	if err != nil {
+		t.Fatal(err)
+	}
+	st, err := repo.Status(ctx)
+	if err != nil {
+		t.Fatal(err)
+	}
+	var rename string
+	for _, e := range st.Entries {
+		if strings.Contains(e.Path, "new.txt") && strings.Contains(e.Path, "old.txt") {
+			rename = e.Path
+		}
+	}
+	if rename == "" {
+		t.Fatalf("rename entry missing: %v", st.Entries)
+	}
+	if err := repo.Discard(ctx, []string{rename, "added.txt"}, true); err != nil {
+		t.Fatal(err)
+	}
+	body, err := os.ReadFile(filepath.Join(dir, "old.txt"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	if string(body) != "from\n" {
+		t.Fatalf("renamed file = %q", body)
+	}
+	if _, err := os.Stat(filepath.Join(dir, "new.txt")); !os.IsNotExist(err) {
+		t.Fatalf("rename destination remains: %v", err)
+	}
+	if _, err := os.Stat(filepath.Join(dir, "added.txt")); !os.IsNotExist(err) {
+		t.Fatalf("added file remains: %v", err)
+	}
+}
+
+func TestDiscardWithoutHEAD(t *testing.T) {
+	dir := initRepo(t)
+	if err := os.WriteFile(filepath.Join(dir, "a.txt"), []byte("new\n"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	gitAt(t, dir, "add", "a.txt")
+
+	ctx, cancel := context.WithTimeout(context.Background(), 15*time.Second)
+	defer cancel()
+	repo, err := Open(ctx, dir)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if err := repo.Discard(ctx, []string{"a.txt"}, true); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := os.Stat(filepath.Join(dir, "a.txt")); !os.IsNotExist(err) {
+		t.Fatalf("added file remains: %v", err)
+	}
+}
+
 func TestStageSelectedLines(t *testing.T) {
 	dir := initRepo(t)
 	if err := os.WriteFile(filepath.Join(dir, "a.txt"), []byte("alpha\nbeta\ngamma\nomega\n"), 0o644); err != nil {

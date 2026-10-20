@@ -213,6 +213,74 @@ func (m *gitSelectionMenu) contentSize(context *guigui.Context) image.Point {
 	return m.menu.Measure(context, guigui.Constraints{})
 }
 
+// gitChangeMenu is the context menu opened by right-clicking a working-copy change.
+type gitChangeMenu struct {
+	guigui.DefaultWidget
+
+	menu basicwidget.PopupMenu[string]
+
+	pos          image.Point
+	stageLabel   string
+	discardLabel string
+	staged       bool
+	onStage      func(unstage bool)
+	onDiscard    func()
+}
+
+func (m *gitChangeMenu) Open(at image.Point, stageLabel, discardLabel string, staged bool, onStage func(bool), onDiscard func()) {
+	m.pos = at
+	m.stageLabel = stageLabel
+	m.discardLabel = discardLabel
+	m.staged = staged
+	m.onStage = onStage
+	m.onDiscard = onDiscard
+	m.menu.SetOpen(true)
+}
+
+func (m *gitChangeMenu) IsOpen() bool {
+	return m.menu.IsOpen()
+}
+
+func (m *gitChangeMenu) Build(context *guigui.Context, adder *guigui.ChildAdder) error {
+	m.menu.SetItems([]basicwidget.PopupMenuItem[string]{
+		{Text: m.stageLabel, Value: "stage"},
+		{Border: true},
+		{Text: m.discardLabel, Value: "discard"},
+	})
+	m.menu.OnItemSelected(func(context *guigui.Context, index int) {
+		item, ok := m.menu.ItemByIndex(index)
+		if !ok {
+			return
+		}
+		switch item.Value {
+		case "stage":
+			if m.onStage != nil {
+				m.onStage(m.staged)
+			}
+		case "discard":
+			if m.onDiscard != nil {
+				m.onDiscard()
+			}
+		}
+	})
+	if m.menu.IsOpen() {
+		adder.AddWidget(&m.menu)
+	}
+	return nil
+}
+
+func (m *gitChangeMenu) Layout(context *guigui.Context, widgetBounds *guigui.WidgetBounds, layouter *guigui.ChildLayouter) {
+	layouter.LayoutWidget(&m.menu, widgetBounds.Bounds())
+}
+
+func (m *gitChangeMenu) Measure(context *guigui.Context, constraints guigui.Constraints) image.Point {
+	return image.Point{}
+}
+
+func (m *gitChangeMenu) contentSize(context *guigui.Context) image.Point {
+	return m.menu.Measure(context, guigui.Constraints{})
+}
+
 // gitTagMenu is the context menu opened by right-clicking a tag.
 type gitTagMenu struct {
 	guigui.DefaultWidget

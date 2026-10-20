@@ -154,6 +154,7 @@ type GitTool struct {
 	commitMenu gitCommitMenu
 	tagMenu    gitTagMenu
 	selMenu    gitSelectionMenu
+	changeMenu gitChangeMenu
 	confirm    gitConfirm
 	rename     gitRename
 
@@ -558,6 +559,7 @@ func (t *GitTool) Build(context *guigui.Context, adder *guigui.ChildAdder) error
 	adder.AddWidget(&t.commitMenu)
 	adder.AddWidget(&t.tagMenu)
 	adder.AddWidget(&t.selMenu)
+	adder.AddWidget(&t.changeMenu)
 	adder.AddWidget(&t.confirm)
 	adder.AddWidget(&t.rename)
 	return nil
@@ -754,7 +756,7 @@ func (t *GitTool) moveOpenCommit(down bool) bool {
 	if t.commitView || t.showEmpty || t.emptyHome || t.sshPick {
 		return false
 	}
-	if t.rename.IsOpen() || t.confirm.IsOpen() || t.tagMenu.IsOpen() || t.branchMenu.IsOpen() || t.commitMenu.IsOpen() || t.selMenu.IsOpen() {
+	if t.menuOpen() {
 		return false
 	}
 	n := t.commitList.ItemCount()
@@ -880,6 +882,11 @@ func (t *GitTool) layoutOverlays(context *guigui.Context, layouter *guigui.Child
 		p := t.selMenu.pos
 		layouter.LayoutWidget(&t.selMenu, image.Rectangle{Min: p, Max: p.Add(s)})
 	}
+	if t.changeMenu.IsOpen() {
+		s := t.changeMenu.contentSize(context)
+		p := t.changeMenu.pos
+		layouter.LayoutWidget(&t.changeMenu, image.Rectangle{Min: p, Max: p.Add(s)})
+	}
 	if t.tagMenu.IsOpen() {
 		s := t.tagMenu.contentSize(context)
 		p := t.tagMenu.pos
@@ -946,7 +953,7 @@ func (t *GitTool) Tick(context *guigui.Context, widgetBounds *guigui.WidgetBound
 	if !inpututil.IsMouseButtonJustPressed(ebiten.MouseButtonLeft) {
 		return nil
 	}
-	if t.rename.IsOpen() || t.confirm.IsOpen() || t.tagMenu.IsOpen() || t.branchMenu.IsOpen() || t.commitMenu.IsOpen() || t.selMenu.IsOpen() {
+	if t.menuOpen() {
 		return nil
 	}
 	v, ok := context.Env(t, EnvKeyModel)
@@ -1081,7 +1088,7 @@ func (t *GitTool) commitGraphKeyTarget(context *guigui.Context) bool {
 	if t.commitView || t.showEmpty || t.emptyHome || t.sshPick {
 		return false
 	}
-	if t.rename.IsOpen() || t.confirm.IsOpen() || t.tagMenu.IsOpen() || t.branchMenu.IsOpen() || t.commitMenu.IsOpen() || t.selMenu.IsOpen() {
+	if t.menuOpen() {
 		return false
 	}
 	if shortcutModifierPressed(context) || ebiten.IsKeyPressed(ebiten.KeyShift) || ebiten.IsKeyPressed(ebiten.KeyAlt) || ebiten.IsKeyPressed(ebiten.KeyControl) {
@@ -1378,6 +1385,12 @@ func (t *GitTool) HandlePointingInput(context *guigui.Context, widgetBounds *gui
 		t.openTagMenu(appModel.Lang(), model, ref)
 		return guigui.HandleInputByWidget(t)
 	}
+	if t.commitView {
+		if path, staged, ok := t.changeAtCursor(); ok {
+			t.openChangeMenu(appModel.Lang(), model, path, staged)
+			return guigui.HandleInputByWidget(t)
+		}
+	}
 	if !t.commitView {
 		if t.cursorOnCommitSplit() {
 			return guigui.HandleInputByWidget(t)
@@ -1430,6 +1443,69 @@ func (t *GitTool) setDiffSplit(split bool) {
 	}
 	t.diffSplit = split
 	guigui.RequestRebuild()
+}
+
+func (t *GitTool) menuOpen() bool {
+	return t.rename.IsOpen() || t.confirm.IsOpen() || t.tagMenu.IsOpen() || t.branchMenu.IsOpen() || t.commitMenu.IsOpen() || t.selMenu.IsOpen() || t.changeMenu.IsOpen()
+}
+
+func (t *GitTool) changeAtCursor() (string, bool, bool) {
+	if t.workPanes.empty != nil {
+		return "", false, false
+	}
+	if path, ok := t.workPanes.unstaged.pathAtCursor(); ok {
+		return path, false, true
+	}
+	if path, ok := t.workPanes.staged.pathAtCursor(); ok {
+		return path, true, true
+	}
+	return "", false, false
+}
+
+func (t *GitTool) openChangeMenu(lang i18n.Lang, model *GitModel, path string, staged bool) {
+	if path == "" || !model.HasRepo() || model.Busy() {
+		return
+	}
+	section := &t.workPanes.unstaged
+	label := i18n.T(lang, i18n.GitStage)
+	if staged {
+		section = &t.workPanes.staged
+		label = i18n.T(lang, i18n.GitUnstage)
+	}
+	paths := changeMenuPaths(section.sel, path)
+	if len(paths) == 0 {
+		return
+	}
+	discard := i18n.T(lang, i18n.GitDiscardChanges)
+	t.changeMenu.Open(image.Pt(ebiten.CursorPosition()), label, discard, staged, func(unstage bool) {
+		if unstage {
+			model.DoUnstage(paths)
+			return
+		}
+		model.DoStage(paths)
+	}, func() {
+		t.confirm.Ask(discardAsk(lang, paths), discard, i18n.T(lang, i18n.GitCancel), func() {
+			model.DoDiscard(paths, staged)
+		})
+	})
+}
+
+func discardAsk(lang i18n.Lang, paths []string) string {
+	if len(paths) == 1 {
+		return i18n.T(lang, i18n.GitDiscardAsk, changeDisplayName(paths[0]))
+	}
+	return i18n.T(lang, i18n.GitDiscardAskMany, len(paths))
+}
+
+func changeDisplayName(path string) string {
+	if i := strings.LastIndex(path, " -> "); i >= 0 {
+		path = path[i+len(" -> "):]
+	}
+	path = strings.TrimSuffix(strings.TrimSpace(path), "/")
+	if i := strings.LastIndex(path, "/"); i >= 0 {
+		return path[i+1:]
+	}
+	return path
 }
 
 func (t *GitTool) openLineMenu(context *guigui.Context, start, end int) bool {

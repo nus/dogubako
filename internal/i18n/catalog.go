@@ -146,6 +146,9 @@ const (
 	GitUnstage          Key = "git.unstage"
 	GitStageLines       Key = "git.stage_lines"
 	GitUnstageLines     Key = "git.unstage_lines"
+	GitDiscardChanges   Key = "git.discard_changes"
+	GitDiscardAsk       Key = "git.discard_ask"
+	GitDiscardAskMany   Key = "git.discard_ask_many"
 	GitStaged           Key = "git.staged"
 	GitUnstaged         Key = "git.unstaged"
 	GitEmpty            Key = "git.empty"
@@ -281,6 +284,8 @@ const (
 	StatusGitStageFailed    Key = "status.git_stage_failed"
 	StatusGitUnstageOk      Key = "status.git_unstage_ok"
 	StatusGitUnstageFailed  Key = "status.git_unstage_failed"
+	StatusGitDiscardOk      Key = "status.git_discard_ok"
+	StatusGitDiscardFailed  Key = "status.git_discard_failed"
 	StatusGitFetchOk        Key = "status.git_fetch_ok"
 	StatusGitFetchFailed    Key = "status.git_fetch_failed"
 	StatusGitPullOk         Key = "status.git_pull_ok"
@@ -459,11 +464,14 @@ var catalogs = map[Lang]map[Key]string{
 		GitUnstage:                     "Unstage",
 		GitStageLines:                  "選択行を Stage",
 		GitUnstageLines:                "選択行を Unstage",
+		GitDiscardChanges:              "変更を破棄",
+		GitDiscardAsk:                  "「%s」の変更を破棄しますか？",
+		GitDiscardAskMany:              "%d 件の変更を破棄しますか？",
 		GitStaged:                      "ステージ済み",
 		GitUnstaged:                    "未ステージ",
 		GitEmpty:                       "Git リポジトリのフォルダを開いてください。",
 		GitNoCommits:                   "表示するコミットがありません。",
-		GitHint:                        "ブランチをクリックすると先端のコミットを表示。グラフのブランチをダブルクリックすると切り替え。タグをダブルクリックすると切り替え。右クリックで名前の変更と削除。コミットを右クリックしてブランチやタグを作成。コミットをクリックして詳細。",
+		GitHint:                        "ブランチをクリックすると先端のコミットを表示。グラフのブランチをダブルクリックすると切り替え。タグをダブルクリックすると切り替え。右クリックで名前の変更と削除。コミットを右クリックしてブランチやタグを作成。コミットをクリックして詳細。変更を右クリックして Stage、Unstage、破棄。",
 		GitDetached:                    "detached HEAD",
 		GitUncommitted:                 "未コミットの変更",
 		GitAheadBehind:                 "ahead %d / behind %d",
@@ -581,6 +589,8 @@ var catalogs = map[Lang]map[Key]string{
 		StatusGitStageFailed:           "ステージに失敗しました: %v",
 		StatusGitUnstageOk:             "アンステージしました",
 		StatusGitUnstageFailed:         "アンステージに失敗しました: %v",
+		StatusGitDiscardOk:             "変更を破棄しました",
+		StatusGitDiscardFailed:         "変更の破棄に失敗しました: %v",
 		StatusGitFetchOk:               "fetch しました",
 		StatusGitFetchFailed:           "fetch に失敗しました: %v",
 		StatusGitPullOk:                "pull しました",
@@ -757,11 +767,14 @@ var catalogs = map[Lang]map[Key]string{
 		GitUnstage:                     "Unstage",
 		GitStageLines:                  "Stage selected lines",
 		GitUnstageLines:                "Unstage selected lines",
+		GitDiscardChanges:              "Discard Changes",
+		GitDiscardAsk:                  "Discard changes to \"%s\"?",
+		GitDiscardAskMany:              "Discard changes to %d files?",
 		GitStaged:                      "Staged",
 		GitUnstaged:                    "Unstaged",
 		GitEmpty:                       "Open a folder that is a Git repository.",
 		GitNoCommits:                   "No commits to show.",
-		GitHint:                        "Click a branch to show its tip commit. Double-click a branch on the graph to switch. Double-click a tag to switch. Right-click a branch to rename or delete. Right-click a commit to create a branch or tag. Click a commit for details.",
+		GitHint:                        "Click a branch to show its tip commit. Double-click a branch on the graph to switch. Double-click a tag to switch. Right-click a branch to rename or delete. Right-click a commit to create a branch or tag. Click a commit for details. Right-click a change to stage, unstage, or discard it.",
 		GitDetached:                    "detached HEAD",
 		GitUncommitted:                 "Uncommitted changes",
 		GitAheadBehind:                 "ahead %d / behind %d",
@@ -879,6 +892,8 @@ var catalogs = map[Lang]map[Key]string{
 		StatusGitStageFailed:           "Could not stage: %v",
 		StatusGitUnstageOk:             "Unstaged",
 		StatusGitUnstageFailed:         "Could not unstage: %v",
+		StatusGitDiscardOk:             "Discarded changes",
+		StatusGitDiscardFailed:         "Could not discard changes: %v",
 		StatusGitFetchOk:               "Fetched",
 		StatusGitFetchFailed:           "Fetch failed: %v",
 		StatusGitPullOk:                "Pulled",
