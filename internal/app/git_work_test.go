@@ -3,6 +3,8 @@ package app
 import (
 	"image"
 	"testing"
+
+	"github.com/nus/dogubako/internal/i18n"
 )
 
 func TestGitHistGraphHeight(t *testing.T) {
@@ -145,5 +147,25 @@ func TestGitChangeLabelWidths(t *testing.T) {
 	}
 	if name, dir := gitChangeLabelWidths(0, 10, 8, 4); name != 0 || dir != 0 {
 		t.Fatalf("empty row = %d, %d", name, dir)
+	}
+}
+
+func TestChangeMenuPaths(t *testing.T) {
+	got := changeMenuPaths([]string{"a.txt", "b.txt"}, "b.txt")
+	if len(got) != 2 || got[0] != "a.txt" || got[1] != "b.txt" {
+		t.Fatalf("inside selection = %#v", got)
+	}
+	got = changeMenuPaths([]string{"a.txt", "b.txt"}, "c.txt")
+	if len(got) != 1 || got[0] != "c.txt" {
+		t.Fatalf("outside selection = %#v", got)
+	}
+	if got := changeDisplayName("dir/old.txt -> sub/new.txt"); got != "new.txt" {
+		t.Fatalf("display = %q", got)
+	}
+	if got := discardAsk(i18n.EN, []string{"dir/a.txt"}); got != `Discard changes to "a.txt"?` {
+		t.Fatalf("one file = %q", got)
+	}
+	if got := discardAsk(i18n.EN, []string{"a.txt", "b.txt"}); got != "Discard changes to 2 files?" {
+		t.Fatalf("many = %q", got)
 	}
 }

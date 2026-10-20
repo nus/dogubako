@@ -541,8 +541,9 @@ type gitFileSection struct {
 
 	items []guigui.LinearLayoutItem
 
-	fileItems []basicwidget.ListItem[string]
-	sel       []string
+	fileItems  []basicwidget.ListItem[string]
+	sel        []string
+	listBounds image.Rectangle
 
 	checked bool
 	onCheck func(paths []string, checked bool)
@@ -572,6 +573,46 @@ func (s *gitFileSection) selectedPath() string {
 		return ""
 	}
 	return s.sel[0]
+}
+
+// pathAtCursor is the file under the pointer, when one is.
+// The hit row spans the list width, matching the list's own hover target.
+func (s *gitFileSection) pathAtCursor() (string, bool) {
+	c := image.Pt(ebiten.CursorPosition())
+	if !c.In(s.listBounds) {
+		return "", false
+	}
+	for i := 0; i < s.list.ItemCount(); i++ {
+		b := s.list.ItemBounds(i)
+		if b.Empty() {
+			continue
+		}
+		b.Min.X = s.listBounds.Min.X
+		b.Max.X = s.listBounds.Max.X
+		if !c.In(b) {
+			continue
+		}
+		item, ok := s.list.ItemByIndex(i)
+		if !ok || item.Value == "" {
+			return "", false
+		}
+		return item.Value, true
+	}
+	return "", false
+}
+
+// changeMenuPaths is the selection the context menu acts on.
+// A click inside the selection keeps every selected path. A click outside it uses that path alone.
+func changeMenuPaths(selected []string, path string) []string {
+	for _, p := range selected {
+		if p == path {
+			return append([]string(nil), selected...)
+		}
+	}
+	if path == "" {
+		return nil
+	}
+	return []string{path}
 }
 
 func (s *gitFileSection) setFiles(context *guigui.Context, entries []gitcli.StatusEntry, checked bool, enabled bool, pickEmpty bool, onPick func(), onCheck func(paths []string, checked bool)) {
@@ -653,6 +694,13 @@ func (s *gitFileSection) Build(context *guigui.Context, adder *guigui.ChildAdder
 
 func (s *gitFileSection) Layout(context *guigui.Context, widgetBounds *guigui.WidgetBounds, layouter *guigui.ChildLayouter) {
 	u := basicwidget.UnitSize(context)
+	b := widgetBounds.Bounds()
+	gap := u / 6
+	top := b.Min.Y + u + gap
+	if top > b.Max.Y {
+		top = b.Max.Y
+	}
+	s.listBounds = image.Rect(b.Min.X, top, b.Max.X, b.Max.Y)
 	s.items = s.items[:0]
 	s.items = append(s.items,
 		guigui.LinearLayoutItem{Widget: &s.title, Size: guigui.FixedSize(u)},
@@ -661,8 +709,8 @@ func (s *gitFileSection) Layout(context *guigui.Context, widgetBounds *guigui.Wi
 	(guigui.LinearLayout{
 		Direction: guigui.LayoutDirectionVertical,
 		Items:     s.items,
-		Gap:       u / 6,
-	}).LayoutWidgets(context, widgetBounds.Bounds(), layouter)
+		Gap:       gap,
+	}).LayoutWidgets(context, b, layouter)
 }
 
 func (s *gitFileSection) Measure(context *guigui.Context, constraints guigui.Constraints) image.Point {

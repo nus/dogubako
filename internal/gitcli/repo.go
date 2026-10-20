@@ -503,6 +503,136 @@ func (r *Repo) Unstage(ctx context.Context, paths []string) error {
 	return r.run(ctx, args...)
 }
 
+// Discard throws away changes to paths.
+// staged restores the index and the worktree to HEAD.
+// Otherwise the worktree is restored to the index, and untracked paths are deleted.
+func (r *Repo) Discard(ctx context.Context, paths []string, staged bool) error {
+	if err := ctx.Err(); err != nil {
+		return err
+	}
+	paths = discardPaths(paths, staged)
+	if len(paths) == 0 {
+		return fmt.Errorf("no paths")
+	}
+	if staged {
+		return r.discardIndex(ctx, paths)
+	}
+	return r.discardWorktree(ctx, paths)
+}
+
+func (r *Repo) discardIndex(ctx context.Context, paths []string) error {
+	out, err := r.output(ctx, "rev-parse", "--verify", "--quiet", "HEAD")
+	if err != nil || strings.TrimSpace(out) == "" {
+		if ctx.Err() != nil {
+			return ctx.Err()
+		}
+		args := append([]string{"rm", "-f", "--"}, paths...)
+		return r.run(ctx, args...)
+	}
+	args := append([]string{"restore", "--source=HEAD", "--staged", "--worktree", "--"}, paths...)
+	return r.run(ctx, args...)
+}
+
+func (r *Repo) discardWorktree(ctx context.Context, paths []string) error {
+	tracked, untracked, err := r.splitTracked(ctx, paths)
+	if err != nil {
+		return err
+	}
+	if len(tracked) > 0 {
+		args := append([]string{"restore", "--worktree", "--"}, tracked...)
+		if err := r.run(ctx, args...); err != nil {
+			return err
+		}
+	}
+	if len(untracked) > 0 {
+		args := append([]string{"clean", "-f", "--"}, untracked...)
+		if err := r.run(ctx, args...); err != nil {
+			return err
+		}
+	}
+	return nil
+}
+
+func (r *Repo) splitTracked(ctx context.Context, paths []string) (tracked, untracked []string, err error) {
+	args := append([]string{"ls-files", "-z", "--"}, paths...)
+	out, err := r.output(ctx, args...)
+	if err != nil {
+		return nil, nil, err
+	}
+	have := make(map[string]bool, len(paths))
+	for _, p := range strings.Split(out, "\x00") {
+		if p != "" {
+			have[p] = true
+		}
+	}
+	for _, p := range paths {
+		if have[p] {
+			tracked = append(tracked, p)
+		} else {
+			untracked = append(untracked, p)
+		}
+	}
+	return tracked, untracked, nil
+}
+
+// discardPaths is the pathspec list for Discard.
+// A porcelain rename is "old -> new". Staged discard covers both sides.
+// A worktree discard uses the destination, which is the file that changed.
+func discardPaths(paths []string, staged bool) []string {
+	seen := make(map[string]bool, len(paths))
+	var out []string
+	add := func(p string) {
+		p = strings.TrimSpace(p)
+		if p == "" || p == "." || p == ".." || strings.Contains(p, "\x00") || seen[p] {
+			return
+		}
+		seen[p] = true
+		out = append(out, p)
+	}
+	for _, p := range paths {
+		if staged {
+			for _, part := range statusIndexPaths(p) {
+				add(part)
+			}
+			continue
+		}
+		add(statusWorktreePath(p))
+	}
+	return out
+}
+
+func statusIndexPaths(path string) []string {
+	old, neu, renamed := splitStatusRename(path)
+	if !renamed {
+		return []string{path}
+	}
+	if old == neu {
+		return []string{old}
+	}
+	return []string{old, neu}
+}
+
+func statusWorktreePath(path string) string {
+	_, neu, renamed := splitStatusRename(path)
+	if renamed {
+		return neu
+	}
+	return path
+}
+
+func splitStatusRename(path string) (old, neu string, renamed bool) {
+	i := strings.LastIndex(path, " -> ")
+	if i <= 0 {
+		return path, path, false
+	}
+	old = strings.TrimSpace(path[:i])
+	neu = strings.TrimSpace(path[i+len(" -> "):])
+	if old == "" || neu == "" {
+		return path, path, false
+	}
+	return old, neu, true
+}
+
 // DiffWork returns the patch for path. staged reads the index; otherwise the worktree.
 // An untracked file is diffed against /dev/null.
 func (r *Repo) DiffWork(ctx context.Context, path string, staged bool) (string, error) {

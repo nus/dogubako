@@ -701,6 +701,18 @@ func (m *gitSession) DoUnstage(paths []string) {
 	})
 }
 
+// DoDiscard throws away changes to paths.
+// staged restores the index and the worktree to HEAD.
+func (m *gitSession) DoDiscard(paths []string, staged bool) {
+	if !m.HasRepo() || m.Busy() || len(paths) == 0 {
+		return
+	}
+	paths = append([]string(nil), paths...)
+	m.startOp(i18n.StatusGitDiscardOk, i18n.StatusGitDiscardFailed, func(ctx context.Context, repo *gitcli.Repo) error {
+		return repo.Discard(ctx, paths, staged)
+	})
+}
+
 // DoApplyPatch stages or unstages the lines described by patch.
 func (m *gitSession) DoApplyPatch(patch string, reverse bool) {
 	if !m.HasRepo() || m.Busy() || strings.TrimSpace(patch) == "" {

@@ -200,6 +200,7 @@ func (t *GitTool) setSideDragPassthrough(context *guigui.Context, pass bool) {
 		&t.commitMenu,
 		&t.tagMenu,
 		&t.selMenu,
+		&t.changeMenu,
 		&t.confirm,
 		&t.rename,
 	} {
