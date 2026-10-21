@@ -145,6 +145,7 @@ type GitTool struct {
 	showChanges bool
 	diffStaged  bool
 	diffSplit   bool
+	diffWrap    bool
 	workPanes   gitWorkPanes
 	msgInput    guigui.WidgetWithSize[*basicwidget.TextInput]
 	status      basicwidget.Text
@@ -1435,6 +1436,7 @@ func (t *GitTool) setHistDiff(lang i18n.Lang, model *GitModel) {
 	shown := t.openHash + "\x00" + t.histFile
 	t.histStack.diff.Set(body, empty, shown)
 	t.histStack.diff.SetSplit(lang, t.diffSplit, t.setDiffSplit)
+	t.histStack.diff.SetWrap(lang, t.diffWrap, t.setDiffWrap)
 }
 
 func (t *GitTool) setDiffSplit(split bool) {
@@ -1442,6 +1444,14 @@ func (t *GitTool) setDiffSplit(split bool) {
 		return
 	}
 	t.diffSplit = split
+	guigui.RequestRebuild()
+}
+
+func (t *GitTool) setDiffWrap(wrap bool) {
+	if t.diffWrap == wrap {
+		return
+	}
+	t.diffWrap = wrap
 	guigui.RequestRebuild()
 }
 

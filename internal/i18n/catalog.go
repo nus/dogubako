@@ -171,6 +171,8 @@ const (
 	GitChangeContent    Key = "git.change_content"
 	GitDiffCompact      Key = "git.diff_compact"
 	GitDiffSplit        Key = "git.diff_split"
+	GitDiffNoWrap       Key = "git.diff_nowrap"
+	GitDiffWrap         Key = "git.diff_wrap"
 	GitNoChanges        Key = "git.no_changes"
 
 	StopwatchStart   Key = "stopwatch.start"
@@ -489,6 +491,8 @@ var catalogs = map[Lang]map[Key]string{
 		GitChangeContent:               "変更内容",
 		GitDiffCompact:                 "コンパクト",
 		GitDiffSplit:                   "分割",
+		GitDiffNoWrap:                  "折り返しなし",
+		GitDiffWrap:                    "折り返し",
 		GitNoChanges:                   "変更はありません。",
 		MTPDevices:                     "デバイス",
 		MTPRefresh:                     "再読み込み",
@@ -792,6 +796,8 @@ var catalogs = map[Lang]map[Key]string{
 		GitChangeContent:               "Changes",
 		GitDiffCompact:                 "Compact",
 		GitDiffSplit:                   "Split",
+		GitDiffNoWrap:                  "No wrap",
+		GitDiffWrap:                    "Wrap",
 		GitNoChanges:                   "No changes.",
 		MTPDevices:                     "Devices",
 		MTPRefresh:                     "Reload",

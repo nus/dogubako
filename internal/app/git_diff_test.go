@@ -421,6 +421,241 @@ func TestStyleDiffGutter(t *testing.T) {
 	}
 }
 
+func TestExpandWrappedLines(t *testing.T) {
+	cases := []struct {
+		text   string
+		counts []int
+		want   string
+	}{
+		{"ab\ncd\n", []int{2, 1, 1}, "ab\n\ncd\n"},
+		{"ab\ncd\n", []int{1, 2, 1}, "ab\ncd\n\n"},
+		{"ab", []int{3}, "ab\n\n"},
+		{"", []int{2}, "\n"},
+		{"ab\n", []int{1, 1}, "ab\n"},
+		{"ab\n", []int{2, 3}, "ab\n\n\n\n"},
+		{"ab\n", []int{2}, "ab\n"},
+	}
+	for _, tc := range cases {
+		got := expandWrappedLines(tc.text, tc.counts)
+		if got != tc.want {
+			t.Fatalf("expand(%q, %v) = %q, want %q", tc.text, tc.counts, got, tc.want)
+		}
+		if got == tc.text && len(diffLogicalLines(tc.text)) != len(tc.counts) {
+			continue
+		}
+		if len(diffLogicalLines(got)) != sumWrapCounts(tc.counts) && len(diffLogicalLines(tc.text)) == len(tc.counts) {
+			t.Fatalf("expand(%q, %v) lines %d, want %d", tc.text, tc.counts, len(diffLogicalLines(got)), sumWrapCounts(tc.counts))
+		}
+	}
+}
+
+func TestExpandKinds(t *testing.T) {
+	if got := string(expandKinds([]byte("+-"), []int{2, 1, 1})); got != "++-" {
+		t.Fatalf("with trailing = %q", got)
+	}
+	if got := string(expandKinds([]byte("+-"), []int{2, 1})); got != "++-" {
+		t.Fatalf("without trailing = %q", got)
+	}
+	if expandKinds([]byte("+"), []int{1, 1, 1}) != nil {
+		t.Fatal("mismatched counts should be dropped")
+	}
+	if expandKinds(nil, []int{2}) != nil {
+		t.Fatal("no kinds")
+	}
+}
+
+func TestExpandedGutterKeepsNumberColor(t *testing.T) {
+	text := expandWrappedLines("  1 \n", []int{2, 1})
+	kinds := expandKinds([]byte{' '}, []int{2, 1})
+	styles := styleSplit(text, kinds, false, true)
+	pal := diffPalette(false)
+	got, uniform := styles.ColorInRange(0, len(text), color.NRGBA{})
+	if !uniform || got != pal.meta {
+		t.Fatalf("wrapped gutter color = %v uniform=%v", got, uniform)
+	}
+}
+
+func TestCompactAndGutterShareLines(t *testing.T) {
+	diff := "" +
+		"diff --git a/a.txt b/a.txt\n" +
+		"--- a/a.txt\n" +
+		"+++ b/a.txt\n" +
+		"@@ -1,2 +1,2 @@\n" +
+		" ctx\n" +
+		"-old\n" +
+		"+new\n"
+	marks, body, _, kinds := compactDiff(diff)
+	gutter := diffGutter(diff)
+	if len(diffLogicalLines(body)) != len(diffLogicalLines(gutter)) || len(diffLogicalLines(body)) != len(diffLogicalLines(marks)) {
+		t.Fatalf("lines body %d gutter %d marks %d", len(diffLogicalLines(body)), len(diffLogicalLines(gutter)), len(diffLogicalLines(marks)))
+	}
+	if len(kinds) != len(diffLogicalLines(body))-1 {
+		t.Fatalf("kinds %d lines %d", len(kinds), len(diffLogicalLines(body)))
+	}
+}
+
+func TestDiffLogicalLinesMatchWidget(t *testing.T) {
+	samples := []string{"", "a", "a\n", "a\nb", "a\nb\n", "a\r\nb\r\n"}
+	var widget basicwidget.Text
+	widget.SetMultiline(true)
+	widget.SetEditable(false)
+	for _, s := range samples {
+		widget.SetValue(s)
+		lines := diffLogicalLines(s)
+		if widget.LineCount() != len(lines) {
+			t.Fatalf("%q widget %d logical %d", s, widget.LineCount(), len(lines))
+		}
+		for i, line := range lines {
+			start := widget.LineStartInBytes(i)
+			end := len(s)
+			if i+1 < len(lines) {
+				end = widget.LineStartInBytes(i + 1)
+			}
+			if s[start:end] != line {
+				t.Fatalf("%q line %d %q != %q", s, i, s[start:end], line)
+			}
+		}
+	}
+}
+
+func TestDiffWrapGlyphs(t *testing.T) {
+	const size = float32(100)
+	off := diffWrapStrokes(false, size)
+	on := diffWrapStrokes(true, size)
+	if len(off) == 0 || len(on) == 0 {
+		t.Fatal("empty glyph")
+	}
+	if diffWrapStrokesSame(off, on) {
+		t.Fatal("wrap and no-wrap glyphs match")
+	}
+	if !diffWrapStrokesInside(off, size) || !diffWrapStrokesInside(on, size) {
+		t.Fatal("glyph is clipped")
+	}
+	if diffWrapVerticalCount(off) != 0 {
+		t.Fatal("no-wrap glyph turns")
+	}
+	if diffWrapVerticalCount(on) == 0 {
+		t.Fatal("wrap glyph does not turn down")
+	}
+	if !diffWrapArrowPoints(off, 1) {
+		t.Fatal("no-wrap glyph does not point right")
+	}
+	if !diffWrapArrowPoints(on, -1) {
+		t.Fatal("wrap glyph does not point back")
+	}
+}
+
+func diffWrapStrokesSame(a, b [][4]float32) bool {
+	if len(a) != len(b) {
+		return false
+	}
+	for i := range a {
+		if a[i] != b[i] {
+			return false
+		}
+	}
+	return true
+}
+
+func diffWrapStrokesInside(strokes [][4]float32, size float32) bool {
+	for _, s := range strokes {
+		for _, v := range s {
+			if v < 0 || v > size {
+				return false
+			}
+		}
+	}
+	return true
+}
+
+func diffWrapVerticalCount(strokes [][4]float32) int {
+	n := 0
+	for _, s := range strokes {
+		if s[0] == s[2] && s[1] != s[3] {
+			n++
+		}
+	}
+	return n
+}
+
+func diffWrapArrowPoints(strokes [][4]float32, dir float32) bool {
+	minX := strokes[0][0]
+	maxX := strokes[0][0]
+	for _, s := range strokes {
+		for _, x := range []float32{s[0], s[2]} {
+			if x < minX {
+				minX = x
+			}
+			if x > maxX {
+				maxX = x
+			}
+		}
+	}
+	for _, s := range strokes {
+		if s[1] == s[3] || s[0] == s[2] {
+			continue
+		}
+		left, right := s[0], s[2]
+		if right < left {
+			left, right = right, left
+		}
+		if dir > 0 && right == maxX {
+			return true
+		}
+		if dir < 0 && left == minX {
+			return true
+		}
+	}
+	return false
+}
+
+func sumWrapCounts(counts []int) int {
+	n := 0
+	for _, c := range counts {
+		if c < 1 {
+			c = 1
+		}
+		n += c
+	}
+	return n
+}
+
+func TestDiffWheelAxes(t *testing.T) {
+	// A mouse wheel is vertical. A short, wide diff uses it to reach the line end.
+	dx, dy := diffWheelAxes(0, -12, 200, 400, 800, 100, false)
+	if dx != -12 || dy != 0 {
+		t.Fatalf("short wide diff: got %v,%v", dx, dy)
+	}
+	// A tall diff keeps the vertical wheel, and Shift sends it sideways.
+	dx, dy = diffWheelAxes(0, -12, 200, 400, 800, 900, false)
+	if dx != 0 || dy != -12 {
+		t.Fatalf("tall diff: got %v,%v", dx, dy)
+	}
+	dx, dy = diffWheelAxes(0, -12, 200, 400, 800, 900, true)
+	if dx != -12 || dy != 0 {
+		t.Fatalf("shift: got %v,%v", dx, dy)
+	}
+	dx, dy = diffWheelAxes(0, -12, 200, 400, 100, 900, true)
+	if dx != 0 || dy != -12 {
+		t.Fatalf("shift with nothing past the pane: got %v,%v", dx, dy)
+	}
+}
+
+func TestClampScrollOffset(t *testing.T) {
+	if got := clampScrollOffset(-20, 100, 250); got != -20 {
+		t.Fatalf("inside range: %v", got)
+	}
+	if got := clampScrollOffset(-999, 100, 250); got != -150 {
+		t.Fatalf("past the end: %v", got)
+	}
+	if got := clampScrollOffset(10, 100, 250); got != 0 {
+		t.Fatalf("before the start: %v", got)
+	}
+	if got := clampScrollOffset(-10, 100, 40); got != 0 {
+		t.Fatalf("content that fits: %v", got)
+	}
+}
+
 func assertColor(t *testing.T, styles basicwidget.TextStyles, start, end int, want color.NRGBA) {
 	t.Helper()
 	got, uniform := styles.ColorInRange(start, end, color.NRGBA{})

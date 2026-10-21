@@ -24,20 +24,21 @@ type gitFileDiff struct {
 // Compact keeps the unified patch with old and new line numbers beside it.
 // Hunk markers stay visible in their own column, outside the text selection.
 // Split puts the old file on the left and the new file on the right.
-// Each split column scrolls horizontally on its own. Vertical scrolling stays in step.
+// The code in each column scrolls horizontally on its own, so a line that
+// runs past the pane can be brought into view. Line numbers and markers stay
+// at the left. Vertical scrolling stays in step.
+// With wrapping on, long lines break inside the pane and the number and marker
+// columns grow so each source line stays beside its text.
 type gitDiffView struct {
 	guigui.DefaultWidget
 
-	panel   basicwidget.Panel
 	compact gitDiffSide
-
-	leftPanel  basicwidget.Panel
-	rightPanel basicwidget.Panel
-	left       gitDiffSide
-	right      gitDiffSide
+	left    gitDiffSide
+	right   gitDiffSide
 
 	text  string
 	split bool
+	wrap  bool
 	dark  bool
 
 	gutter                string
@@ -52,12 +53,12 @@ type gitDiffView struct {
 	onMenu                func(context *guigui.Context, start, end int) bool
 	useMenu               bool
 	menuRanges            [][2]int
-	leftX, leftY          float64
-	rightX, rightY        float64
+	leftY, rightY         float64
 }
 
-func (v *gitDiffView) Set(text string, dark, split bool) {
+func (v *gitDiffView) Set(text string, dark, split, wrap bool) {
 	v.dark = dark
+	v.wrap = wrap
 	if text == v.text && split == v.split {
 		return
 	}
@@ -78,11 +79,10 @@ func (v *gitDiffView) Set(text string, dark, split bool) {
 }
 
 func (v *gitDiffView) ResetScroll() {
-	v.leftX, v.leftY = 0, 0
-	v.rightX, v.rightY = 0, 0
-	v.panel.ForceSetScrollOffset(0, 0)
-	v.leftPanel.ForceSetScrollOffset(0, 0)
-	v.rightPanel.ForceSetScrollOffset(0, 0)
+	v.leftY, v.rightY = 0, 0
+	v.compact.resetScroll()
+	v.left.resetScroll()
+	v.right.resetScroll()
 }
 
 func (v *gitDiffView) SetLineMenu(f func(context *guigui.Context, start, end int) bool) {
@@ -149,42 +149,38 @@ func (v *gitDiffView) bindMenu(text *gitDiffText, left bool) {
 	}
 }
 
-func (v *gitDiffView) syncFromLeft(x, y float64) {
-	v.leftX = x
+func (v *gitDiffView) syncFromLeft(y float64) {
 	if y == v.leftY {
 		return
 	}
 	v.leftY = y
-	v.rightPanel.ForceSetScrollOffset(v.rightX, y)
+	v.rightY = y
+	v.right.setScrollY(y)
 }
 
-func (v *gitDiffView) syncFromRight(x, y float64) {
-	v.rightX = x
+func (v *gitDiffView) syncFromRight(y float64) {
 	if y == v.rightY {
 		return
 	}
 	v.rightY = y
-	v.leftPanel.ForceSetScrollOffset(v.leftX, y)
+	v.leftY = y
+	v.left.setScrollY(y)
 }
 
 func (v *gitDiffView) Build(context *guigui.Context, adder *guigui.ChildAdder) error {
 	if v.split {
-		adder.AddWidget(&v.leftPanel)
-		adder.AddWidget(&v.rightPanel)
-		configureDiffPanel(&v.leftPanel)
-		configureDiffPanel(&v.rightPanel)
-		v.left.prepare(v.leftNum, v.leftBody, styleSplit(v.leftNum, v.leftKinds, v.dark, true), styleSplit(v.leftBody, v.leftKinds, v.dark, false))
-		v.right.prepare(v.rightNum, v.rightBody, styleSplit(v.rightNum, v.rightKinds, v.dark, true), styleSplit(v.rightBody, v.rightKinds, v.dark, false))
-		v.leftPanel.SetContent(&v.left)
-		v.rightPanel.SetContent(&v.right)
+		v.left.onScrollY = v.syncFromLeft
+		v.right.onScrollY = v.syncFromRight
+		adder.AddWidget(&v.left)
+		adder.AddWidget(&v.right)
+		v.left.setWrap(v.wrap)
+		v.right.setWrap(v.wrap)
+		v.left.prepare(v.leftNum, v.leftBody, styleSplit(v.leftNum, v.leftKinds, v.dark, true), styleSplit(v.leftBody, v.leftKinds, v.dark, false), v.leftKinds, v.dark)
+		v.right.prepare(v.rightNum, v.rightBody, styleSplit(v.rightNum, v.rightKinds, v.dark, true), styleSplit(v.rightBody, v.rightKinds, v.dark, false), v.rightKinds, v.dark)
 		v.bindMenu(&v.left.body, true)
 		v.bindMenu(&v.right.body, false)
-		v.leftPanel.OnScroll(func(_ *guigui.Context, x, y float64) { v.syncFromLeft(x, y) })
-		v.rightPanel.OnScroll(func(_ *guigui.Context, x, y float64) { v.syncFromRight(x, y) })
 		return nil
 	}
-	adder.AddWidget(&v.panel)
-	configureDiffPanel(&v.panel)
 	var bodyStyle, markStyle basicwidget.TextStyles
 	if v.compactMarks != "" {
 		bodyStyle = styleSplit(v.compactBody, v.compactKinds, v.dark, false)
@@ -192,8 +188,9 @@ func (v *gitDiffView) Build(context *guigui.Context, adder *guigui.ChildAdder) e
 	} else {
 		bodyStyle = styleDiff(v.compactBody, v.dark)
 	}
-	v.compact.prepareMarked(v.gutter, v.compactMarks, v.compactBody, styleDiffGutter(v.gutter, v.text, v.dark), markStyle, bodyStyle)
-	v.panel.SetContent(&v.compact)
+	adder.AddWidget(&v.compact)
+	v.compact.setWrap(v.wrap)
+	v.compact.prepareMarked(v.gutter, v.compactMarks, v.compactBody, styleDiffGutter(v.gutter, v.text, v.dark), markStyle, bodyStyle, v.compactKinds, v.compactKinds, v.dark)
 	v.bindMenu(&v.compact.body, false)
 	return nil
 }
@@ -201,7 +198,7 @@ func (v *gitDiffView) Build(context *guigui.Context, adder *guigui.ChildAdder) e
 func (v *gitDiffView) Layout(context *guigui.Context, widgetBounds *guigui.WidgetBounds, layouter *guigui.ChildLayouter) {
 	bounds := widgetBounds.Bounds()
 	if !v.split {
-		layouter.LayoutWidget(&v.panel, bounds)
+		layouter.LayoutWidget(&v.compact, bounds)
 		return
 	}
 	gap := basicwidget.UnitSize(context) / 8
@@ -217,8 +214,8 @@ func (v *gitDiffView) Layout(context *guigui.Context, widgetBounds *guigui.Widge
 	if rightMin > bounds.Max.X {
 		rightMin = bounds.Max.X
 	}
-	layouter.LayoutWidget(&v.leftPanel, image.Rect(bounds.Min.X, bounds.Min.Y, leftMax, bounds.Max.Y))
-	layouter.LayoutWidget(&v.rightPanel, image.Rect(rightMin, bounds.Min.Y, bounds.Max.X, bounds.Max.Y))
+	layouter.LayoutWidget(&v.left, image.Rect(bounds.Min.X, bounds.Min.Y, leftMax, bounds.Max.Y))
+	layouter.LayoutWidget(&v.right, image.Rect(rightMin, bounds.Min.Y, bounds.Max.X, bounds.Max.Y))
 }
 
 func (v *gitDiffView) Measure(context *guigui.Context, constraints guigui.Constraints) image.Point {
@@ -666,6 +663,93 @@ func formatDiffNum(n, width int) string {
 		return strings.Repeat(" ", width)
 	}
 	return fmt.Sprintf("%*d", width, n)
+}
+
+// diffLogicalLines splits text the way the diff text widget counts lines.
+// The empty string is one line. A trailing line break adds an empty line,
+// so "abc\n" is ["abc\n", ""].
+func diffLogicalLines(text string) []string {
+	if text == "" {
+		return []string{""}
+	}
+	lines := make([]string, 0, strings.Count(text, "\n")+1)
+	start := 0
+	for i := 0; i < len(text); i++ {
+		if text[i] != '\n' {
+			continue
+		}
+		lines = append(lines, text[start:i+1])
+		start = i + 1
+	}
+	lines = append(lines, text[start:])
+	return lines
+}
+
+// expandWrappedLines repeats blank lines so logical line i occupies counts[i]
+// visual rows. counts follows diffLogicalLines. A length mismatch leaves text
+// unchanged, which keeps the number column on its original lines.
+func expandWrappedLines(text string, counts []int) string {
+	lines := diffLogicalLines(text)
+	if len(lines) != len(counts) {
+		return text
+	}
+	extra := 0
+	for _, n := range counts {
+		if n > 1 {
+			extra += n - 1
+		}
+	}
+	if extra == 0 {
+		return text
+	}
+	var b strings.Builder
+	b.Grow(len(text) + extra)
+	for i, line := range lines {
+		n := counts[i]
+		if n < 1 {
+			n = 1
+		}
+		if line != "" {
+			b.WriteString(line)
+		}
+		for k := 1; k < n; k++ {
+			b.WriteByte('\n')
+		}
+	}
+	return b.String()
+}
+
+// expandKinds repeats each content line's kind once per visual row.
+// counts may include the trailing empty logical line that a final newline
+// adds; that line has no kind. A mismatch returns nil.
+func expandKinds(kinds []byte, counts []int) []byte {
+	if len(kinds) == 0 {
+		return nil
+	}
+	content := counts
+	if len(counts) == len(kinds)+1 {
+		content = counts[:len(kinds)]
+	} else if len(counts) != len(kinds) {
+		return nil
+	}
+	n := 0
+	for _, c := range content {
+		if c < 1 {
+			c = 1
+		}
+		n += c
+	}
+	out := make([]byte, 0, n)
+	for i, k := range kinds {
+		c := content[i]
+		if c < 1 {
+			c = 1
+		}
+		for range c {
+			out = append(out, k)
+		}
+	}
+	return out
 }
 
 func decimalDigits(n int) int {
