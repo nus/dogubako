@@ -973,16 +973,18 @@ func (r *gitFileRow) Measure(context *guigui.Context, constraints guigui.Constra
 type gitWorkDiff struct {
 	guigui.DefaultWidget
 
-	panel basicwidget.Panel
-	mode  gitDiffModeBar
-	view  gitDiffView
-	note  basicwidget.Text
+	panel   basicwidget.Panel
+	mode    gitDiffModeBar
+	wrapBar gitDiffWrapBar
+	view    gitDiffView
+	note    basicwidget.Text
 
-	body  string
-	empty string
-	shown string
-	split bool
-	show  bool
+	body   string
+	empty  string
+	shown  string
+	split  bool
+	wrapOn bool
+	show   bool
 }
 
 func (d *gitWorkDiff) Set(body, empty, shown string) {
@@ -1001,6 +1003,15 @@ func (d *gitWorkDiff) SetSplit(lang i18n.Lang, split bool, onSplit func(bool)) {
 		return
 	}
 	d.split = split
+	d.view.ResetScroll()
+}
+
+func (d *gitWorkDiff) SetWrap(lang i18n.Lang, wrap bool, onWrap func(bool)) {
+	d.wrapBar.Set(lang, wrap, onWrap)
+	if wrap == d.wrapOn {
+		return
+	}
+	d.wrapOn = wrap
 	d.view.ResetScroll()
 }
 
@@ -1031,9 +1042,10 @@ func (d *gitWorkDiff) Build(context *guigui.Context, adder *guigui.ChildAdder) e
 		d.panel.SetContent(&d.note)
 		return nil
 	}
+	adder.AddWidget(&d.wrapBar)
 	adder.AddWidget(&d.mode)
 	adder.AddWidget(&d.view)
-	d.view.Set(d.body, context.ColorMode() == ebiten.ColorModeDark, d.split)
+	d.view.Set(d.body, context.ColorMode() == ebiten.ColorModeDark, d.split, d.wrapOn)
 	return nil
 }
 
@@ -1045,16 +1057,28 @@ func (d *gitWorkDiff) Layout(context *guigui.Context, widgetBounds *guigui.Widge
 	}
 	u := basicwidget.UnitSize(context)
 	mode := d.mode.Measure(context, guigui.Constraints{})
+	wrap := d.wrapBar.Measure(context, guigui.Constraints{})
 	headerH := mode.Y
+	if wrap.Y > headerH {
+		headerH = wrap.Y
+	}
 	if headerH <= 0 {
 		headerH = u
 	}
+	gap := u / 8
+	between := u / 4
 	modeW := mode.X
+	wrapW := wrap.X
 	if modeW > bounds.Dx() {
 		modeW = bounds.Dx()
 	}
-	gap := u / 8
-	layouter.LayoutWidget(&d.mode, image.Rect(bounds.Max.X-modeW, bounds.Min.Y, bounds.Max.X, bounds.Min.Y+headerH))
+	modeX := bounds.Max.X - modeW
+	wrapX := modeX - between - wrapW
+	if wrapX < bounds.Min.X {
+		wrapX = bounds.Min.X
+	}
+	layouter.LayoutWidget(&d.wrapBar, image.Rect(wrapX, bounds.Min.Y, wrapX+wrapW, bounds.Min.Y+headerH))
+	layouter.LayoutWidget(&d.mode, image.Rect(modeX, bounds.Min.Y, bounds.Max.X, bounds.Min.Y+headerH))
 	body := image.Rect(bounds.Min.X, bounds.Min.Y+headerH+gap, bounds.Max.X, bounds.Max.Y)
 	if body.Min.Y > body.Max.Y {
 		body.Min.Y = body.Max.Y
@@ -1086,6 +1110,7 @@ func (t *GitTool) setWorkDiff(lang i18n.Lang, model *GitModel) {
 	}
 	t.workPanes.diff.Set(body, empty, shown)
 	t.workPanes.diff.SetSplit(lang, t.diffSplit, t.setDiffSplit)
+	t.workPanes.diff.SetWrap(lang, t.diffWrap, t.setDiffWrap)
 	t.workPanes.diff.SetLineMenu(func(context *guigui.Context, start, end int) bool {
 		return t.openLineMenu(context, start, end)
 	})
