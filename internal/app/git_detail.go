@@ -358,6 +358,7 @@ type gitFileNode struct {
 	path  string
 	add   int
 	del   int
+	file  bool // this path is a changed file, not only a parent directory
 	kids  []*gitFileNode
 	index map[string]int
 }
@@ -375,7 +376,20 @@ func (n *gitFileNode) child(name, path string) *gitFileNode {
 	return c
 }
 
+// hasDirectFile reports whether a changed file sits directly inside n.
+func (n *gitFileNode) hasDirectFile() bool {
+	for _, c := range n.kids {
+		if c.file {
+			return true
+		}
+	}
+	return false
+}
+
 // fileTreeLines groups file stats into a folder tree. folded paths are collapsed.
+// A directory with no changed file of its own is not a row. Its name is joined
+// onto the descendant that does contain files, so internal/app/git.go shows as
+// the folder internal/app and the file git.go. Fold keys use that joined path.
 func fileTreeLines(stats []gitPathStat, folded map[string]bool) []gitTreeLine {
 	order := append([]gitPathStat(nil), stats...)
 	sort.Slice(order, func(i, j int) bool { return order[i].Path < order[j].Path })
@@ -403,26 +417,35 @@ func fileTreeLines(stats []gitPathStat, folded map[string]bool) []gitTreeLine {
 		if last < 0 {
 			continue
 		}
+		node.file = true
 		node.add = st.Add
 		node.del = st.Del
 	}
 	var out []gitTreeLine
-	var walk func(*gitFileNode, int)
-	walk = func(n *gitFileNode, depth int) {
+	var walk func(*gitFileNode, int, string)
+	walk = func(n *gitFileNode, depth int, prefix string) {
 		for _, c := range n.kids {
+			name := c.name
+			if prefix != "" {
+				name = prefix + "/" + name
+			}
+			if len(c.kids) > 0 && !c.hasDirectFile() {
+				walk(c, depth, name)
+				continue
+			}
 			folder := len(c.kids) > 0
-			line := gitTreeLine{Name: c.name, Path: c.path, Depth: depth, Folder: folder, Collapsed: folder && folded[c.path]}
+			line := gitTreeLine{Name: name, Path: c.path, Depth: depth, Folder: folder, Collapsed: folder && folded[c.path]}
 			if !folder {
 				line.Add = c.add
 				line.Del = c.del
 			}
 			out = append(out, line)
 			if folder && !folded[c.path] {
-				walk(c, depth+1)
+				walk(c, depth+1, "")
 			}
 		}
 	}
-	walk(root, 0)
+	walk(root, 0, "")
 	return out
 }
 

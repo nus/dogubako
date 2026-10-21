@@ -66,15 +66,18 @@ func TestFileTreeLines(t *testing.T) {
 	for _, ln := range lines {
 		names = append(names, ln.Name)
 	}
-	want := []string{"README.md", "internal", "app", "git.go", "git_diff.go"}
+	want := []string{"README.md", "internal/app", "git.go", "git_diff.go"}
 	if strings.Join(names, ",") != strings.Join(want, ",") {
 		t.Fatalf("names = %v", names)
 	}
-	if lines[0].Add != 1 || lines[0].Del != 0 || lines[0].Folder {
+	if lines[0].Add != 1 || lines[0].Del != 0 || lines[0].Folder || lines[0].Depth != 0 {
 		t.Fatalf("readme = %+v", lines[0])
 	}
-	if !lines[1].Folder || lines[1].Collapsed {
-		t.Fatalf("internal = %+v", lines[1])
+	if !lines[1].Folder || lines[1].Collapsed || lines[1].Path != "internal/app" || lines[1].Depth != 0 {
+		t.Fatalf("folder = %+v", lines[1])
+	}
+	if lines[2].Depth != 1 || lines[2].Path != "internal/app/git.go" || lines[2].Add != 12 || lines[2].Del != 3 {
+		t.Fatalf("git.go = %+v", lines[2])
 	}
 	text, addStart, addEnd, delStart, delEnd := fileTreeLabel("git.go", 12, 3)
 	if text != "git.go  (+12 -3)" {
@@ -83,10 +86,64 @@ func TestFileTreeLines(t *testing.T) {
 	if text[addStart:addEnd] != "+12" || text[delStart:delEnd] != "-3" {
 		t.Fatalf("spans %q %q", text[addStart:addEnd], text[delStart:delEnd])
 	}
-	folded := fileTreeLines(stats, map[string]bool{"internal": true})
-	if len(folded) != 2 || folded[1].Name != "internal" || !folded[1].Collapsed {
+	folded := fileTreeLines(stats, map[string]bool{"internal/app": true})
+	if len(folded) != 2 || folded[1].Name != "internal/app" || folded[1].Path != "internal/app" || !folded[1].Collapsed {
 		t.Fatalf("folded = %+v", folded)
 	}
+}
+
+func TestFileTreeLinesCompactsDirsWithoutFiles(t *testing.T) {
+	branches := fileTreeLines([]gitPathStat{
+		{Path: "internal/gitcli/parse.go"},
+		{Path: "internal/app/git.go"},
+	}, nil)
+	if got := treeLineNames(branches); strings.Join(got, ",") != "internal/app,git.go,internal/gitcli,parse.go" {
+		t.Fatalf("branches = %v", got)
+	}
+	if branches[0].Depth != 0 || branches[1].Depth != 1 || branches[2].Depth != 0 || branches[3].Depth != 1 {
+		t.Fatalf("branch depths = %+v", branches)
+	}
+	if branches[1].Path != "internal/app/git.go" || branches[3].Path != "internal/gitcli/parse.go" {
+		t.Fatalf("branch paths = %+v", branches)
+	}
+
+	mixed := fileTreeLines([]gitPathStat{
+		{Path: "internal/app/git.go", Add: 2},
+		{Path: "internal/README.md", Add: 1},
+	}, nil)
+	if got := treeLineNames(mixed); strings.Join(got, ",") != "internal,README.md,app,git.go" {
+		t.Fatalf("mixed = %v", got)
+	}
+	if mixed[0].Depth != 0 || mixed[1].Depth != 1 || mixed[2].Depth != 1 || mixed[3].Depth != 2 {
+		t.Fatalf("mixed depths = %+v", mixed)
+	}
+	if mixed[1].Add != 1 || mixed[1].Path != "internal/README.md" || mixed[3].Path != "internal/app/git.go" {
+		t.Fatalf("mixed files = %+v", mixed)
+	}
+
+	deep := fileTreeLines([]gitPathStat{
+		{Path: "a/b/c/d/other.go"},
+		{Path: "a/b/file.go"},
+	}, nil)
+	if got := treeLineNames(deep); strings.Join(got, ",") != "a/b,c/d,other.go,file.go" {
+		t.Fatalf("deep = %v", got)
+	}
+	if deep[0].Path != "a/b" || deep[1].Path != "a/b/c/d" || deep[1].Depth != 1 || deep[2].Depth != 2 || deep[3].Path != "a/b/file.go" || deep[3].Depth != 1 {
+		t.Fatalf("deep lines = %+v", deep)
+	}
+
+	root := fileTreeLines([]gitPathStat{{Path: "README.md", Add: 1}}, nil)
+	if len(root) != 1 || root[0].Folder || root[0].Name != "README.md" || root[0].Add != 1 {
+		t.Fatalf("root = %+v", root)
+	}
+}
+
+func treeLineNames(lines []gitTreeLine) []string {
+	names := make([]string, len(lines))
+	for i, ln := range lines {
+		names[i] = ln.Name
+	}
+	return names
 }
 
 func TestBridgeEdgesPrefersColor(t *testing.T) {
