@@ -138,30 +138,23 @@ func gitGraphColWidth(rowW, u, lanes int, units float64) int {
 	return clampGitGraphCol(w, rowW, u, lanes)
 }
 
-// gitLaneStep is the space between lane centers in a column of colW pixels.
-// A wider column keeps the natural spacing. A narrower column packs the lanes in.
+// gitLaneStep is the space between lane centers.
+// Spacing stays at the natural lane width. A narrower column clips the lanes
+// past its right edge, the same way the title column clips its text.
 func gitLaneStep(colW, lanes, u int) int {
-	natural := gitLaneWidth(u)
-	n := gitGraphLaneCount(lanes)
-	pad := 0
-	if u > 0 {
-		pad = u / 4
+	return gitLaneWidth(u)
+}
+
+// clipGitGraph limits drawing to the column. Lanes past the right edge stay hidden.
+func clipGitGraph(dst *ebiten.Image, bounds image.Rectangle) (*ebiten.Image, bool) {
+	clip := bounds.Intersect(dst.Bounds())
+	if clip.Empty() {
+		return nil, false
 	}
-	if pad > colW {
-		pad = 0
+	if dst.Bounds() == clip {
+		return dst, false
 	}
-	inner := colW - pad
-	if inner < n {
-		inner = n
-	}
-	step := inner / n
-	if step > natural {
-		step = natural
-	}
-	if step < 1 {
-		return 1
-	}
-	return step
+	return dst.RecyclableSubImage(clip), true
 }
 
 type gitGraphGlyph struct {
@@ -225,6 +218,12 @@ func (g *gitGraphGlyph) Draw(context *guigui.Context, widgetBounds *guigui.Widge
 	b := widgetBounds.Bounds()
 	if b.Empty() {
 		return
+	}
+	if sub, recycle := clipGitGraph(dst, b); sub == nil {
+		return
+	} else if recycle {
+		defer sub.Recycle()
+		dst = sub
 	}
 	u := basicwidget.UnitSize(context)
 	n := g.lanes
@@ -332,6 +331,12 @@ func (g *gitGraphBridge) Draw(context *guigui.Context, widgetBounds *guigui.Widg
 	b := widgetBounds.Bounds()
 	if b.Empty() || len(g.edges) == 0 {
 		return
+	}
+	if sub, recycle := clipGitGraph(dst, b); sub == nil {
+		return
+	} else if recycle {
+		defer sub.Recycle()
+		dst = sub
 	}
 	u := basicwidget.UnitSize(context)
 	lw := gitLaneStep(b.Dx(), g.lanes, u)
@@ -465,13 +470,72 @@ func gitCommitColGap(u int) int {
 	return u / 6
 }
 
+// gitTitleEndPad is empty space inside the right edge of the title column.
+// A full-width glyph of the git mono face is half a unit, so half a character
+// is about a quarter unit.
+func gitTitleEndPad(u int) int {
+	if u < 1 {
+		return 0
+	}
+	return u / 4
+}
+
+// insetGitTitleEnd leaves gitTitleEndPad empty at the right of the title text.
+func insetGitTitleEnd(context *guigui.Context, layouter *guigui.ChildLayouter, row guigui.LinearLayout, bounds image.Rectangle, subject guigui.Widget) {
+	pad := gitTitleEndPad(basicwidget.UnitSize(context))
+	if pad < 1 {
+		return
+	}
+	index := -1
+	for i := range row.Items {
+		if row.Items[i].Widget == subject {
+			index = i
+			break
+		}
+	}
+	if index < 0 {
+		return
+	}
+	b := row.ItemBoundsAt(index, context, bounds)
+	if b.Dx() <= pad {
+		return
+	}
+	b.Max.X -= pad
+	layouter.LayoutWidget(subject, b)
+}
+
 func gitMinSubjectCol(u int) int { return 4 * u }
 
 func gitMinAuthorCol(u int) int { return 3 * u }
 
-func gitMinHashCol(u int) int { return 3 * u }
+// gitCommitWhenLayout is the history date column, "2006-01-02 15:04".
+const gitCommitWhenLayout = "2006-01-02 15:04"
 
-func gitMinDateCol(u int) int { return 5 * u }
+// gitLatinWidth is the width of n monospace Latin glyphs.
+// The git mono face draws Latin at a quarter of a unit.
+func gitLatinWidth(u, n int) int {
+	if u < 1 {
+		u = 1
+	}
+	if n < 1 {
+		n = 1
+	}
+	w := int(float64(u)*float64(n)/4 + 0.5)
+	if w < 1 {
+		return 1
+	}
+	return w
+}
+
+// gitMinHashCol is the width of the short commit id.
+func gitMinHashCol(u int) int {
+	return gitLatinWidth(u, gitcli.ShortHashLen)
+}
+
+// gitMinDateCol is the width of the history date text.
+func gitMinDateCol(u int) int {
+	return gitLatinWidth(u, len(gitCommitWhenLayout))
+}
 
 func gitMaxMetaCol(u int) int { return 48 * u }
 
@@ -1072,7 +1136,7 @@ func (r *gitCommitRow) Set(row gitcli.GraphRow, lanes int, head, expandAbove, ex
 	if row.Commit.When.IsZero() {
 		r.date.SetValue("")
 	} else {
-		r.date.SetValue(row.Commit.When.Local().Format("2006-01-02 15:04"))
+		r.date.SetValue(row.Commit.When.Local().Format(gitCommitWhenLayout))
 	}
 }
 
@@ -1152,7 +1216,10 @@ func (r *gitCommitRow) Layout(context *guigui.Context, widgetBounds *guigui.Widg
 	r.author.SetBaseStyle(&style)
 	r.hash.SetBaseStyle(&style)
 	r.date.SetBaseStyle(&style)
-	r.layoutRow(context, widgetBounds.Bounds().Dx()).LayoutWidgets(context, widgetBounds.Bounds(), layouter)
+	bounds := widgetBounds.Bounds()
+	row := r.layoutRow(context, bounds.Dx())
+	row.LayoutWidgets(context, bounds, layouter)
+	insetGitTitleEnd(context, layouter, row, bounds, &r.subject)
 }
 
 func gitCommitHeaderHeight(u int) int {
@@ -1250,7 +1317,9 @@ func (h *gitCommitHeader) Layout(context *guigui.Context, widgetBounds *guigui.W
 	if inner.Max.X < inner.Min.X {
 		inner.Max.X = inner.Min.X
 	}
-	h.layoutRow(context, inner.Dx()).LayoutWidgets(context, inner, layouter)
+	row := h.layoutRow(context, inner.Dx())
+	row.LayoutWidgets(context, inner, layouter)
+	insetGitTitleEnd(context, layouter, row, inner, &h.subject)
 }
 
 func (h *gitCommitHeader) Measure(context *guigui.Context, constraints guigui.Constraints) image.Point {
