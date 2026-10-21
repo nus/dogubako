@@ -215,6 +215,28 @@ func TestGitMetaColsResize(t *testing.T) {
 	}
 }
 
+func TestGitMinHashCol(t *testing.T) {
+	const u = 24
+	want := gitcli.ShortHashLen * u / 4
+	if got := gitMinHashCol(u); got != want {
+		t.Fatalf("min hash = %d, want %d", got, want)
+	}
+	if got := gitMinHashCol(0); got < 1 {
+		t.Fatalf("min hash = %d", got)
+	}
+}
+
+func TestGitMinDateCol(t *testing.T) {
+	const u = 24
+	want := len(gitCommitWhenLayout) * u / 4
+	if got := gitMinDateCol(u); got != want {
+		t.Fatalf("min date = %d, want %d", got, want)
+	}
+	if len(gitCommitWhenLayout) != 16 {
+		t.Fatalf("layout = %q", gitCommitWhenLayout)
+	}
+}
+
 func TestGitFitMetaCols(t *testing.T) {
 	const u = 24
 	author, hash, date := gitFitMetaCols(1000, 1000, 1000, 80, u, 10)
@@ -244,8 +266,11 @@ func TestGitLaneStep(t *testing.T) {
 	const u = 24
 	const lanes = 4
 	narrow := gitGraphMinWidth(u, lanes)
-	if got := gitLaneStep(narrow, lanes, u); got >= gitLaneWidth(u) {
-		t.Fatalf("packed step = %d, natural %d", got, gitLaneWidth(u))
+	if got := gitLaneStep(narrow, lanes, u); got != gitLaneWidth(u) {
+		t.Fatalf("narrow step = %d, want natural %d", got, gitLaneWidth(u))
+	}
+	if got := gitLaneStep(1, lanes, u); got != gitLaneWidth(u) {
+		t.Fatalf("tight step = %d, want natural %d", got, gitLaneWidth(u))
 	}
 }
 

@@ -19,9 +19,12 @@ type Commit struct {
 	Decorations []Decoration
 }
 
+// ShortHashLen is how many characters Short shows from a full hash.
+const ShortHashLen = 7
+
 func (c Commit) Short() string {
-	if len(c.Hash) >= 7 {
-		return c.Hash[:7]
+	if len(c.Hash) >= ShortHashLen {
+		return c.Hash[:ShortHashLen]
 	}
 	return c.Hash
 }
