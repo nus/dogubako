@@ -173,6 +173,9 @@ const (
 	GitDiffSplit        Key = "git.diff_split"
 	GitDiffNoWrap       Key = "git.diff_nowrap"
 	GitDiffWrap         Key = "git.diff_wrap"
+	GitDiffWhole        Key = "git.diff_whole"
+	GitDiffPrevHunk     Key = "git.diff_prev_hunk"
+	GitDiffNextHunk     Key = "git.diff_next_hunk"
 	GitNoChanges        Key = "git.no_changes"
 
 	StopwatchStart   Key = "stopwatch.start"
@@ -493,6 +496,9 @@ var catalogs = map[Lang]map[Key]string{
 		GitDiffSplit:                   "分割",
 		GitDiffNoWrap:                  "折り返しなし",
 		GitDiffWrap:                    "折り返し",
+		GitDiffWhole:                   "ファイル全体",
+		GitDiffPrevHunk:                "前のハンク",
+		GitDiffNextHunk:                "次のハンク",
 		GitNoChanges:                   "変更はありません。",
 		MTPDevices:                     "デバイス",
 		MTPRefresh:                     "再読み込み",
@@ -798,6 +804,9 @@ var catalogs = map[Lang]map[Key]string{
 		GitDiffSplit:                   "Split",
 		GitDiffNoWrap:                  "No wrap",
 		GitDiffWrap:                    "Wrap",
+		GitDiffWhole:                   "Whole file",
+		GitDiffPrevHunk:                "Previous hunk",
+		GitDiffNextHunk:                "Next hunk",
 		GitNoChanges:                   "No changes.",
 		MTPDevices:                     "Devices",
 		MTPRefresh:                     "Reload",

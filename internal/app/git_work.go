@@ -973,18 +973,23 @@ func (r *gitFileRow) Measure(context *guigui.Context, constraints guigui.Constra
 type gitWorkDiff struct {
 	guigui.DefaultWidget
 
-	panel   basicwidget.Panel
-	mode    gitDiffModeBar
-	wrapBar gitDiffWrapBar
-	view    gitDiffView
-	note    basicwidget.Text
+	panel    basicwidget.Panel
+	mode     gitDiffModeBar
+	wrapBar  gitDiffWrapBar
+	wholeBar gitDiffWholeBar
+	hunkBar  gitDiffHunkBar
+	view     gitDiffView
+	note     basicwidget.Text
 
-	body   string
-	empty  string
-	shown  string
-	split  bool
-	wrapOn bool
-	show   bool
+	body      string
+	empty     string
+	shown     string
+	split     bool
+	wrapOn    bool
+	wholeOn   bool
+	wholeText string
+	lang      i18n.Lang
+	show      bool
 }
 
 func (d *gitWorkDiff) Set(body, empty, shown string) {
@@ -998,6 +1003,7 @@ func (d *gitWorkDiff) Set(body, empty, shown string) {
 }
 
 func (d *gitWorkDiff) SetSplit(lang i18n.Lang, split bool, onSplit func(bool)) {
+	d.lang = lang
 	d.mode.Set(lang, split, onSplit)
 	if split == d.split {
 		return
@@ -1013,6 +1019,12 @@ func (d *gitWorkDiff) SetWrap(lang i18n.Lang, wrap bool, onWrap func(bool)) {
 	}
 	d.wrapOn = wrap
 	d.view.ResetScroll()
+}
+
+func (d *gitWorkDiff) SetWhole(lang i18n.Lang, on bool, full string, enabled bool, onWhole func(bool)) {
+	d.wholeBar.Set(lang, on, enabled, onWhole)
+	d.wholeOn = on
+	d.wholeText = full
 }
 
 func (d *gitWorkDiff) Text() string {
@@ -1042,10 +1054,16 @@ func (d *gitWorkDiff) Build(context *guigui.Context, adder *guigui.ChildAdder) e
 		d.panel.SetContent(&d.note)
 		return nil
 	}
+	adder.AddWidget(&d.hunkBar)
+	adder.AddWidget(&d.wholeBar)
 	adder.AddWidget(&d.wrapBar)
 	adder.AddWidget(&d.mode)
 	adder.AddWidget(&d.view)
-	d.view.Set(d.body, context.ColorMode() == ebiten.ColorModeDark, d.split, d.wrapOn)
+	d.view.Set(d.body, context.ColorMode() == ebiten.ColorModeDark, d.split, d.wrapOn, d.wholeOn, d.wholeText)
+	lineH := basicwidget.LineHeight(context)
+	d.hunkBar.Set(d.lang, d.view.canJumpHunk(lineH, false), d.view.canJumpHunk(lineH, true), func(lineH int, next bool) {
+		d.view.jumpHunk(lineH, next)
+	})
 	return nil
 }
 
@@ -1058,9 +1076,17 @@ func (d *gitWorkDiff) Layout(context *guigui.Context, widgetBounds *guigui.Widge
 	u := basicwidget.UnitSize(context)
 	mode := d.mode.Measure(context, guigui.Constraints{})
 	wrap := d.wrapBar.Measure(context, guigui.Constraints{})
+	whole := d.wholeBar.Measure(context, guigui.Constraints{})
+	hunk := d.hunkBar.Measure(context, guigui.Constraints{})
 	headerH := mode.Y
 	if wrap.Y > headerH {
 		headerH = wrap.Y
+	}
+	if whole.Y > headerH {
+		headerH = whole.Y
+	}
+	if hunk.Y > headerH {
+		headerH = hunk.Y
 	}
 	if headerH <= 0 {
 		headerH = u
@@ -1069,6 +1095,8 @@ func (d *gitWorkDiff) Layout(context *guigui.Context, widgetBounds *guigui.Widge
 	between := u / 4
 	modeW := mode.X
 	wrapW := wrap.X
+	wholeW := whole.X
+	hunkW := hunk.X
 	if modeW > bounds.Dx() {
 		modeW = bounds.Dx()
 	}
@@ -1077,6 +1105,16 @@ func (d *gitWorkDiff) Layout(context *guigui.Context, widgetBounds *guigui.Widge
 	if wrapX < bounds.Min.X {
 		wrapX = bounds.Min.X
 	}
+	wholeX := wrapX - between - wholeW
+	if wholeX < bounds.Min.X {
+		wholeX = bounds.Min.X
+	}
+	hunkX := wholeX - between - hunkW
+	if hunkX < bounds.Min.X {
+		hunkX = bounds.Min.X
+	}
+	layouter.LayoutWidget(&d.hunkBar, image.Rect(hunkX, bounds.Min.Y, hunkX+hunkW, bounds.Min.Y+headerH))
+	layouter.LayoutWidget(&d.wholeBar, image.Rect(wholeX, bounds.Min.Y, wholeX+wholeW, bounds.Min.Y+headerH))
 	layouter.LayoutWidget(&d.wrapBar, image.Rect(wrapX, bounds.Min.Y, wrapX+wrapW, bounds.Min.Y+headerH))
 	layouter.LayoutWidget(&d.mode, image.Rect(modeX, bounds.Min.Y, bounds.Max.X, bounds.Min.Y+headerH))
 	body := image.Rect(bounds.Min.X, bounds.Min.Y+headerH+gap, bounds.Max.X, bounds.Max.Y)
@@ -1111,6 +1149,8 @@ func (t *GitTool) setWorkDiff(lang i18n.Lang, model *GitModel) {
 	t.workPanes.diff.Set(body, empty, shown)
 	t.workPanes.diff.SetSplit(lang, t.diffSplit, t.setDiffSplit)
 	t.workPanes.diff.SetWrap(lang, t.diffWrap, t.setDiffWrap)
+	full, enabled := t.wholeFileDiff(model, body, path, staged, false)
+	t.workPanes.diff.SetWhole(lang, t.diffWhole, full, enabled, t.setDiffWhole)
 	t.workPanes.diff.SetLineMenu(func(context *guigui.Context, start, end int) bool {
 		return t.openLineMenu(context, start, end)
 	})

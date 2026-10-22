@@ -2,6 +2,7 @@ package app
 
 import (
 	"fmt"
+	"image"
 	"image/color"
 	"strings"
 	"testing"
@@ -572,6 +573,407 @@ func TestDiffLogicalLinesMatchWidget(t *testing.T) {
 				t.Fatalf("%q line %d %q != %q", s, i, s[start:end], line)
 			}
 		}
+	}
+}
+
+func TestDiffWholeGlyph(t *testing.T) {
+	const size = float32(100)
+	strokes := diffWholeStrokes(size)
+	if len(strokes) < 8 {
+		t.Fatalf("document glyph has %d strokes", len(strokes))
+	}
+	if !diffWrapStrokesInside(strokes, size) {
+		t.Fatal("glyph is clipped")
+	}
+	if diffWrapStrokesSame(strokes, diffWrapStrokes(false, size)) || diffWrapStrokesSame(strokes, diffWrapStrokes(true, size)) {
+		t.Fatal("whole-file glyph matches a wrap glyph")
+	}
+}
+
+func TestWholeFileKeepsOriginalPatchLines(t *testing.T) {
+	original := "" +
+		"diff --git a/a.txt b/a.txt\n" +
+		"--- a/a.txt\n" +
+		"+++ b/a.txt\n" +
+		"@@ -3,3 +3,4 @@\n" +
+		" c\n" +
+		"-d\n" +
+		"+D\n" +
+		"+E\n" +
+		" e\n"
+	full := "" +
+		"diff --git a/a.txt b/a.txt\n" +
+		"--- a/a.txt\n" +
+		"+++ b/a.txt\n" +
+		"@@ -1,5 +1,6 @@\n" +
+		" a\n" +
+		" b\n" +
+		" c\n" +
+		"-d\n" +
+		"+D\n" +
+		"+E\n" +
+		" e\n"
+
+	var v gitDiffView
+	v.Set(original, false, false, false, true, full)
+	if !strings.Contains(v.gutter, gutterCols("1", "1")) {
+		t.Fatalf("gutter missing the first line:\n%s", v.gutter)
+	}
+	if _, _, ok := bodyLineRange(v.compactBody, "a"); !ok {
+		t.Fatalf("compact body missing the prefix:\n%s", v.compactBody)
+	}
+	assertWholePatch(t, &v, original, "E", "+E\n", false)
+	assertWholePatch(t, &v, original, "d", "-d\n", false)
+	if start, end, ok := bodyLineRange(v.compactBody, "a"); !ok {
+		t.Fatal("missing a")
+	} else if _, ok := gitcli.PatchForRanges(original, overlappingSources(v.compactSpans, start, end), false); ok {
+		t.Fatal("unchanged prefix was staged")
+	}
+
+	v.Set(original, false, true, false, true, full)
+	left := splitLines(v.leftBody)
+	right := splitLines(v.rightBody)
+	if len(left) != len(right) {
+		t.Fatalf("split rows left %d right %d", len(left), len(right))
+	}
+	if !slicesContain(left, "a") || !slicesContain(left, "d") || !slicesContain(right, "a") || !slicesContain(right, "E") {
+		t.Fatalf("left %q\nright %q", left, right)
+	}
+	if start, end, ok := bodyLineRange(v.leftBody, "d"); !ok {
+		t.Fatal("split left missing d")
+	} else {
+		got, ok := gitcli.PatchForRanges(original, overlappingSources(v.leftSpans, start, end), true)
+		want, wantOK := gitcli.PatchForLines(original, lineRange(original, "-d\n")[0], lineRange(original, "-d\n")[1], true)
+		if !ok || !wantOK || got != want {
+			t.Fatalf("unstage got %q (%v)\nwant %q (%v)", got, ok, want, wantOK)
+		}
+	}
+
+	v.Set(original, false, false, false, false, "")
+	if _, _, ok := bodyLineRange(v.compactBody, "a"); ok {
+		t.Fatalf("hunk view still shows the prefix:\n%s", v.compactBody)
+	}
+}
+
+func TestWholeFileLeavesCompleteFiles(t *testing.T) {
+	added := "" +
+		"diff --git a/c.txt b/c.txt\n" +
+		"new file mode 100644\n" +
+		"--- /dev/null\n" +
+		"+++ b/c.txt\n" +
+		"@@ -0,0 +1,2 @@\n" +
+		"+one\n" +
+		"+two\n"
+	deleted := "" +
+		"diff --git a/c.txt b/c.txt\n" +
+		"deleted file mode 100644\n" +
+		"--- a/c.txt\n" +
+		"+++ /dev/null\n" +
+		"@@ -1 +0,0 @@\n" +
+		"-one\n"
+	binary := "diff --git a/b.jpg b/b.jpg\nBinary files a/b.jpg and b/b.jpg differ\n"
+	if !diffAlreadyWhole(added) || !diffAlreadyWhole(deleted) || diffAlreadyWhole("diff --git a/a.txt b/a.txt\n") {
+		t.Fatal("whole-file detection")
+	}
+	if !diffIsBinary(binary) || diffIsBinary(added) {
+		t.Fatal("binary detection")
+	}
+	var v gitDiffView
+	v.Set(added, false, false, false, false, "")
+	body, gutter := v.compactBody, v.gutter
+	v.Set(added, false, false, false, true, added)
+	if v.compactBody != body || v.gutter != gutter {
+		t.Fatal("new file display changed")
+	}
+	v.Set(deleted, false, false, false, true, deleted)
+	if _, _, ok := bodyLineRange(v.compactBody, "one"); !ok {
+		t.Fatalf("deleted file body:\n%s", v.compactBody)
+	}
+	if _, ok := wholeFileSources(binary, binary); ok {
+		t.Fatal("binary diff expanded")
+	}
+}
+
+func assertWholePatch(t *testing.T, v *gitDiffView, original, line, fragment string, unstage bool) {
+	t.Helper()
+	start, end, ok := bodyLineRange(v.compactBody, line)
+	if !ok {
+		t.Fatalf("line %q not in body:\n%s", line, v.compactBody)
+	}
+	got, ok := gitcli.PatchForRanges(original, overlappingSources(v.compactSpans, start, end), unstage)
+	wantStart, wantEnd := lineRange(original, fragment)[0], lineRange(original, fragment)[1]
+	want, wantOK := gitcli.PatchForLines(original, wantStart, wantEnd, unstage)
+	if !ok || !wantOK || got != want {
+		t.Fatalf("line %q got %q (%v)\nwant %q (%v)", line, got, ok, want, wantOK)
+	}
+}
+
+func bodyLineRange(body, content string) (start, end int, ok bool) {
+	rest := body
+	off := 0
+	for rest != "" {
+		i := strings.IndexByte(rest, '\n')
+		line := rest
+		next := len(rest)
+		if i >= 0 {
+			line = rest[:i]
+			next = i + 1
+		}
+		if line == content {
+			return off, off + next, true
+		}
+		if i < 0 {
+			break
+		}
+		off += next
+		rest = rest[next:]
+	}
+	return 0, 0, false
+}
+
+func slicesContain(lines []string, want string) bool {
+	for _, line := range lines {
+		if line == want {
+			return true
+		}
+	}
+	return false
+}
+
+func TestDiffOverviewMarks(t *testing.T) {
+	kinds := []byte{'m', '@', ' ', '-', '-', '+', ' '}
+	marks := diffOverviewMarks(kinds, nil, nil)
+	if len(marks) != 2 {
+		t.Fatalf("marks = %+v", marks)
+	}
+	if !marks[0].del || marks[0].add || marks[0].start != 3.0/7 || marks[0].end != 5.0/7 {
+		t.Fatalf("deletion = %+v", marks[0])
+	}
+	if !marks[1].add || marks[1].del || marks[1].start != 5.0/7 || marks[1].end != 6.0/7 {
+		t.Fatalf("addition = %+v", marks[1])
+	}
+
+	gapped := diffOverviewMarks([]byte{'-', ' ', '-'}, nil, nil)
+	if len(gapped) != 2 || gapped[0].end == gapped[1].start {
+		t.Fatalf("context should split marks: %+v", gapped)
+	}
+
+	wrapped := diffOverviewMarks(kinds, nil, []int{1, 1, 1, 3, 1, 1, 1})
+	if len(wrapped) != 2 || wrapped[0].start != 3.0/9 || wrapped[0].end != 7.0/9 || wrapped[1].start != 7.0/9 {
+		t.Fatalf("wrapped = %+v", wrapped)
+	}
+
+	split := diffOverviewMarks([]byte{'-', ' ', 0}, []byte{'+', ' ', '+'}, nil)
+	if len(split) != 2 || !split[0].add || !split[0].del || split[1].del || !split[1].add {
+		t.Fatalf("split = %+v", split)
+	}
+	if split[0].end == split[1].start {
+		t.Fatal("unchanged row should separate the marks")
+	}
+}
+
+func TestOverviewScrollAndMarkRect(t *testing.T) {
+	track := image.Rect(0, 0, 10, 100)
+	r := diffOverviewMarkRect(track, 0, 0.001, 4)
+	if r.Dy() < 4 || r.Min.Y < track.Min.Y || r.Max.Y > track.Max.Y {
+		t.Fatalf("tiny mark = %v", r)
+	}
+	bottom := diffOverviewMarkRect(track, 0.99, 1, 4)
+	if bottom.Max.Y != track.Max.Y || bottom.Dy() < 4 {
+		t.Fatalf("bottom mark = %v", bottom)
+	}
+	if got := overviewScrollOffset(0, 0, 100, 20, 100); got != 0 {
+		t.Fatalf("top scroll = %v", got)
+	}
+	if got := overviewScrollOffset(100, 0, 100, 20, 100); got != -80 {
+		t.Fatalf("bottom scroll = %v", got)
+	}
+	if got := overviewScrollOffset(50, 0, 100, 20, 100); got != -40 {
+		t.Fatalf("middle scroll = %v", got)
+	}
+	thumb := overviewThumbRect(track, -40, 20, 100, 4)
+	if thumb.Min.Y != 40 || thumb.Dy() != 20 {
+		t.Fatalf("thumb = %v", thumb)
+	}
+	if overviewThumbRect(track, 0, 100, 50, 4).Empty() == false {
+		t.Fatal("a file that fits should not draw a thumb")
+	}
+}
+
+func TestDiffOverviewLanes(t *testing.T) {
+	markW, gap, thumbW := diffOverviewParts(1)
+	track := image.Rect(10, 20, 10+markW+gap+thumbW, 120)
+	marks, thumb := diffOverviewLanes(track, 1)
+	if marks.Dx() != markW || thumb.Dx() != thumbW || marks.Max.X+gap != thumb.Min.X {
+		t.Fatalf("lanes marks=%v thumb=%v", marks, thumb)
+	}
+	if marks.Min.Y != track.Min.Y || thumb.Max.Y != track.Max.Y {
+		t.Fatal("lanes should span the track")
+	}
+	if thumb.Overlaps(marks) {
+		t.Fatal("the scrollbar should sit beside the change marks")
+	}
+}
+
+func TestWholeFileOverviewFollowsMode(t *testing.T) {
+	original := "" +
+		"diff --git a/a.txt b/a.txt\n" +
+		"@@ -2 +2 @@\n" +
+		"-a\n" +
+		"+b\n"
+	full := "" +
+		"diff --git a/a.txt b/a.txt\n" +
+		"@@ -1,3 +1,3 @@\n" +
+		" x\n" +
+		"-a\n" +
+		"+b\n" +
+		" y\n"
+	var v gitDiffView
+	v.Set(original, false, false, false, true, full)
+	if !v.overviewActive() {
+		t.Fatal("whole file should show the scrollbar")
+	}
+	marks := v.overviewMarks()
+	if len(marks) != 2 || !marks[0].del || marks[0].add || !marks[1].add || marks[1].del {
+		t.Fatalf("marks = %+v", marks)
+	}
+	if marks[0].start == 0 {
+		t.Fatal("the unchanged prefix should sit above the deletion")
+	}
+	v.Set(original, false, true, false, true, full)
+	split := v.overviewMarks()
+	if len(split) != 1 || !split[0].add || !split[0].del {
+		t.Fatalf("split mark = %+v", split)
+	}
+	v.Set(original, false, false, false, false, "")
+	if v.overviewActive() {
+		t.Fatal("hunk view should not show the scrollbar")
+	}
+}
+
+func TestDiffHunkTargets(t *testing.T) {
+	kinds := []byte{'m', '@', ' ', '-', '+', ' ', '@', ' ', '-'}
+	hunks := diffHunkTargets(kinds, nil, false)
+	if len(hunks) != 2 || hunks[0] != 1 || hunks[1] != 6 {
+		t.Fatalf("hunk headers = %v", hunks)
+	}
+	changes := diffHunkTargets(kinds, nil, true)
+	if len(changes) != 2 || changes[0] != 3 || changes[1] != 8 {
+		t.Fatalf("change runs = %v", changes)
+	}
+	gapped := diffHunkTargets([]byte{'-', ' ', '-'}, nil, true)
+	if len(gapped) != 2 || gapped[0] != 0 || gapped[1] != 2 {
+		t.Fatalf("context should split runs: %v", gapped)
+	}
+	split := diffHunkTargets([]byte{'-', ' ', 0}, []byte{'+', ' ', '+'}, true)
+	if len(split) != 2 || split[0] != 0 || split[1] != 2 {
+		t.Fatalf("split runs = %v", split)
+	}
+	headers := diffHunkTargets([]byte{'@', '-', ' '}, []byte{'@', '+', ' '}, false)
+	if len(headers) != 1 || headers[0] != 0 {
+		t.Fatalf("split header = %v", headers)
+	}
+}
+
+func TestDiffHunkNeighborAndLine(t *testing.T) {
+	targets := []int{1, 6}
+	if dest, ok := diffHunkNeighbor(targets, 0, true); !ok || dest != 1 {
+		t.Fatalf("next from header = %d %v", dest, ok)
+	}
+	if dest, ok := diffHunkNeighbor(targets, 1, true); !ok || dest != 6 {
+		t.Fatalf("next from first = %d %v", dest, ok)
+	}
+	if _, ok := diffHunkNeighbor(targets, 6, true); ok {
+		t.Fatal("no hunk after the last")
+	}
+	if _, ok := diffHunkNeighbor(targets, 1, false); ok {
+		t.Fatal("no hunk before the first")
+	}
+	if dest, ok := diffHunkNeighbor(targets, 4, false); !ok || dest != 1 {
+		t.Fatalf("previous = %d %v", dest, ok)
+	}
+	counts := []int{1, 1, 3}
+	if diffVisualRowsBefore(2, counts) != 2 {
+		t.Fatalf("rows before wrap = %d", diffVisualRowsBefore(2, counts))
+	}
+	if got := diffLineAt(-20, counts, 10, 3); got != 2 {
+		t.Fatalf("line at wrapped scroll = %d", got)
+	}
+	if got := diffLineAt(-19, counts, 10, 3); got != 1 {
+		t.Fatalf("line before wrapped row = %d", got)
+	}
+	if got := diffLineAt(0, nil, 10, 4); got != 0 {
+		t.Fatalf("top line = %d", got)
+	}
+}
+
+func TestJumpHunk(t *testing.T) {
+	text := "" +
+		"diff --git a/a.txt b/a.txt\n" +
+		"@@ -1,3 +1,3 @@\n" +
+		" a\n" +
+		"-b\n" +
+		"+c\n" +
+		"@@ -20,3 +20,3 @@\n" +
+		" d\n" +
+		"-e\n" +
+		"+f\n"
+	var v gitDiffView
+	v.Set(text, false, false, false, false, "")
+	v.compact.viewH = 40
+	v.compact.contentH = 400
+	if v.jumpHunk(10, false) {
+		t.Fatal("the header is already above the first hunk")
+	}
+	if !v.jumpHunk(10, true) {
+		t.Fatal("next hunk")
+	}
+	if y, _, _ := v.scrollGeom(); y != -10 {
+		t.Fatalf("first hunk scroll = %v", y)
+	}
+	if !v.jumpHunk(10, true) {
+		t.Fatal("second hunk")
+	}
+	if y, _, _ := v.scrollGeom(); y != -50 {
+		t.Fatalf("second hunk scroll = %v", y)
+	}
+	if v.jumpHunk(10, true) {
+		t.Fatal("no hunk after the last")
+	}
+	if !v.jumpHunk(10, false) {
+		t.Fatal("previous hunk")
+	}
+	if y, _, _ := v.scrollGeom(); y != -10 {
+		t.Fatalf("previous scroll = %v", y)
+	}
+
+	full := "" +
+		"diff --git a/a.txt b/a.txt\n" +
+		"@@ -1,5 +1,5 @@\n" +
+		" x\n" +
+		" y\n" +
+		"-a\n" +
+		"+b\n" +
+		" z\n" +
+		"-c\n" +
+		"+d\n"
+	v.Set(text, false, false, false, true, full)
+	v.compact.viewH = 40
+	v.compact.contentH = 400
+	if !v.overviewActive() {
+		t.Fatal("whole file")
+	}
+	if !v.jumpHunk(10, true) {
+		t.Fatal("first change")
+	}
+	if y, _, _ := v.scrollGeom(); y != -40 {
+		t.Fatalf("first change scroll = %v", y)
+	}
+	if !v.jumpHunk(10, true) {
+		t.Fatal("second change")
+	}
+	if y, _, _ := v.scrollGeom(); y != -70 {
+		t.Fatalf("second change scroll = %v", y)
 	}
 }
 

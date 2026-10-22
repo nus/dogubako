@@ -105,7 +105,9 @@ type gitSession struct {
 	histMore  bool
 	histGen   uint64
 
-	workSlots [2]gitWorkSlot
+	workSlots   [2]gitWorkSlot
+	wholeSlots  [2]gitWorkSlot
+	commitWhole gitWorkSlot
 
 	// reveal is a commit hash the graph should scroll into view. Empty means none.
 	reveal string
@@ -771,6 +773,56 @@ func (m *gitSession) workDiffKey(path string, staged bool) string {
 }
 
 func (m *gitSession) startWorkDiff(slot *gitWorkSlot, path string, staged bool, key string) {
+	m.startDiff(slot, key, func(ctx context.Context, repo *gitcli.Repo) (string, error) {
+		return repo.DiffWork(ctx, path, staged)
+	})
+}
+
+// WorkDiffWhole returns a wide-context patch for path.
+// ready is false while it is loading. The result follows the same key as WorkDiff.
+func (m *gitSession) WorkDiffWhole(path string, staged bool) (string, bool, error) {
+	path = strings.TrimSpace(path)
+	if path == "" || m.repo == nil {
+		return "", true, nil
+	}
+	slot := &m.wholeSlots[0]
+	if staged {
+		slot = &m.wholeSlots[1]
+	}
+	key := m.workDiffKey(path, staged)
+	if slot.key == key {
+		return slot.diff, true, slot.err
+	}
+	if slot.pending == nil {
+		m.startDiff(slot, key, func(ctx context.Context, repo *gitcli.Repo) (string, error) {
+			return repo.DiffWorkWhole(ctx, path, staged)
+		})
+	}
+	return "", false, nil
+}
+
+// CommitDiffWhole returns a wide-context patch for path at hash.
+// ready is false while it is loading.
+func (m *gitSession) CommitDiffWhole(hash, path string) (string, bool, error) {
+	hash = strings.TrimSpace(hash)
+	path = strings.TrimSpace(path)
+	if hash == "" || path == "" || m.repo == nil {
+		return "", true, nil
+	}
+	key := hash + "\x00" + path
+	slot := &m.commitWhole
+	if slot.key == key {
+		return slot.diff, true, slot.err
+	}
+	if slot.pending == nil {
+		m.startDiff(slot, key, func(ctx context.Context, repo *gitcli.Repo) (string, error) {
+			return repo.ShowFileWhole(ctx, hash, path)
+		})
+	}
+	return "", false, nil
+}
+
+func (m *gitSession) startDiff(slot *gitWorkSlot, key string, load func(context.Context, *gitcli.Repo) (string, error)) {
 	if m.repo == nil {
 		return
 	}
@@ -780,31 +832,36 @@ func (m *gitSession) startWorkDiff(slot *gitWorkSlot, path string, staged bool, 
 	go func() {
 		ctx, cancel := context.WithTimeout(context.Background(), gitLoadTimeout)
 		defer cancel()
-		diff, err := repo.DiffWork(ctx, path, staged)
+		diff, err := load(ctx, repo)
 		ch <- gitWorkResult{key: key, diff: diff, err: err}
 	}()
 }
 
 func (m *gitSession) drainWork() {
-	rebuilt := false
-	for i := range m.workSlots {
-		slot := &m.workSlots[i]
-		if slot.pending == nil {
-			continue
-		}
-		select {
-		case res := <-slot.pending:
-			slot.pending = nil
-			slot.key = res.key
-			slot.diff = res.diff
-			slot.err = res.err
-			rebuilt = true
-		default:
-		}
-	}
+	rebuilt := m.drainDiffSlot(&m.workSlots[0])
+	rebuilt = m.drainDiffSlot(&m.workSlots[1]) || rebuilt
+	rebuilt = m.drainDiffSlot(&m.wholeSlots[0]) || rebuilt
+	rebuilt = m.drainDiffSlot(&m.wholeSlots[1]) || rebuilt
+	rebuilt = m.drainDiffSlot(&m.commitWhole) || rebuilt
 	if rebuilt {
 		m.generation++
 		guigui.RequestRebuild()
+	}
+}
+
+func (m *gitSession) drainDiffSlot(slot *gitWorkSlot) bool {
+	if slot.pending == nil {
+		return false
+	}
+	select {
+	case res := <-slot.pending:
+		slot.pending = nil
+		slot.key = res.key
+		slot.diff = res.diff
+		slot.err = res.err
+		return true
+	default:
+		return false
 	}
 }
 

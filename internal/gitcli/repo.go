@@ -633,26 +633,60 @@ func splitStatusRename(path string) (old, neu string, renamed bool) {
 	return old, neu, true
 }
 
+// wholeFileContext is enough unified-diff context to include the lines outside hunks.
+const wholeFileContext = 1000000
+
 // DiffWork returns the patch for path. staged reads the index; otherwise the worktree.
 // An untracked file is diffed against /dev/null.
 func (r *Repo) DiffWork(ctx context.Context, path string, staged bool) (string, error) {
+	return r.diffWork(ctx, path, staged, 0)
+}
+
+// DiffWorkWhole is DiffWork with enough context to include the rest of the file.
+func (r *Repo) DiffWorkWhole(ctx context.Context, path string, staged bool) (string, error) {
+	return r.diffWork(ctx, path, staged, wholeFileContext)
+}
+
+// ShowFileWhole is the patch for path at hash, with enough context to include the rest of the file.
+func (r *Repo) ShowFileWhole(ctx context.Context, hash, path string) (string, error) {
+	hash = strings.TrimSpace(hash)
+	path = strings.TrimSpace(path)
+	if hash == "" || path == "" {
+		return "", nil
+	}
+	return r.diffOutput(ctx, "show", "--no-notes", "--no-color", "--format=", "--patch", fmt.Sprintf("-U%d", wholeFileContext), hash, "--", path)
+}
+
+func (r *Repo) diffWork(ctx context.Context, path string, staged bool, unified int) (string, error) {
 	path = strings.TrimSpace(path)
 	if path == "" {
 		return "", nil
 	}
-	args := []string{"diff", "--no-color", "--patch"}
-	if staged {
-		args = append(args, "--cached")
-	}
-	args = append(args, "--", path)
-	out, err := r.diffOutput(ctx, args...)
+	out, err := r.diffOutput(ctx, diffWorkArgs(staged, unified, path)...)
 	if err != nil || staged || strings.TrimSpace(out) != "" {
 		return out, err
 	}
 	if !r.exists(ctx, path) {
 		return "", nil
 	}
-	return r.diffOutput(ctx, "diff", "--no-color", "--no-index", "--patch", "--", "/dev/null", path)
+	args := []string{"diff", "--no-color", "--no-index", "--patch"}
+	if unified > 0 {
+		args = append(args, fmt.Sprintf("-U%d", unified))
+	}
+	args = append(args, "--", "/dev/null", path)
+	return r.diffOutput(ctx, args...)
+}
+
+func diffWorkArgs(staged bool, unified int, path string) []string {
+	args := []string{"diff", "--no-color", "--patch"}
+	if unified > 0 {
+		args = append(args, fmt.Sprintf("-U%d", unified))
+	}
+	if staged {
+		args = append(args, "--cached")
+	}
+	args = append(args, "--", path)
+	return args
 }
 
 // ApplyIndex applies patch to the index and leaves the worktree as it is.
