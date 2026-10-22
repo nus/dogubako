@@ -1249,6 +1249,64 @@ func TestSnapshotListsSubmodules(t *testing.T) {
 	}
 }
 
+func TestWholeFileDiffIncludesSkippedLines(t *testing.T) {
+	dir := initRepo(t)
+	var b strings.Builder
+	for i := 1; i <= 15; i++ {
+		switch i {
+		case 1:
+			b.WriteString("HEAD_LINE\n")
+		case 8:
+			b.WriteString("MIDDLE\n")
+		case 15:
+			b.WriteString("TAIL_LINE\n")
+		default:
+			fmt.Fprintf(&b, "line %d\n", i)
+		}
+	}
+	if err := os.WriteFile(filepath.Join(dir, "a.txt"), []byte(b.String()), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	gitAt(t, dir, "add", "a.txt")
+	gitAt(t, dir, "commit", "-m", "base")
+	changed := strings.ReplaceAll(b.String(), "MIDDLE\n", "CHANGED\n")
+	if err := os.WriteFile(filepath.Join(dir, "a.txt"), []byte(changed), 0o644); err != nil {
+		t.Fatal(err)
+	}
+
+	ctx, cancel := context.WithTimeout(context.Background(), 15*time.Second)
+	defer cancel()
+	repo, err := Open(ctx, dir)
+	if err != nil {
+		t.Fatal(err)
+	}
+	narrow, err := repo.DiffWork(ctx, "a.txt", false)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if strings.Contains(narrow, "HEAD_LINE") || strings.Contains(narrow, "TAIL_LINE") {
+		t.Fatalf("narrow diff already includes the ends:\n%s", narrow)
+	}
+	wide, err := repo.DiffWorkWhole(ctx, "a.txt", false)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if !strings.Contains(wide, " HEAD_LINE\n") || !strings.Contains(wide, " TAIL_LINE\n") || !strings.Contains(wide, "+CHANGED\n") {
+		t.Fatalf("wide diff:\n%s", wide)
+	}
+
+	gitAt(t, dir, "add", "a.txt")
+	gitAt(t, dir, "commit", "-m", "change")
+	hash := strings.TrimSpace(gitAt(t, dir, "rev-parse", "HEAD"))
+	shown, err := repo.ShowFileWhole(ctx, hash, "a.txt")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if !strings.Contains(shown, " HEAD_LINE\n") || !strings.Contains(shown, " TAIL_LINE\n") || !strings.Contains(shown, "+CHANGED\n") {
+		t.Fatalf("commit diff:\n%s", shown)
+	}
+}
+
 func commitHasDecoration(cs []Commit, kind, name string) bool {
 	for _, c := range cs {
 		if hasDecoration(c.Decorations, kind, name) {

@@ -146,6 +146,7 @@ type GitTool struct {
 	diffStaged  bool
 	diffSplit   bool
 	diffWrap    bool
+	diffWhole   bool
 	workPanes   gitWorkPanes
 	msgInput    guigui.WidgetWithSize[*basicwidget.TextInput]
 	status      basicwidget.Text
@@ -1437,6 +1438,30 @@ func (t *GitTool) setHistDiff(lang i18n.Lang, model *GitModel) {
 	t.histStack.diff.Set(body, empty, shown)
 	t.histStack.diff.SetSplit(lang, t.diffSplit, t.setDiffSplit)
 	t.histStack.diff.SetWrap(lang, t.diffWrap, t.setDiffWrap)
+	full, enabled := t.wholeFileDiff(model, body, t.histFile, false, true)
+	t.histStack.diff.SetWhole(lang, t.diffWhole, full, enabled, t.setDiffWhole)
+}
+
+// wholeFileDiff loads a wide-context diff when whole-file mode is on.
+// Binary files leave the button disabled. New and deleted files are already complete,
+// so they keep the patch that is showing.
+func (t *GitTool) wholeFileDiff(model *GitModel, body, path string, staged, commit bool) (string, bool) {
+	enabled := strings.TrimSpace(body) != "" && !diffIsBinary(body)
+	if !t.diffWhole || !enabled || diffAlreadyWhole(body) || path == "" {
+		return "", enabled
+	}
+	var text string
+	var ready bool
+	var err error
+	if commit {
+		text, ready, err = model.CommitDiffWhole(t.openHash, path)
+	} else {
+		text, ready, err = model.WorkDiffWhole(path, staged)
+	}
+	if !ready || err != nil {
+		return "", enabled
+	}
+	return text, enabled
 }
 
 func (t *GitTool) setDiffSplit(split bool) {
@@ -1452,6 +1477,14 @@ func (t *GitTool) setDiffWrap(wrap bool) {
 		return
 	}
 	t.diffWrap = wrap
+	guigui.RequestRebuild()
+}
+
+func (t *GitTool) setDiffWhole(on bool) {
+	if t.diffWhole == on {
+		return
+	}
+	t.diffWhole = on
 	guigui.RequestRebuild()
 }
 

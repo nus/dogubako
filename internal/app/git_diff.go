@@ -29,16 +29,24 @@ type gitFileDiff struct {
 // at the left. Vertical scrolling stays in step.
 // With wrapping on, long lines break inside the pane and the number and marker
 // columns grow so each source line stays beside its text.
+// Whole-file mode fills the lines the hunks skip. Selections still refer to the
+// original patch, so staging a line stages that patch line.
+// The overview bar on the right is that mode's scrollbar. Additions and deletions
+// are marked in the diff colors, and the thumb beside them is the part on screen.
 type gitDiffView struct {
 	guigui.DefaultWidget
 
-	compact gitDiffSide
-	left    gitDiffSide
-	right   gitDiffSide
+	compact  gitDiffSide
+	left     gitDiffSide
+	right    gitDiffSide
+	overview diffOverviewBar
 
 	text  string
+	shown string
 	split bool
 	wrap  bool
+	whole bool
+	full  string
 	dark  bool
 
 	gutter                string
@@ -56,24 +64,39 @@ type gitDiffView struct {
 	leftY, rightY         float64
 }
 
-func (v *gitDiffView) Set(text string, dark, split, wrap bool) {
+func (v *gitDiffView) Set(text string, dark, split, wrap, whole bool, full string) {
 	v.dark = dark
 	v.wrap = wrap
-	if text == v.text && split == v.split {
+	if text == v.text && split == v.split && whole == v.whole && full == v.full {
 		return
 	}
+	prevSplit := v.split
 	v.text = text
 	v.split = split
+	v.whole = whole
+	v.full = full
+	shown, sources := displayDiff(text, whole, full)
+	if shown == v.shown && split == prevSplit {
+		return
+	}
+	v.shown = shown
 	if split {
-		doc := splitDiff(text)
+		doc := splitDiff(shown)
+		if len(sources) > 0 {
+			doc.leftSpans = remapDiffSpans(doc.leftSpans, sources)
+			doc.rightSpans = remapDiffSpans(doc.rightSpans, sources)
+		}
 		v.leftNum, v.leftBody = doc.leftNum, doc.leftBody
 		v.rightNum, v.rightBody = doc.rightNum, doc.rightBody
 		v.leftKinds, v.rightKinds = doc.leftKinds, doc.rightKinds
 		v.leftSpans, v.rightSpans = doc.leftSpans, doc.rightSpans
 		v.gutter = ""
 	} else {
-		v.gutter = diffGutter(text)
-		v.compactMarks, v.compactBody, v.compactSpans, v.compactKinds = compactDiff(text)
+		v.gutter = diffGutter(shown)
+		v.compactMarks, v.compactBody, v.compactSpans, v.compactKinds = compactDiff(shown)
+		if len(sources) > 0 {
+			v.compactSpans = remapDiffSpans(v.compactSpans, sources)
+		}
 	}
 	v.ResetScroll()
 }
@@ -179,6 +202,7 @@ func (v *gitDiffView) Build(context *guigui.Context, adder *guigui.ChildAdder) e
 		v.right.prepare(v.rightNum, v.rightBody, styleSplit(v.rightNum, v.rightKinds, v.dark, true), styleSplit(v.rightBody, v.rightKinds, v.dark, false), v.rightKinds, v.dark)
 		v.bindMenu(&v.left.body, true)
 		v.bindMenu(&v.right.body, false)
+		v.attachOverview(adder)
 		return nil
 	}
 	var bodyStyle, markStyle basicwidget.TextStyles
@@ -192,11 +216,12 @@ func (v *gitDiffView) Build(context *guigui.Context, adder *guigui.ChildAdder) e
 	v.compact.setWrap(v.wrap)
 	v.compact.prepareMarked(v.gutter, v.compactMarks, v.compactBody, styleDiffGutter(v.gutter, v.text, v.dark), markStyle, bodyStyle, v.compactKinds, v.compactKinds, v.dark)
 	v.bindMenu(&v.compact.body, false)
+	v.attachOverview(adder)
 	return nil
 }
 
 func (v *gitDiffView) Layout(context *guigui.Context, widgetBounds *guigui.WidgetBounds, layouter *guigui.ChildLayouter) {
-	bounds := widgetBounds.Bounds()
+	bounds := v.layoutOverview(context, widgetBounds.Bounds(), layouter)
 	if !v.split {
 		layouter.LayoutWidget(&v.compact, bounds)
 		return
