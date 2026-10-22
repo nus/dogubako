@@ -984,6 +984,7 @@ type gitWorkDiff struct {
 	body      string
 	empty     string
 	shown     string
+	path      string
 	split     bool
 	wrapOn    bool
 	wholeOn   bool
@@ -992,9 +993,10 @@ type gitWorkDiff struct {
 	show      bool
 }
 
-func (d *gitWorkDiff) Set(body, empty, shown string) {
+func (d *gitWorkDiff) Set(body, empty, shown, path string) {
 	d.body = body
 	d.empty = empty
+	d.path = path
 	if shown != d.shown {
 		d.shown = shown
 		d.panel.ForceSetScrollOffset(0, 0)
@@ -1059,6 +1061,7 @@ func (d *gitWorkDiff) Build(context *guigui.Context, adder *guigui.ChildAdder) e
 	adder.AddWidget(&d.wrapBar)
 	adder.AddWidget(&d.mode)
 	adder.AddWidget(&d.view)
+	d.view.filePath = d.path
 	d.view.Set(d.body, context.ColorMode() == ebiten.ColorModeDark, d.split, d.wrapOn, d.wholeOn, d.wholeText)
 	lineH := basicwidget.LineHeight(context)
 	d.hunkBar.Set(d.lang, d.view.canJumpHunk(lineH, false), d.view.canJumpHunk(lineH, true), func(lineH int, next bool) {
@@ -1146,7 +1149,7 @@ func (t *GitTool) setWorkDiff(lang i18n.Lang, model *GitModel) {
 	if staged {
 		shown = path + "\x00staged"
 	}
-	t.workPanes.diff.Set(body, empty, shown)
+	t.workPanes.diff.Set(body, empty, shown, path)
 	t.workPanes.diff.SetSplit(lang, t.diffSplit, t.setDiffSplit)
 	t.workPanes.diff.SetWrap(lang, t.diffWrap, t.setDiffWrap)
 	full, enabled := t.wholeFileDiff(model, body, path, staged, false)
