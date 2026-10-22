@@ -1435,7 +1435,7 @@ func (t *GitTool) setHistDiff(lang i18n.Lang, model *GitModel) {
 		empty = i18n.T(lang, i18n.GitNoChanges)
 	}
 	shown := t.openHash + "\x00" + t.histFile
-	t.histStack.diff.Set(body, empty, shown)
+	t.histStack.diff.Set(body, empty, shown, t.histFile)
 	t.histStack.diff.SetSplit(lang, t.diffSplit, t.setDiffSplit)
 	t.histStack.diff.SetWrap(lang, t.diffWrap, t.setDiffWrap)
 	full, enabled := t.wholeFileDiff(model, body, t.histFile, false, true)

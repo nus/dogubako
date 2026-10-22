@@ -33,6 +33,9 @@ type gitFileDiff struct {
 // original patch, so staging a line stages that patch line.
 // The overview bar on the right is that mode's scrollbar. Additions and deletions
 // are marked in the diff colors, and the thumb beside them is the part on screen.
+// Source lines of a known language are colored by token. Line numbers, markers,
+// hunks, and meta lines keep their own colors, and the coloring does not change
+// which bytes a selection can stage.
 type gitDiffView struct {
 	guigui.DefaultWidget
 
@@ -48,6 +51,9 @@ type gitDiffView struct {
 	whole bool
 	full  string
 	dark  bool
+	// filePath names the selected file when the diff header does not.
+	filePath string
+	syntax   diffSyntax
 
 	gutter                string
 	compactMarks          string
@@ -198,19 +204,17 @@ func (v *gitDiffView) Build(context *guigui.Context, adder *guigui.ChildAdder) e
 		adder.AddWidget(&v.right)
 		v.left.setWrap(v.wrap)
 		v.right.setWrap(v.wrap)
-		v.left.prepare(v.leftNum, v.leftBody, styleSplit(v.leftNum, v.leftKinds, v.dark, true), styleSplit(v.leftBody, v.leftKinds, v.dark, false), v.leftKinds, v.dark)
-		v.right.prepare(v.rightNum, v.rightBody, styleSplit(v.rightNum, v.rightKinds, v.dark, true), styleSplit(v.rightBody, v.rightKinds, v.dark, false), v.rightKinds, v.dark)
+		v.left.prepare(v.leftNum, v.leftBody, styleSplit(v.leftNum, v.leftKinds, v.dark, true), v.splitBodyStyle(true), v.leftKinds, v.dark)
+		v.right.prepare(v.rightNum, v.rightBody, styleSplit(v.rightNum, v.rightKinds, v.dark, true), v.splitBodyStyle(false), v.rightKinds, v.dark)
 		v.bindMenu(&v.left.body, true)
 		v.bindMenu(&v.right.body, false)
 		v.attachOverview(adder)
 		return nil
 	}
-	var bodyStyle, markStyle basicwidget.TextStyles
+	bodyStyle := v.compactBodyStyle()
+	var markStyle basicwidget.TextStyles
 	if v.compactMarks != "" {
-		bodyStyle = styleSplit(v.compactBody, v.compactKinds, v.dark, false)
 		markStyle = styleSplit(v.compactMarks, v.compactKinds, v.dark, false)
-	} else {
-		bodyStyle = styleDiff(v.compactBody, v.dark)
 	}
 	adder.AddWidget(&v.compact)
 	v.compact.setWrap(v.wrap)
