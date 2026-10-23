@@ -321,6 +321,19 @@ const (
 	StatusGitTagRemoteErr   Key = "status.git_tag_remote_err"
 	StatusGitNeedMessage    Key = "status.git_need_message"
 	StatusGitNoChanges      Key = "status.git_no_changes"
+
+	DesktopUsageHeader     Key = "desktop.usage_header"
+	DesktopRemoved         Key = "desktop.removed"
+	DesktopNothing         Key = "desktop.nothing"
+	DesktopNeedAppImage    Key = "desktop.need_appimage"
+	DesktopAppImageMissing Key = "desktop.appimage_missing"
+	DesktopAppImageCheck   Key = "desktop.appimage_check"
+	DesktopNeedAppDir      Key = "desktop.need_appdir"
+	DesktopReadEntry       Key = "desktop.read_entry"
+	DesktopReadIcon        Key = "desktop.read_icon"
+	DesktopWriteFile       Key = "desktop.write_file"
+	DesktopRemoveFile      Key = "desktop.remove_file"
+	DesktopBadPath         Key = "desktop.bad_path"
 )
 
 var catalogs = map[Lang]map[Key]string{
@@ -631,6 +644,18 @@ var catalogs = map[Lang]map[Key]string{
 		StatusGitTagRemoteErr:          "リモートからのタグ削除に失敗しました: %v",
 		StatusGitNeedMessage:           "コミットメッセージを入力してください",
 		StatusGitNoChanges:             "コミットする変更がありません",
+		DesktopUsageHeader:             "使い方:",
+		DesktopRemoved:                 "アプリケーションメニューの登録を消しました",
+		DesktopNothing:                 "消すファイルはありませんでした",
+		DesktopNeedAppImage:            "AppImage から実行してください",
+		DesktopAppImageMissing:         "AppImage が見つかりません: %s",
+		DesktopAppImageCheck:           "AppImage を確認できません: %v",
+		DesktopNeedAppDir:              "APPDIR が無いので、AppImage の中のファイルを読めません",
+		DesktopReadEntry:               "デスクトップエントリを読めません: %v",
+		DesktopReadIcon:                "アイコンを読めません: %v",
+		DesktopWriteFile:               "ファイルを書けません: %v",
+		DesktopRemoveFile:              "ファイルを消せません: %v",
+		DesktopBadPath:                 "AppImage のパスをデスクトップエントリに書けません",
 	},
 	EN: {
 		AppTitle:                       "Dogubako",
@@ -939,6 +964,18 @@ var catalogs = map[Lang]map[Key]string{
 		StatusGitTagRemoteErr:          "Could not delete the tag from the remote: %v",
 		StatusGitNeedMessage:           "Enter a commit message",
 		StatusGitNoChanges:             "No changes to commit",
+		DesktopUsageHeader:             "Usage:",
+		DesktopRemoved:                 "Removed the application menu entry",
+		DesktopNothing:                 "There was nothing to remove",
+		DesktopNeedAppImage:            "Run this from the AppImage",
+		DesktopAppImageMissing:         "AppImage not found: %s",
+		DesktopAppImageCheck:           "Could not check the AppImage: %v",
+		DesktopNeedAppDir:              "APPDIR is unset, so files inside the AppImage cannot be read",
+		DesktopReadEntry:               "Could not read the desktop entry: %v",
+		DesktopReadIcon:                "Could not read the icon: %v",
+		DesktopWriteFile:               "Could not write the file: %v",
+		DesktopRemoveFile:              "Could not remove the file: %v",
+		DesktopBadPath:                 "The AppImage path cannot be written to a desktop entry",
 	},
 }
 
