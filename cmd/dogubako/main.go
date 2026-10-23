@@ -10,11 +10,15 @@ import (
 
 	"github.com/nus/dogubako/internal/app"
 	"github.com/nus/dogubako/internal/appicon"
+	"github.com/nus/dogubako/internal/appimage"
 	_ "github.com/nus/dogubako/internal/cjkembed"
 	"github.com/nus/dogubako/internal/i18n"
 )
 
 func main() {
+	if code, handled := appimage.Dispatch(os.Args[1:], os.Stdout, os.Stderr); handled {
+		os.Exit(code)
+	}
 	if img, err := appicon.RGBA(); err == nil {
 		ebiten.SetWindowIcon([]image.Image{img})
 	}

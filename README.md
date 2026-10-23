@@ -207,13 +207,26 @@ FUSE でマウントできないときは次でも起動できます。
 ./dist/Dogubako-0.1.0-linux-amd64.AppImage --appimage-extract-and-run
 ```
 
+アプリケーションメニューに登録するときも、ウィンドウは開きません。`XDG_DATA_HOME`（未設定または空なら `~/.local/share`）へ `applications/dogubako.desktop` と 256 / 512 のアイコンを書き、`Exec` と `TryExec` をその AppImage の絶対パスにします。
+
+```sh
+./dist/Dogubako-0.1.0-linux-amd64.AppImage --install-desktop
+./dist/Dogubako-0.1.0-linux-amd64.AppImage --uninstall-desktop
+```
+
+FUSE を使わない起動と一緒でも同じです。
+
+```sh
+./dist/Dogubako-0.1.0-linux-amd64.AppImage --appimage-extract-and-run --install-desktop
+```
+
 開発用の単体バイナリは `make build` で作れます。
 
 ```sh
 ./dist/dogubako
 ```
 
-アプリケーションメニューに出す場合は、バイナリを `PATH` の通る場所へ置き、デスクトップエントリをコピーします。
+単体バイナリをアプリケーションメニューに出す場合は、バイナリを `PATH` の通る場所へ置き、デスクトップエントリをコピーします。
 
 ```sh
 sudo install -m 755 dist/dogubako /usr/local/bin/dogubako
@@ -242,6 +255,7 @@ make test
 - `internal/h264` — Annex-B 分割と H.264 復号（macOS は VideoToolbox、それ以外は OpenH264）
 - `internal/openh264` — Cisco OpenH264 共有ライブラリの実行時ロードと復号（Linux のみ、`ebitengine/purego`、CGO なし）
 - `internal/appicon` — アプリ／パッケージ用アイコン
+- `internal/appimage` — AppImage の `--install-desktop` / `--uninstall-desktop`
 - `internal/imageproc` — リサイズ・切り取り・エンコード
 - `internal/capture` — OS の画面キャプチャコマンド呼び出し
 - `internal/userdir` — ピクチャ / スクリーンショットフォルダの解決
