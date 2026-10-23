@@ -238,7 +238,7 @@ func TestCompactDiffMarkersStayOutOfBody(t *testing.T) {
 		" ctx\n" +
 		"-old\n" +
 		"+new\n"
-	marks, body, spans, kinds := compactDiff(diff)
+	marks, body, spans, kinds, _ := compactDiff(diff)
 	if strings.Join(splitLines(marks), ",") != " , , , , ,-,+" {
 		t.Fatalf("marks %q", marks)
 	}
@@ -268,17 +268,17 @@ func TestCompactDiffMarkersStayOutOfBody(t *testing.T) {
 	}
 
 	open := "@@ -1 +1 @@\n-a\n+b"
-	marks, body, _, _ = compactDiff(open)
+	marks, body, _, _, _ = compactDiff(open)
 	if marks != " \n-\n+" || body != "@@ -1 +1 @@\na\nb" {
 		t.Fatalf("open marks %q body %q", marks, body)
 	}
 
 	binary := "diff --git a/b.jpg b/b.jpg\nBinary files a/b.jpg and b/b.jpg differ\n"
-	marks, body, spans, kinds = compactDiff(binary)
+	marks, body, spans, kinds, _ = compactDiff(binary)
 	if marks != "" || body != binary || spans != nil || kinds != nil {
 		t.Fatalf("binary marks %q body %q spans %v kinds %q", marks, body, spans, kinds)
 	}
-	marks, body, spans, kinds = compactDiff("")
+	marks, body, spans, kinds, _ = compactDiff("")
 	if marks != "" || body != "" || spans != nil || kinds != nil {
 		t.Fatalf("empty marks %q body %q", marks, body)
 	}
@@ -542,7 +542,7 @@ func TestCompactAndGutterShareLines(t *testing.T) {
 		" ctx\n" +
 		"-old\n" +
 		"+new\n"
-	marks, body, _, kinds := compactDiff(diff)
+	marks, body, _, kinds, _ := compactDiff(diff)
 	gutter := diffGutter(diff)
 	if len(diffLogicalLines(body)) != len(diffLogicalLines(gutter)) || len(diffLogicalLines(body)) != len(diffLogicalLines(marks)) {
 		t.Fatalf("lines body %d gutter %d marks %d", len(diffLogicalLines(body)), len(diffLogicalLines(gutter)), len(diffLogicalLines(marks)))

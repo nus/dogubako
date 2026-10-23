@@ -102,7 +102,7 @@ func TestSyntaxGoTokens(t *testing.T) {
 		t.Fatalf("theme switch = %v", got)
 	}
 
-	_, bodyOnly, spans, kinds := compactDiff(goDiff)
+	_, bodyOnly, spans, kinds, _ := compactDiff(goDiff)
 	if v.compactBody != bodyOnly || !slices.Equal(v.compactSpans, spans) || !slices.Equal(v.compactKinds, kinds) {
 		t.Fatal("syntax changed the selectable diff")
 	}
@@ -335,8 +335,9 @@ func TestSyntaxContrast(t *testing.T) {
 		page := nrgbaOf(basicwidgetdraw.BackgroundColor(mode))
 		diff := diffPalette(dark)
 		colors := []color.NRGBA{pal.keyword, pal.str, pal.comment, pal.number, pal.typ, pal.ident}
-		backs := []color.NRGBA{page, diff.addBg, diff.delBg}
-		for _, fg := range colors {
+		text := nrgbaOf(basicwidgetdraw.TextColor(mode, true))
+		backs := []color.NRGBA{page, diff.addBg, diff.delBg, diff.addWord, diff.delWord}
+		for _, fg := range append(colors, text) {
 			for _, bg := range backs {
 				if c := contrastRatio(fg, bg); c < 4.5 {
 					t.Fatalf("dark=%v fg=%v bg=%v contrast %.2f", dark, fg, bg, c)

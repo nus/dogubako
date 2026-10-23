@@ -36,6 +36,11 @@ type gitFileDiff struct {
 // Source lines of a known language are colored by token. Line numbers, markers,
 // hunks, and meta lines keep their own colors, and the coloring does not change
 // which bytes a selection can stage.
+// Inside a paired deletion and addition, the characters that differ are a
+// darker red or green than the line. The rest of the line keeps the line
+// color. Equal counts pair from the top. Unequal counts pair only lines
+// that still share half of the shorter line. The darker ranges are paint
+// only, so a selection stages the same patch bytes.
 type gitDiffView struct {
 	guigui.DefaultWidget
 
@@ -64,6 +69,9 @@ type gitDiffView struct {
 	rightNum, rightBody   string
 	leftKinds, rightKinds []byte
 	leftSpans, rightSpans []diffSpan
+	compactPaints         []diffPaint
+	leftPaints            []diffPaint
+	rightPaints           []diffPaint
 	onMenu                func(context *guigui.Context, start, end int) bool
 	useMenu               bool
 	menuRanges            [][2]int
@@ -96,10 +104,11 @@ func (v *gitDiffView) Set(text string, dark, split, wrap, whole bool, full strin
 		v.rightNum, v.rightBody = doc.rightNum, doc.rightBody
 		v.leftKinds, v.rightKinds = doc.leftKinds, doc.rightKinds
 		v.leftSpans, v.rightSpans = doc.leftSpans, doc.rightSpans
+		v.leftPaints, v.rightPaints = doc.leftPaints, doc.rightPaints
 		v.gutter = ""
 	} else {
 		v.gutter = diffGutter(shown)
-		v.compactMarks, v.compactBody, v.compactSpans, v.compactKinds = compactDiff(shown)
+		v.compactMarks, v.compactBody, v.compactSpans, v.compactKinds, v.compactPaints = compactDiff(shown)
 		if len(sources) > 0 {
 			v.compactSpans = remapDiffSpans(v.compactSpans, sources)
 		}
@@ -496,15 +505,16 @@ func diffMetaLine(line string) bool {
 // drawn, and it is not part of the body a selection can cover. Other lines
 // stay whole in the body. A diff with no hunk body returns an empty marker
 // column and the original text, so there is nothing to peel off.
-func compactDiff(text string) (marks, body string, spans []diffSpan, kinds []byte) {
+func compactDiff(text string) (marks, body string, spans []diffSpan, kinds []byte, paints []diffPaint) {
 	lines := scanDiffLines(text)
 	if len(lines) == 0 {
-		return "", "", nil, nil
+		return "", "", nil, nil, nil
 	}
+	byLine := indexInlines(diffInlines(lines))
 	var mb, bb strings.Builder
 	inHunk := false
 	marked := false
-	for _, ln := range lines {
+	for i, ln := range lines {
 		kind := byte('m')
 		payload := ln.content
 		if strings.HasPrefix(ln.content, "diff --git ") {
@@ -527,6 +537,7 @@ func compactDiff(text string) (marks, body string, spans []diffSpan, kinds []byt
 		mb.WriteByte(mark)
 		viewStart := bb.Len()
 		bb.WriteString(payload)
+		paints = applyLinePaints(paints, viewStart, kind, i, byLine)
 		if ln.end > ln.start+len(ln.content) {
 			mb.WriteByte('\n')
 			bb.WriteByte('\n')
@@ -540,9 +551,9 @@ func compactDiff(text string) (marks, body string, spans []diffSpan, kinds []byt
 		kinds = append(kinds, kind)
 	}
 	if !marked {
-		return "", text, nil, nil
+		return "", text, nil, nil, nil
 	}
-	return mb.String(), bb.String(), spans, kinds
+	return mb.String(), bb.String(), spans, kinds, paints
 }
 
 // diffNumMinWidth is the digit width of each line-number column.
@@ -794,24 +805,28 @@ func decimalDigits(n int) int {
 }
 
 type diffColors struct {
-	addBg, delBg, numBg, hunk, meta color.NRGBA
+	addBg, delBg, addWord, delWord, numBg, hunk, meta color.NRGBA
 }
 
 func diffPalette(dark bool) diffColors {
 	if dark {
 		return diffColors{
-			addBg: color.NRGBA{R: 0x1b, G: 0x3d, B: 0x26, A: 0xff},
-			delBg: color.NRGBA{R: 0x3d, G: 0x1b, B: 0x1e, A: 0xff},
-			numBg: color.NRGBA{R: 0x16, G: 0x1b, B: 0x22, A: 0xff},
-			hunk:  color.NRGBA{R: 0x79, G: 0xc0, B: 0xff, A: 0xff},
-			meta:  color.NRGBA{R: 0x8b, G: 0x94, B: 0x9e, A: 0xff},
+			addBg:   color.NRGBA{R: 0x1b, G: 0x3d, B: 0x26, A: 0xff},
+			delBg:   color.NRGBA{R: 0x3d, G: 0x1b, B: 0x1e, A: 0xff},
+			addWord: color.NRGBA{R: 0x1f, G: 0x46, B: 0x2c, A: 0xff},
+			delWord: color.NRGBA{R: 0x6c, G: 0x28, B: 0x29, A: 0xff},
+			numBg:   color.NRGBA{R: 0x16, G: 0x1b, B: 0x22, A: 0xff},
+			hunk:    color.NRGBA{R: 0x79, G: 0xc0, B: 0xff, A: 0xff},
+			meta:    color.NRGBA{R: 0x8b, G: 0x94, B: 0x9e, A: 0xff},
 		}
 	}
 	return diffColors{
-		addBg: color.NRGBA{R: 0xda, G: 0xfb, B: 0xe1, A: 0xff},
-		delBg: color.NRGBA{R: 0xff, G: 0xeb, B: 0xe9, A: 0xff},
-		numBg: color.NRGBA{R: 0xf6, G: 0xf8, B: 0xfa, A: 0xff},
-		hunk:  color.NRGBA{R: 0x05, G: 0x50, B: 0xae, A: 0xff},
-		meta:  color.NRGBA{R: 0x57, G: 0x60, B: 0x6a, A: 0xff},
+		addBg:   color.NRGBA{R: 0xda, G: 0xfb, B: 0xe1, A: 0xff},
+		delBg:   color.NRGBA{R: 0xff, G: 0xeb, B: 0xe9, A: 0xff},
+		addWord: color.NRGBA{R: 0xab, G: 0xf2, B: 0xbc, A: 0xff},
+		delWord: color.NRGBA{R: 0xff, G: 0xce, B: 0xcb, A: 0xff},
+		numBg:   color.NRGBA{R: 0xf6, G: 0xf8, B: 0xfa, A: 0xff},
+		hunk:    color.NRGBA{R: 0x05, G: 0x50, B: 0xae, A: 0xff},
+		meta:    color.NRGBA{R: 0x57, G: 0x60, B: 0x6a, A: 0xff},
 	}
 }
