@@ -124,6 +124,8 @@ func (v *gitDiffView) ensureSyntax() {
 	if v.split {
 		left := styleSplit(v.leftBody, v.leftKinds, v.dark, false)
 		right := styleSplit(v.rightBody, v.rightKinds, v.dark, false)
+		paintDiffChars(&left, v.leftPaints, v.dark)
+		paintDiffChars(&right, v.rightPaints, v.dark)
 		paintSyntax(&left, v.syntax.left, v.dark)
 		paintSyntax(&right, v.syntax.right, v.dark)
 		v.syntax.leftStyle = left
@@ -136,6 +138,7 @@ func (v *gitDiffView) ensureSyntax() {
 	} else {
 		styles = styleDiff(v.compactBody, v.dark)
 	}
+	paintDiffChars(&styles, v.compactPaints, v.dark)
 	paintSyntax(&styles, v.syntax.compact, v.dark)
 	v.syntax.compactStyle = styles
 }

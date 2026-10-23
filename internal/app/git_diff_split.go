@@ -28,6 +28,8 @@ type splitDoc struct {
 	rightKinds          []byte
 	leftSpans           []diffSpan
 	rightSpans          []diffSpan
+	leftPaints          []diffPaint
+	rightPaints         []diffPaint
 }
 
 // diffSpan maps one displayed body line back to the unified diff.
@@ -42,6 +44,7 @@ type splitLine struct {
 	text             string
 	kind             byte
 	srcStart, srcEnd int
+	src              int
 }
 
 type splitRow struct {
@@ -71,19 +74,19 @@ func splitDiff(text string) splitDoc {
 		ln := lines[i]
 		if strings.HasPrefix(ln.content, "diff --git ") {
 			inHunk = false
-			rows = append(rows, splitBoth(ln, 'm'))
+			rows = append(rows, splitBoth(ln, 'm', i))
 			i++
 			continue
 		}
 		if oldStart, newStart, ok := parseHunkStarts(ln.content); ok {
 			oldLine, newLine = oldStart, newStart
 			inHunk = true
-			rows = append(rows, splitBoth(ln, '@'))
+			rows = append(rows, splitBoth(ln, '@', i))
 			i++
 			continue
 		}
 		if !inHunk || ln.content == "" {
-			rows = append(rows, splitBoth(ln, 'm'))
+			rows = append(rows, splitBoth(ln, 'm', i))
 			i++
 			continue
 		}
@@ -93,15 +96,15 @@ func splitDiff(text string) splitDoc {
 			note(newLine)
 			payload := diffPayload(ln.content)
 			rows = append(rows, splitRow{
-				left:  splitSideLine(ln, oldLine, ' ', payload),
-				right: splitSideLine(ln, newLine, ' ', payload),
+				left:  splitSideLine(ln, oldLine, ' ', payload, i),
+				right: splitSideLine(ln, newLine, ' ', payload, i),
 			})
 			oldLine++
 			newLine++
 			i++
 		case '-', '+':
 			var dels, adds []diffSrcLine
-			var delNums, addNums []int
+			var delNums, addNums, delSrc, addSrc []int
 			for i < len(lines) {
 				c := lines[i].content
 				if c == "" || (c[0] != '-' && c[0] != '+') {
@@ -111,11 +114,13 @@ func splitDiff(text string) splitDoc {
 					note(oldLine)
 					dels = append(dels, lines[i])
 					delNums = append(delNums, oldLine)
+					delSrc = append(delSrc, i)
 					oldLine++
 				} else {
 					note(newLine)
 					adds = append(adds, lines[i])
 					addNums = append(addNums, newLine)
+					addSrc = append(addSrc, i)
 					newLine++
 				}
 				i++
@@ -124,15 +129,15 @@ func splitDiff(text string) splitDoc {
 			for k := 0; k < n; k++ {
 				var row splitRow
 				if k < len(dels) {
-					row.left = splitSideLine(dels[k], delNums[k], '-', diffPayload(dels[k].content))
+					row.left = splitSideLine(dels[k], delNums[k], '-', diffPayload(dels[k].content), delSrc[k])
 				}
 				if k < len(adds) {
-					row.right = splitSideLine(adds[k], addNums[k], '+', diffPayload(adds[k].content))
+					row.right = splitSideLine(adds[k], addNums[k], '+', diffPayload(adds[k].content), addSrc[k])
 				}
 				rows = append(rows, row)
 			}
 		default:
-			rows = append(rows, splitBoth(ln, 'm'))
+			rows = append(rows, splitBoth(ln, 'm', i))
 			i++
 		}
 	}
@@ -140,26 +145,28 @@ func splitDiff(text string) splitDoc {
 	if d := decimalDigits(maxN); maxN > 0 && d > width {
 		width = d
 	}
-	return renderSplit(rows, width)
+	return renderSplit(rows, width, indexInlines(diffInlines(lines)))
 }
 
-func splitBoth(ln diffSrcLine, kind byte) splitRow {
+func splitBoth(ln diffSrcLine, kind byte, src int) splitRow {
 	line := splitLine{
 		text:     ln.content,
 		kind:     kind,
 		srcStart: ln.start,
 		srcEnd:   ln.end,
+		src:      src,
 	}
 	return splitRow{left: line, right: line}
 }
 
-func splitSideLine(ln diffSrcLine, num int, kind byte, text string) splitLine {
+func splitSideLine(ln diffSrcLine, num int, kind byte, text string, src int) splitLine {
 	return splitLine{
 		num:      num,
 		text:     text,
 		kind:     kind,
 		srcStart: ln.start,
 		srcEnd:   ln.end,
+		src:      src,
 	}
 }
 
@@ -193,12 +200,18 @@ func scanDiffLines(text string) []diffSrcLine {
 	return out
 }
 
-func renderSplit(rows []splitRow, width int) splitDoc {
+func renderSplit(rows []splitRow, width int, byLine [][]diffInline) splitDoc {
 	var doc splitDoc
 	var leftNum, leftBody, rightNum, rightBody strings.Builder
 	for _, row := range rows {
 		writeSplitSide(&leftNum, &leftBody, &doc.leftSpans, &doc.leftKinds, row.left, width)
 		writeSplitSide(&rightNum, &rightBody, &doc.rightSpans, &doc.rightKinds, row.right, width)
+		if n := len(doc.leftSpans); n > 0 {
+			doc.leftPaints = applyLinePaints(doc.leftPaints, doc.leftSpans[n-1].viewStart, row.left.kind, row.left.src, byLine)
+		}
+		if n := len(doc.rightSpans); n > 0 {
+			doc.rightPaints = applyLinePaints(doc.rightPaints, doc.rightSpans[n-1].viewStart, row.right.kind, row.right.src, byLine)
+		}
 	}
 	doc.leftNum = leftNum.String()
 	doc.leftBody = leftBody.String()
