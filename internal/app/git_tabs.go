@@ -115,6 +115,21 @@ func (m *GitModel) ActiveTab() int {
 	return m.active
 }
 
+// TabDisplay is the repository path shown for the tab, matching the side pane.
+// Local tabs show the directory. SSH tabs show host:dir, or host:port:dir when
+// a port is set. It is empty when the tab has no repository.
+func (m *GitModel) TabDisplay(index int) string {
+	m.ensure()
+	if index < 0 || index >= len(m.tabs) {
+		return ""
+	}
+	repoPath := m.tabs[index].path
+	if repoPath == "" {
+		return ""
+	}
+	return gitcli.ParseLoc(repoPath).Display()
+}
+
 // TabLabel is the repository folder name, or empty when the tab has no repository.
 // Tabs that share a folder name include the parent directory.
 func (m *GitModel) TabLabel(index int) string {

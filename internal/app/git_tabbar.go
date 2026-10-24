@@ -46,7 +46,7 @@ func (b *gitTabBar) Sync(lang i18n.Lang, model *GitModel) {
 		}
 		idx := i
 		sep := i+1 < n && i != active && i+1 != active
-		b.tabs.At(i).Set(label, i == active, sep, func() { model.SelectTab(idx) }, func() { model.CloseTab(idx) })
+		b.tabs.At(i).Set(label, model.TabDisplay(i), i == active, sep, func() { model.SelectTab(idx) }, func() { model.CloseTab(idx) })
 	}
 	b.add.Set(func() { model.NewTab() })
 }
@@ -134,8 +134,10 @@ type gitTab struct {
 
 	label basicwidget.Text
 	close basicwidget.Text
+	tip   basicwidget.TooltipArea
 
 	text     string
+	path     string
 	active   bool
 	sep      bool
 	onSelect func()
@@ -146,8 +148,9 @@ type gitTab struct {
 	closeBox   image.Rectangle
 }
 
-func (t *gitTab) Set(label string, active, sep bool, onSelect, onClose func()) {
+func (t *gitTab) Set(label, path string, active, sep bool, onSelect, onClose func()) {
 	t.text = label
+	t.path = path
 	t.active = active
 	t.sep = sep
 	t.onSelect = onSelect
@@ -178,6 +181,12 @@ func (t *gitTab) Build(context *guigui.Context, adder *guigui.ChildAdder) error 
 	context.SetClipChildren(t, true)
 	adder.AddWidget(&t.label)
 	adder.AddWidget(&t.close)
+	// A new tab has no path, so it has no tooltip. The area covers the close
+	// button too: that button is part of the tab.
+	if t.path != "" {
+		adder.AddWidget(&t.tip)
+		t.tip.SetText(t.path)
+	}
 	return nil
 }
 
@@ -217,6 +226,9 @@ func (t *gitTab) Layout(context *guigui.Context, widgetBounds *guigui.WidgetBoun
 	y := b.Min.Y + (b.Dy()-close)/2
 	t.closeBox = image.Rect(x, y, x+close, y+close)
 	layouter.LayoutWidget(&t.close, t.closeBox)
+	if t.path != "" {
+		layouter.LayoutWidget(&t.tip, b)
+	}
 	text := b
 	text.Min.X += u / 3
 	text.Max.X = x - u/8
@@ -263,6 +275,7 @@ func (t *gitTab) Tick(context *guigui.Context, widgetBounds *guigui.WidgetBounds
 
 func (t *gitTab) WriteStateKey(context *guigui.Context, w *guigui.StateKeyWriter) {
 	w.WriteString(t.text)
+	w.WriteString(t.path)
 	w.WriteBool(t.active)
 	w.WriteBool(t.sep)
 	w.WriteBool(t.hover)

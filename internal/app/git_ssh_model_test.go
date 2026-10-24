@@ -53,6 +53,36 @@ func TestRemotePathHelpers(t *testing.T) {
 	}
 }
 
+func TestTabDisplay(t *testing.T) {
+	m := &GitModel{}
+	local := "/Users/me/proj"
+	withPort := gitcli.Loc{Dest: "user@host", Port: "2222", Dir: "/work"}.Key()
+	noPort := gitcli.Loc{Dest: "dev", Dir: "/work"}.Key()
+	m.tabs = []*gitSession{
+		{owner: m, path: ""},
+		{owner: m, path: local},
+		{owner: m, path: withPort},
+		{owner: m, path: noPort},
+	}
+	m.active = 0
+	m.gitSession = m.tabs[0]
+	if got := m.TabDisplay(0); got != "" {
+		t.Fatalf("empty = %q", got)
+	}
+	if got := m.TabDisplay(1); got != local {
+		t.Fatalf("local = %q", got)
+	}
+	if got := m.TabDisplay(2); got != "user@host:2222:/work" {
+		t.Fatalf("port = %q", got)
+	}
+	if got := m.TabDisplay(3); got != "dev:/work" {
+		t.Fatalf("remote = %q", got)
+	}
+	if got := m.TabDisplay(-1); got != "" {
+		t.Fatalf("missing = %q", got)
+	}
+}
+
 func TestTabLabelRemote(t *testing.T) {
 	m := &GitModel{}
 	m.tabs = []*gitSession{
