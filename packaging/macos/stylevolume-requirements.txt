@@ -1,0 +1,3 @@
+# Reads the Finder window settings back out of .DS_Store so a disk image
+# without a stored background fails the build instead of shipping quietly.
+ds_store==1.3.3
