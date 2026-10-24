@@ -184,7 +184,7 @@ make package-ubuntu
 
 `make package-ubuntu` には `squashfs-tools`（`mksquashfs`）が必要です。AppImage のランタイムはビルド時に [type2-runtime](https://github.com/AppImage/type2-runtime) から取得します。オフラインで作るときは `APPIMAGE_RUNTIME_x86_64` / `APPIMAGE_RUNTIME_aarch64` に ELF を渡します。
 
-`.dmg` を開いて **Dogubako** を Applications へドラッグします。日本語環境では Finder 上の名前は「道具箱」です。署名していない配布物は、初回だけコントロールキーを押しながら開くか、右クリック → 開く、で Gatekeeper を通します。
+macOS で作った `.dmg` を開くと、Finder はアイコン表示のウィンドウになります。左が Dogubako.app、右が Applications で、背景には左から右へ向かう矢印があります。二つのアイコンはその矢印の両端にあり、スクロールせず全体が見えます。その矢印に沿って **Dogubako** を Applications へドラッグします。日本語環境では Finder 上の名前は「道具箱」です。署名していない配布物は、初回だけコントロールキーを押しながら開くか、右クリック → 開く、で Gatekeeper を通します。
 
 Apple Developer 証明書がある場合は、Mac 上で署名できます。
 
@@ -192,7 +192,7 @@ Apple Developer 証明書がある場合は、Mac 上で署名できます。
 MACOS_SIGN_IDENTITY="Developer ID Application: …" make package-macos
 ```
 
-`make package-macos` は Linux からも実行できます。その場合の `.dmg` は ISO 9660 / Joliet / Rock Ridge で、macOS の DiskImageMounter が開けます。GitHub Release の DMG は macOS runner 上の `hdiutil` で作る UDZO（HFS+）イメージで、開くと Applications へドラッグできる構成です。
+`make package-macos` は Linux からも実行できます。その場合の `.dmg` は ISO 9660 / Joliet / Rock Ridge で、macOS の DiskImageMounter が開けます。中身は Dogubako.app と Applications へのシンボリックリンクです。GitHub Release の DMG は macOS runner 上で作る UDZO（HFS+）イメージで、開くと矢印の背景が付いたウィンドウになります。macOS でのパッケージ作成には Python 3 が必要です。矢印の画像は作成時に描き、そのウィンドウ設定をディスクイメージへ書き込んでから UDZO にします。
 
 Ubuntu では AppImage に実行ビットを付けて起動します。OpenGL / X11 はホストのデスクトップ環境のものを使います（上記の実行時パッケージ）。
 

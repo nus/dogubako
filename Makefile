@@ -29,7 +29,8 @@ app-macos: build-macos
 	./packaging/macos/package.sh app
 
 # Universal .dmg (intermediates cleaned after packaging).
-# On macOS this uses hdiutil (UDZO); elsewhere an ISO 9660 image is written.
+# On macOS this is a UDZO image whose Finder window shows an arrow from
+# Dogubako.app to Applications. Elsewhere an ISO 9660 image is written.
 dmg-macos: build-macos
 	./packaging/macos/package.sh dmg
 

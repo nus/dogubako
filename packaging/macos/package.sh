@@ -1,6 +1,11 @@
 #!/usr/bin/env bash
 # Build Dogubako.app bundles and a Universal .dmg for macOS.
 #
+# On macOS the disk image is UDZO. Its Finder window is icon view, with
+# Dogubako.app on the left, an Applications alias on the right, and an
+# arrow drawn between them at package time. Other hosts get an ISO 9660
+# image with the same two items and no arrow.
+#
 # Usage:
 #   packaging/macos/package.sh [app|dmg|all]
 #
@@ -95,20 +100,71 @@ stage_dmg_root() {
 	ln -s /Applications "$stage/Applications"
 }
 
-create_dmg_hdiutil() {
-	local stage=$1
+# Python is used to read .DS_Store back and refuse a disk image whose
+# background Finder did not actually store.
+ensure_style_python() {
+	local venv="$DIST/.venv-dmg"
+	local bin="$venv/bin/python"
+	if [[ -x $bin ]]; then
+		printf '%s\n' "$bin"
+		return
+	fi
+	command -v python3 >/dev/null 2>&1 || die "python3 is required to style the macOS DMG"
+	rm -rf "$venv"
+	python3 -m venv "$venv"
+	"$venv/bin/pip" install --disable-pip-version-check -r "$SCRIPT_DIR/stylevolume-requirements.txt" >&2
+	[[ -x $bin ]] || die "python was not installed into $venv"
+	printf '%s\n' "$bin"
+}
+
+# Prints the mount point, then the device, one per line.
+attach_dmg() {
+	local image=$1
+	local plist
+	plist=$(hdiutil attach -nobrowse -owners off -plist "$image")
+	python3 -c 'import plistlib,sys
+p=plistlib.loads(sys.stdin.buffer.read())
+for e in p["system-entities"]:
+    m=e.get("mount-point")
+    if m:
+        print(m)
+        print(e.get("dev-entry",""))
+        break
+else:
+    sys.exit(1)' <<<"$plist"
+}
+
+create_dmg_udzo() {
+	local app_dir=$1
 	local dest=$2
 	local volname=$3
-	local tmp="${dest}.rw.dmg"
-	rm -f "$tmp" "$dest"
+	local work mount py dev
+	work=$(mktemp -d "${TMPDIR:-/tmp}/dogubako-dmg.XXXXXX")
+	# shellcheck disable=SC2064
+	trap "rm -rf '$work'" RETURN
+	(cd "$REPO_ROOT" && go run ./packaging/macos/cmd/dmgwindow -o "$work/style")
+	stage_dmg_root "$app_dir" "$work/root"
 	hdiutil create \
 		-volname "$volname" \
-		-srcfolder "$stage" \
+		-srcfolder "$work/root" \
 		-ov -format UDRW \
 		-fs HFS+ \
-		"$tmp"
-	hdiutil convert "$tmp" -format UDZO -imagekey zlib-level=9 -o "$dest"
-	rm -f "$tmp"
+		"$work/rw.dmg" >/dev/null
+	local attached
+	attached=$(attach_dmg "$work/rw.dmg")
+	mount=$(printf '%s\n' "$attached" | sed -n 1p)
+	dev=$(printf '%s\n' "$attached" | sed -n 2p)
+	cp "$work/style/background.png" "$mount/background.png"
+	py=$(ensure_style_python)
+	if ! "$py" "$SCRIPT_DIR/stylevolume.py" \
+		--mount "$mount" \
+		--layout "$work/style/layout.json"; then
+		hdiutil detach "$mount" >/dev/null 2>&1 || hdiutil detach -force "$dev" >/dev/null 2>&1 || true
+		exit 1
+	fi
+	hdiutil detach "$mount" >/dev/null || hdiutil detach -force "$dev" >/dev/null
+	rm -f "$dest"
+	hdiutil convert "$work/rw.dmg" -format UDZO -imagekey zlib-level=9 -o "$dest" >/dev/null
 }
 
 create_dmg_iso() {
@@ -125,12 +181,11 @@ make_one_dmg() {
 	[[ -d $app_dir ]] || die "missing $app_dir (run: $0 app)"
 
 	local dest="$DIST/${APP_NAME}-${VERSION}-macos-${arch}.dmg"
-	local stage="$DIST/macos/${arch}/dmg-root"
-	stage_dmg_root "$app_dir" "$stage"
-
 	if command -v hdiutil >/dev/null 2>&1; then
-		create_dmg_hdiutil "$stage" "$dest" "道具箱"
+		create_dmg_udzo "$app_dir" "$dest" "道具箱"
 	else
+		local stage="$DIST/macos/${arch}/dmg-root"
+		stage_dmg_root "$app_dir" "$stage"
 		create_dmg_iso "$stage" "$dest" "道具箱"
 		log "note: created ISO 9660 .dmg (use a Mac and hdiutil for a native UDZO image)"
 	fi
