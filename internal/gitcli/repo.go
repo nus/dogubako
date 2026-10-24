@@ -793,7 +793,9 @@ func (r *Repo) Pull(ctx context.Context) error {
 	return r.run(ctx, "pull", "--ff-only")
 }
 
-// PullRef fetches the remote branch and fast-forwards HEAD onto it.
+// PullRef fetches the remote branch and moves HEAD to its tip.
+// A fast-forward still uses pull --ff-only. When the remote tip is another
+// history, the checked-out branch moves onto that tip instead.
 func (r *Repo) PullRef(ctx context.Context, ref Ref) error {
 	if err := ctx.Err(); err != nil {
 		return err
@@ -805,7 +807,29 @@ func (r *Repo) PullRef(ctx context.Context, ref Ref) error {
 	if branch == "" || branch == "HEAD" {
 		return fmt.Errorf("no branch")
 	}
-	return r.run(ctx, "pull", "--ff-only", ref.Remote, branch)
+	err := r.run(ctx, "pull", "--ff-only", ref.Remote, branch)
+	if err == nil || !refusedFastForward(err) {
+		return err
+	}
+	// Fetch inside pull already stored the remote tip. Follow that ref.
+	// --keep leaves edits that do not overlap the remote tree, and refuses
+	// edits that would be overwritten.
+	remoteRef := "refs/remotes/" + ref.Remote + "/" + branch
+	return r.run(ctx, "reset", "--keep", remoteRef)
+}
+
+// refusedFastForward reports git's refusal of pull --ff-only when HEAD cannot
+// move forward to the fetched tip.
+func refusedFastForward(err error) bool {
+	if err == nil {
+		return false
+	}
+	msg := err.Error()
+	if strings.Contains(msg, "Not possible to fast-forward") {
+		return true
+	}
+	// Japanese git (po/ja.po) uses these words for the same refusal.
+	return strings.Contains(msg, "早送りできません")
 }
 
 // Push sends the current branch. Sets upstream to origin when missing.

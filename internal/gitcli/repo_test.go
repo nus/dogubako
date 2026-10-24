@@ -576,6 +576,185 @@ func TestPullRefFastForward(t *testing.T) {
 	if headSubject != "feature" {
 		t.Fatalf("HEAD subject = %q", headSubject)
 	}
+	reflog := gitAt(t, dir, "reflog", "-1", "feature")
+	if !strings.Contains(reflog, "pull") || strings.Contains(reflog, "reset:") {
+		t.Fatalf("reflog = %s", reflog)
+	}
+}
+
+func TestPullRefDiverged(t *testing.T) {
+	dir := divergedMain(t)
+	ctx, cancel := context.WithTimeout(context.Background(), 20*time.Second)
+	defer cancel()
+	repo, err := Open(ctx, dir)
+	if err != nil {
+		t.Fatal(err)
+	}
+	before := strings.TrimSpace(gitAt(t, dir, "rev-parse", "HEAD"))
+	origin := strings.TrimSpace(gitAt(t, dir, "rev-parse", "origin/main"))
+	if before == origin {
+		t.Fatal("expected local main and origin/main to differ")
+	}
+	// An edit outside the rewritten file stays in the worktree.
+	if err := os.WriteFile(filepath.Join(dir, "c.txt"), []byte("same\nedited\n"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	if err := repo.PullRef(ctx, Ref{Name: "origin/main", Remote: "origin"}); err != nil {
+		t.Fatal(err)
+	}
+	head := strings.TrimSpace(gitAt(t, dir, "rev-parse", "HEAD"))
+	origin = strings.TrimSpace(gitAt(t, dir, "rev-parse", "origin/main"))
+	if head != origin {
+		t.Fatalf("HEAD %s origin %s", head, origin)
+	}
+	if branch := strings.TrimSpace(gitAt(t, dir, "rev-parse", "--abbrev-ref", "HEAD")); branch != "main" {
+		t.Fatalf("branch = %s", branch)
+	}
+	if _, err := os.Stat(filepath.Join(dir, "b.txt")); !os.IsNotExist(err) {
+		t.Fatalf("local-only file remains: %v", err)
+	}
+	body, err := os.ReadFile(filepath.Join(dir, "a.txt"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	if string(body) != "rewritten\n" {
+		t.Fatalf("a.txt = %q", body)
+	}
+	same, err := os.ReadFile(filepath.Join(dir, "c.txt"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	if string(same) != "same\nedited\n" {
+		t.Fatalf("c.txt = %q", same)
+	}
+	reflog := gitAt(t, dir, "reflog", "-1")
+	if !strings.Contains(reflog, "reset: moving to refs/remotes/origin/main") {
+		t.Fatalf("reflog = %s", reflog)
+	}
+}
+
+func TestPullRefDivergedFromOtherBranch(t *testing.T) {
+	dir := divergedMain(t)
+	gitAt(t, dir, "checkout", "-b", "feature")
+	writeCommit(t, dir, "f.txt", "feature")
+	feature := strings.TrimSpace(gitAt(t, dir, "rev-parse", "feature"))
+
+	ctx, cancel := context.WithTimeout(context.Background(), 20*time.Second)
+	defer cancel()
+	repo, err := Open(ctx, dir)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if err := repo.Checkout(ctx, Ref{Name: "main"}); err != nil {
+		t.Fatal(err)
+	}
+	if err := repo.PullRef(ctx, Ref{Name: "origin/main", Remote: "origin"}); err != nil {
+		t.Fatal(err)
+	}
+	head := strings.TrimSpace(gitAt(t, dir, "rev-parse", "HEAD"))
+	origin := strings.TrimSpace(gitAt(t, dir, "rev-parse", "origin/main"))
+	main := strings.TrimSpace(gitAt(t, dir, "rev-parse", "main"))
+	if head != origin || main != origin {
+		t.Fatalf("HEAD %s main %s origin %s", head, main, origin)
+	}
+	if branch := strings.TrimSpace(gitAt(t, dir, "rev-parse", "--abbrev-ref", "HEAD")); branch != "main" {
+		t.Fatalf("branch = %s", branch)
+	}
+	if got := strings.TrimSpace(gitAt(t, dir, "rev-parse", "feature")); got != feature {
+		t.Fatalf("feature moved %s -> %s", feature, got)
+	}
+}
+
+func TestPullRefDivergedKeepsOverlappingEdit(t *testing.T) {
+	dir := divergedMain(t)
+	if err := os.WriteFile(filepath.Join(dir, "a.txt"), []byte("base\nlocaledit\n"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	before := strings.TrimSpace(gitAt(t, dir, "rev-parse", "HEAD"))
+
+	ctx, cancel := context.WithTimeout(context.Background(), 20*time.Second)
+	defer cancel()
+	repo, err := Open(ctx, dir)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if err := repo.PullRef(ctx, Ref{Name: "origin/main", Remote: "origin"}); err == nil {
+		t.Fatal("expected pull to refuse an overlapping edit")
+	}
+	after := strings.TrimSpace(gitAt(t, dir, "rev-parse", "HEAD"))
+	if after != before {
+		t.Fatalf("HEAD moved %s -> %s", before, after)
+	}
+	body, err := os.ReadFile(filepath.Join(dir, "a.txt"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	if string(body) != "base\nlocaledit\n" {
+		t.Fatalf("a.txt = %q", body)
+	}
+}
+
+func TestPullRefMissingBranch(t *testing.T) {
+	dir := initRepo(t)
+	writeCommit(t, dir, "a.txt", "base")
+	remote := t.TempDir()
+	gitAt(t, remote, "init", "--bare", "-b", "main")
+	gitAt(t, dir, "remote", "add", "origin", remote)
+	gitAt(t, dir, "push", "-u", "origin", "main")
+	before := strings.TrimSpace(gitAt(t, dir, "rev-parse", "HEAD"))
+
+	ctx, cancel := context.WithTimeout(context.Background(), 20*time.Second)
+	defer cancel()
+	repo, err := Open(ctx, dir)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if err := repo.PullRef(ctx, Ref{Name: "origin/missing", Remote: "origin"}); err == nil {
+		t.Fatal("expected missing branch to fail")
+	}
+	after := strings.TrimSpace(gitAt(t, dir, "rev-parse", "HEAD"))
+	if after != before {
+		t.Fatalf("HEAD moved %s -> %s", before, after)
+	}
+}
+
+func TestRefusedFastForward(t *testing.T) {
+	if !refusedFastForward(errors.New("hint: diverging\nfatal: Not possible to fast-forward, aborting.")) {
+		t.Fatal("english refusal")
+	}
+	if !refusedFastForward(errors.New("fatal: 早送りできません。中止します。")) {
+		t.Fatal("japanese refusal")
+	}
+	if refusedFastForward(errors.New("fatal: couldn't find remote ref missing")) {
+		t.Fatal("missing ref treated as divergence")
+	}
+	if refusedFastForward(nil) {
+		t.Fatal("nil")
+	}
+}
+
+// divergedMain is a clean repository checked out on main. origin/main was
+// rewritten, and main has a commit origin does not. c.txt is the same in both.
+func divergedMain(t *testing.T) string {
+	t.Helper()
+	dir := initRepo(t)
+	writeCommit(t, dir, "a.txt", "base")
+	writeCommit(t, dir, "c.txt", "same")
+	remote := t.TempDir()
+	gitAt(t, remote, "init", "--bare", "-b", "main")
+	gitAt(t, dir, "remote", "add", "origin", remote)
+	gitAt(t, dir, "push", "-u", "origin", "main")
+	writeCommit(t, dir, "b.txt", "local")
+
+	other := t.TempDir()
+	gitAt(t, other, "clone", remote, ".")
+	gitAt(t, other, "config", "user.name", "Test")
+	gitAt(t, other, "config", "user.email", "test@example.com")
+	gitAt(t, other, "config", "commit.gpgsign", "false")
+	writeCommit(t, other, "a.txt", "rewritten")
+	gitAt(t, other, "push", "--force", "origin", "main")
+	gitAt(t, dir, "fetch", "origin")
+	return dir
 }
 
 func TestCheckoutSwitch(t *testing.T) {

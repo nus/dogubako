@@ -1100,7 +1100,7 @@ func (m *gitSession) DoCheckout(ref gitcli.Ref) {
 	})
 }
 
-// DoCheckoutAndPull switches to an existing local branch, then fast-forwards it
+// DoCheckoutAndPull switches to an existing local branch, then updates it
 // from the remote branch the user asked to switch to.
 func (m *gitSession) DoCheckoutAndPull(local, remote gitcli.Ref) {
 	if !m.HasRepo() || m.Busy() || local.Name == "" || local.Remote != "" || remote.Remote == "" {
