@@ -357,6 +357,172 @@ func (m *gitTagMenu) contentSize(context *guigui.Context) image.Point {
 	return m.menu.Measure(context, guigui.Constraints{})
 }
 
+// gitPushDialog asks which push to send after the Push button is pressed.
+type gitPushDialog struct {
+	guigui.DefaultWidget
+
+	popup   basicwidget.Popup
+	content gitPushDialogContent
+}
+
+func (d *gitPushDialog) Ask(message, normal, lease, force, cancel string, onChoose func(gitcli.PushMode)) {
+	d.content.messageText = message
+	d.content.normalText = normal
+	d.content.leaseText = lease
+	d.content.forceText = force
+	d.content.cancelText = cancel
+	d.content.onChoose = onChoose
+	d.popup.SetOpen(true)
+}
+
+func (d *gitPushDialog) IsOpen() bool {
+	return d.popup.IsOpen()
+}
+
+func (d *gitPushDialog) Build(context *guigui.Context, adder *guigui.ChildAdder) error {
+	d.content.popup = &d.popup
+	d.popup.SetContent(&d.content)
+	d.popup.SetModal(true)
+	d.popup.SetBackgroundDark(true)
+	d.popup.SetCloseByClickingOutside(true)
+	d.popup.SetAnimated(true)
+	if d.popup.IsOpen() {
+		adder.AddWidget(&d.popup)
+	}
+	return nil
+}
+
+func (d *gitPushDialog) Layout(context *guigui.Context, widgetBounds *guigui.WidgetBounds, layouter *guigui.ChildLayouter) {
+	layouter.LayoutWidget(&d.popup, widgetBounds.Bounds())
+}
+
+func (d *gitPushDialog) Measure(context *guigui.Context, constraints guigui.Constraints) image.Point {
+	return image.Point{}
+}
+
+func (d *gitPushDialog) contentSize(context *guigui.Context) image.Point {
+	return d.content.Measure(context, guigui.Constraints{})
+}
+
+type gitPushDialogContent struct {
+	guigui.DefaultWidget
+
+	popup *basicwidget.Popup
+
+	message basicwidget.Text
+	normal  basicwidget.Button
+	lease   basicwidget.Button
+	force   basicwidget.Button
+	cancel  basicwidget.Button
+
+	messageText string
+	normalText  string
+	leaseText   string
+	forceText   string
+	cancelText  string
+	onChoose    func(gitcli.PushMode)
+
+	layoutItems []guigui.LinearLayoutItem
+}
+
+func (c *gitPushDialogContent) choose(mode gitcli.PushMode) {
+	on := c.onChoose
+	c.onChoose = nil
+	if c.popup != nil {
+		c.popup.SetOpen(false)
+	}
+	if on != nil {
+		on(mode)
+	}
+}
+
+func (c *gitPushDialogContent) close() {
+	c.onChoose = nil
+	if c.popup != nil {
+		c.popup.SetOpen(false)
+	}
+}
+
+func (c *gitPushDialogContent) Build(context *guigui.Context, adder *guigui.ChildAdder) error {
+	adder.AddWidget(&c.message)
+	adder.AddWidget(&c.normal)
+	adder.AddWidget(&c.lease)
+	adder.AddWidget(&c.force)
+	adder.AddWidget(&c.cancel)
+
+	c.message.SetValue(c.messageText)
+	c.message.SetMultiline(true)
+	c.message.SetWrapMode(basicwidget.WrapModeNormal)
+	c.message.SetHorizontalAlign(basicwidget.HorizontalAlignCenter)
+	c.message.SetVerticalAlign(basicwidget.VerticalAlignMiddle)
+
+	// Escape must reach this dialog even when focus is still on the history.
+	context.SetButtonInputReceptive(c, true)
+
+	c.normal.SetText(c.normalText)
+	c.normal.SetType(basicwidget.ButtonTypePrimary)
+	c.normal.OnDown(func(context *guigui.Context) {
+		c.choose(gitcli.PushNormal)
+	})
+	c.lease.SetText(c.leaseText)
+	c.lease.OnDown(func(context *guigui.Context) {
+		c.choose(gitcli.PushForceWithLease)
+	})
+	c.force.SetText(c.forceText)
+	c.force.OnDown(func(context *guigui.Context) {
+		c.choose(gitcli.PushForce)
+	})
+	c.cancel.SetText(c.cancelText)
+	c.cancel.OnDown(func(context *guigui.Context) {
+		c.close()
+	})
+	return nil
+}
+
+func (c *gitPushDialogContent) HandleButtonInput(context *guigui.Context, widgetBounds *guigui.WidgetBounds) guigui.HandleInputResult {
+	if c.popup == nil || !c.popup.IsOpen() {
+		return guigui.HandleInputResult{}
+	}
+	if inpututil.IsKeyJustPressed(ebiten.KeyEscape) {
+		c.close()
+		return guigui.HandleInputByWidget(c)
+	}
+	return guigui.HandleInputResult{}
+}
+
+func (c *gitPushDialogContent) Measure(context *guigui.Context, constraints guigui.Constraints) image.Point {
+	u := basicwidget.UnitSize(context)
+	w := 16 * u
+	for _, b := range []*basicwidget.Button{&c.normal, &c.lease, &c.force, &c.cancel} {
+		if need := b.Measure(context, guigui.Constraints{}).X + u; need > w {
+			w = need
+		}
+	}
+	msgH := c.message.Measure(context, guigui.FixedWidthConstraints(w-u)).Y
+	btnH := c.normal.Measure(context, guigui.Constraints{}).Y
+	h := msgH + 4*btnH + 3*(u/4) + u/2 + u
+	return image.Pt(w, h)
+}
+
+func (c *gitPushDialogContent) Layout(context *guigui.Context, widgetBounds *guigui.WidgetBounds, layouter *guigui.ChildLayouter) {
+	u := basicwidget.UnitSize(context)
+	btnH := c.normal.Measure(context, guigui.Constraints{}).Y
+	c.layoutItems = slices.Delete(c.layoutItems, 0, len(c.layoutItems))
+	c.layoutItems = append(c.layoutItems,
+		guigui.LinearLayoutItem{Widget: &c.message, Size: guigui.FlexibleSize(1)},
+		guigui.LinearLayoutItem{Widget: &c.normal, Size: guigui.FixedSize(btnH)},
+		guigui.LinearLayoutItem{Widget: &c.lease, Size: guigui.FixedSize(btnH)},
+		guigui.LinearLayoutItem{Widget: &c.force, Size: guigui.FixedSize(btnH)},
+		guigui.LinearLayoutItem{Widget: &c.cancel, Size: guigui.FixedSize(btnH)},
+	)
+	(guigui.LinearLayout{
+		Direction: guigui.LayoutDirectionVertical,
+		Items:     c.layoutItems,
+		Gap:       u / 4,
+		Padding:   guigui.Padding{Start: u / 2, Top: u / 2, End: u / 2, Bottom: u / 2},
+	}).LayoutWidgets(context, widgetBounds.Bounds(), layouter)
+}
+
 // gitConfirm asks before deleting a branch.
 type gitConfirm struct {
 	guigui.DefaultWidget
