@@ -1514,6 +1514,37 @@ func TestPushArgs(t *testing.T) {
 	}
 }
 
+func TestPushBranchArgs(t *testing.T) {
+	cases := []struct {
+		name                     string
+		mode                     PushMode
+		hasUp                    bool
+		remote, upstream, branch string
+		want                     []string
+	}{
+		{"normal missing", PushNormal, false, "", "", "feature/side", []string{"push", "-u", "origin", "feature/side"}},
+		{"lease missing", PushForceWithLease, false, "", "", "main", []string{"push", "--force-with-lease", "-u", "origin", "main"}},
+		{"force missing", PushForce, false, "", "", "topic", []string{"push", "--force", "-u", "origin", "topic"}},
+		{"normal upstream", PushNormal, true, "origin", "main", "main", []string{"push", "origin", "main:main"}},
+		{"lease other name", PushForceWithLease, true, "origin", "topic", "feature", []string{"push", "--force-with-lease", "origin", "feature:topic"}},
+		{"force other remote", PushForce, true, "upstream", "topic", "feature", []string{"push", "--force", "upstream", "feature:topic"}},
+	}
+	for _, tc := range cases {
+		t.Run(tc.name, func(t *testing.T) {
+			got := pushBranchArgs(tc.mode, tc.hasUp, tc.remote, tc.upstream, tc.branch)
+			if strings.Join(got, "\x00") != strings.Join(tc.want, "\x00") {
+				t.Fatalf("args = %#v, want %#v", got, tc.want)
+			}
+			if strings.Contains(strings.Join(got, " "), "HEAD:") {
+				t.Fatalf("branch push must not use HEAD: %#v", got)
+			}
+			if strings.Contains(strings.Join(got, " "), "--force-with-lease=") {
+				t.Fatalf("lease must not pin a hash: %#v", got)
+			}
+		})
+	}
+}
+
 func TestPushArgsOnRemoteGit(t *testing.T) {
 	lease := pushArgs(PushForceWithLease, true, "origin", "main", "main")
 	cmd := gitCmd(context.Background(), Loc{Dest: "dev", Dir: "/work/app"}, lease...)
@@ -1543,6 +1574,34 @@ func TestPushArgsOnRemoteGit(t *testing.T) {
 	}
 	if strings.Contains(remote, "force-with-lease") {
 		t.Fatalf("lease flag on force push: %q", remote)
+	}
+}
+
+func TestPushBranchArgsOnRemoteGit(t *testing.T) {
+	lease := pushBranchArgs(PushForceWithLease, true, "upstream", "topic", "feature")
+	cmd := gitCmd(context.Background(), Loc{Dest: "dev", Dir: "/work/app"}, lease...)
+	if len(cmd.Args) == 0 || cmd.Args[0] != "ssh" {
+		t.Fatalf("args = %#v", cmd.Args)
+	}
+	remote := cmd.Args[len(cmd.Args)-1]
+	leaseAt := strings.Index(remote, "'--force-with-lease'")
+	remoteAt := strings.Index(remote, "'upstream'")
+	specAt := strings.Index(remote, "'feature:topic'")
+	if leaseAt < 0 || remoteAt < 0 || specAt < 0 || leaseAt > remoteAt || remoteAt > specAt {
+		t.Fatalf("remote = %q", remote)
+	}
+	if strings.Contains(remote, "HEAD:") || strings.Contains(remote, "--force-with-lease=") {
+		t.Fatalf("remote = %q", remote)
+	}
+
+	normal := pushBranchArgs(PushNormal, false, "", "", "feature/side")
+	cmd = gitCmd(context.Background(), Loc{Dest: "dev", Dir: "/work/app"}, normal...)
+	remote = cmd.Args[len(cmd.Args)-1]
+	uAt := strings.Index(remote, "'-u'")
+	originAt := strings.Index(remote, "'origin'")
+	branchAt := strings.Index(remote, "'feature/side'")
+	if uAt < 0 || originAt < 0 || branchAt < 0 || uAt > originAt || originAt > branchAt {
+		t.Fatalf("remote = %q", remote)
 	}
 }
 
@@ -1689,6 +1748,237 @@ func TestPushForceModes(t *testing.T) {
 	}
 	if got := strings.TrimSpace(gitAt(t, remote, "rev-parse", "main")); got != local {
 		t.Fatalf("force remote = %s want %s", got, local)
+	}
+}
+
+func TestPushBranchSetsUpstream(t *testing.T) {
+	modes := []struct {
+		name string
+		mode PushMode
+	}{
+		{"normal", PushNormal},
+		{"lease", PushForceWithLease},
+		{"force", PushForce},
+	}
+	for _, tc := range modes {
+		t.Run(tc.name, func(t *testing.T) {
+			dir := initRepo(t)
+			writeCommit(t, dir, "a.txt", "base")
+			remote := t.TempDir()
+			gitAt(t, remote, "init", "--bare", "-b", "main")
+			gitAt(t, dir, "remote", "add", "origin", remote)
+			gitAt(t, dir, "checkout", "-b", "feature/side")
+			writeCommit(t, dir, "b.txt", "side")
+			gitAt(t, dir, "checkout", "main")
+
+			ctx, cancel := context.WithTimeout(context.Background(), 20*time.Second)
+			defer cancel()
+			repo, err := Open(ctx, dir)
+			if err != nil {
+				t.Fatal(err)
+			}
+			if err := repo.PushBranch(ctx, "feature/side", tc.mode); err != nil {
+				t.Fatal(err)
+			}
+			if got := strings.TrimSpace(gitAt(t, dir, "rev-parse", "--abbrev-ref", "HEAD")); got != "main" {
+				t.Fatalf("HEAD = %q", got)
+			}
+			if got := strings.TrimSpace(gitAt(t, dir, "rev-parse", "--abbrev-ref", "feature/side@{upstream}")); got != "origin/feature/side" {
+				t.Fatalf("upstream = %q", got)
+			}
+			want := strings.TrimSpace(gitAt(t, dir, "rev-parse", "feature/side"))
+			if got := strings.TrimSpace(gitAt(t, remote, "rev-parse", "feature/side")); got != want {
+				t.Fatalf("remote = %s want %s", got, want)
+			}
+			if _, err := exec.Command("git", "-C", remote, "rev-parse", "--verify", "--quiet", "main").CombinedOutput(); err == nil {
+				t.Fatalf("push created main")
+			}
+		})
+	}
+}
+
+func TestPushBranchUsesOwnUpstream(t *testing.T) {
+	dir := initRepo(t)
+	writeCommit(t, dir, "a.txt", "base")
+	origin := t.TempDir()
+	gitAt(t, origin, "init", "--bare", "-b", "main")
+	other := t.TempDir()
+	gitAt(t, other, "init", "--bare", "-b", "main")
+	gitAt(t, dir, "remote", "add", "origin", origin)
+	gitAt(t, dir, "remote", "add", "upstream", other)
+	gitAt(t, dir, "push", "-u", "origin", "main")
+	gitAt(t, dir, "checkout", "-b", "feature")
+	writeCommit(t, dir, "b.txt", "feature")
+	gitAt(t, dir, "push", "-u", "upstream", "feature:topic")
+	gitAt(t, dir, "checkout", "main")
+	writeCommit(t, dir, "c.txt", "main-local")
+
+	ctx, cancel := context.WithTimeout(context.Background(), 20*time.Second)
+	defer cancel()
+	repo, err := Open(ctx, dir)
+	if err != nil {
+		t.Fatal(err)
+	}
+	mainHead := strings.TrimSpace(gitAt(t, dir, "rev-parse", "main"))
+	featureHead := strings.TrimSpace(gitAt(t, dir, "rev-parse", "feature"))
+	originMain := strings.TrimSpace(gitAt(t, origin, "rev-parse", "main"))
+	if err := repo.PushBranch(ctx, "feature", PushNormal); err != nil {
+		t.Fatal(err)
+	}
+	if got := strings.TrimSpace(gitAt(t, dir, "rev-parse", "--abbrev-ref", "HEAD")); got != "main" {
+		t.Fatalf("HEAD = %q", got)
+	}
+	if got := strings.TrimSpace(gitAt(t, dir, "rev-parse", "main")); got != mainHead {
+		t.Fatalf("main moved %s -> %s", mainHead, got)
+	}
+	if got := strings.TrimSpace(gitAt(t, dir, "rev-parse", "feature")); got != featureHead {
+		t.Fatalf("feature moved %s -> %s", featureHead, got)
+	}
+	if got := strings.TrimSpace(gitAt(t, other, "rev-parse", "topic")); got != featureHead {
+		t.Fatalf("topic = %s want %s", got, featureHead)
+	}
+	if got := strings.TrimSpace(gitAt(t, origin, "rev-parse", "main")); got != originMain {
+		t.Fatalf("origin/main = %s want %s", got, originMain)
+	}
+	if got := strings.TrimSpace(gitAt(t, dir, "rev-parse", "--abbrev-ref", "feature@{upstream}")); got != "upstream/topic" {
+		t.Fatalf("feature upstream = %q", got)
+	}
+	if out, err := exec.Command("git", "-C", origin, "rev-parse", "--verify", "--quiet", "feature").CombinedOutput(); err == nil {
+		t.Fatalf("push created origin/feature: %s", out)
+	}
+
+	gitAt(t, dir, "checkout", "feature")
+	writeCommit(t, dir, "d.txt", "feature-next")
+	next := strings.TrimSpace(gitAt(t, dir, "rev-parse", "HEAD"))
+	if err := repo.PushBranch(ctx, "feature", PushNormal); err != nil {
+		t.Fatal(err)
+	}
+	if got := strings.TrimSpace(gitAt(t, dir, "rev-parse", "--abbrev-ref", "HEAD")); got != "feature" {
+		t.Fatalf("HEAD = %q", got)
+	}
+	if got := strings.TrimSpace(gitAt(t, other, "rev-parse", "topic")); got != next {
+		t.Fatalf("checked-out push topic = %s want %s", got, next)
+	}
+	if got := strings.TrimSpace(gitAt(t, origin, "rev-parse", "main")); got != originMain {
+		t.Fatalf("checked-out push moved origin/main %s -> %s", originMain, got)
+	}
+}
+
+func TestPushBranchWhileDetached(t *testing.T) {
+	dir := initRepo(t)
+	writeCommit(t, dir, "a.txt", "base")
+	remote := t.TempDir()
+	gitAt(t, remote, "init", "--bare", "-b", "main")
+	gitAt(t, dir, "remote", "add", "origin", remote)
+	gitAt(t, dir, "push", "-u", "origin", "main")
+	writeCommit(t, dir, "b.txt", "next")
+	want := strings.TrimSpace(gitAt(t, dir, "rev-parse", "main"))
+	gitAt(t, dir, "checkout", "--detach", "HEAD~1")
+	detached := strings.TrimSpace(gitAt(t, dir, "rev-parse", "HEAD"))
+
+	ctx, cancel := context.WithTimeout(context.Background(), 20*time.Second)
+	defer cancel()
+	repo, err := Open(ctx, dir)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if err := repo.PushMode(ctx, PushNormal); err == nil || !strings.Contains(err.Error(), "detached HEAD") {
+		t.Fatalf("toolbar push: %v", err)
+	}
+	if err := repo.PushBranch(ctx, "main", PushNormal); err != nil {
+		t.Fatal(err)
+	}
+	if got := strings.TrimSpace(gitAt(t, remote, "rev-parse", "main")); got != want {
+		t.Fatalf("remote = %s want %s", got, want)
+	}
+	if got := strings.TrimSpace(gitAt(t, dir, "rev-parse", "HEAD")); got != detached {
+		t.Fatalf("HEAD = %s want detached %s", got, detached)
+	}
+	if err := exec.Command("git", "-C", dir, "symbolic-ref", "--quiet", "HEAD").Run(); err == nil {
+		t.Fatal("push attached HEAD")
+	}
+}
+
+func TestPushBranchForceModes(t *testing.T) {
+	dir := initRepo(t)
+	writeCommit(t, dir, "a.txt", "base")
+	remote := t.TempDir()
+	gitAt(t, remote, "init", "--bare", "-b", "main")
+	gitAt(t, dir, "remote", "add", "origin", remote)
+	gitAt(t, dir, "push", "-u", "origin", "main")
+	writeCommit(t, dir, "b.txt", "local")
+	gitAt(t, dir, "checkout", "-b", "topic")
+
+	other := t.TempDir()
+	gitAt(t, other, "clone", remote, ".")
+	gitAt(t, other, "config", "user.name", "Test")
+	gitAt(t, other, "config", "user.email", "test@example.com")
+	gitAt(t, other, "config", "commit.gpgsign", "false")
+	writeCommit(t, other, "a.txt", "rewritten")
+	gitAt(t, other, "push", "--force", "origin", "main")
+	gitAt(t, dir, "fetch", "origin")
+
+	ctx, cancel := context.WithTimeout(context.Background(), 30*time.Second)
+	defer cancel()
+	repo, err := Open(ctx, dir)
+	if err != nil {
+		t.Fatal(err)
+	}
+	remoteBefore := strings.TrimSpace(gitAt(t, remote, "rev-parse", "main"))
+	local := strings.TrimSpace(gitAt(t, dir, "rev-parse", "main"))
+	if err := repo.PushBranch(ctx, "main", PushNormal); err == nil {
+		t.Fatal("normal push should refuse a diverged history")
+	}
+	if got := strings.TrimSpace(gitAt(t, remote, "rev-parse", "main")); got != remoteBefore {
+		t.Fatalf("refused push moved remote %s -> %s", remoteBefore, got)
+	}
+	if got := strings.TrimSpace(gitAt(t, dir, "rev-parse", "--abbrev-ref", "HEAD")); got != "topic" {
+		t.Fatalf("HEAD = %q", got)
+	}
+	if err := repo.PushBranch(ctx, "main", PushForceWithLease); err != nil {
+		t.Fatal(err)
+	}
+	if got := strings.TrimSpace(gitAt(t, remote, "rev-parse", "main")); got != local {
+		t.Fatalf("lease remote = %s want %s", got, local)
+	}
+
+	writeCommit(t, other, "d.txt", "later")
+	gitAt(t, other, "push", "--force", "origin", "main")
+	moved := strings.TrimSpace(gitAt(t, remote, "rev-parse", "main"))
+	if err := repo.PushBranch(ctx, "main", PushForceWithLease); err == nil {
+		t.Fatal("lease should refuse a remote that moved after fetch")
+	}
+	if got := strings.TrimSpace(gitAt(t, remote, "rev-parse", "main")); got != moved {
+		t.Fatalf("refused lease moved remote %s -> %s", moved, got)
+	}
+	if err := repo.PushBranch(ctx, "main", PushForce); err != nil {
+		t.Fatal(err)
+	}
+	if got := strings.TrimSpace(gitAt(t, remote, "rev-parse", "main")); got != local {
+		t.Fatalf("force remote = %s want %s", got, local)
+	}
+	if got := strings.TrimSpace(gitAt(t, dir, "rev-parse", "--abbrev-ref", "HEAD")); got != "topic" {
+		t.Fatalf("HEAD = %q", got)
+	}
+}
+
+func TestPushBranchRejectsMissing(t *testing.T) {
+	dir := initRepo(t)
+	writeCommit(t, dir, "a.txt", "base")
+	ctx, cancel := context.WithTimeout(context.Background(), 20*time.Second)
+	defer cancel()
+	repo, err := Open(ctx, dir)
+	if err != nil {
+		t.Fatal(err)
+	}
+	for _, name := range []string{"", "  ", "no-such"} {
+		err := repo.PushBranch(ctx, name, PushForce)
+		if err == nil || !strings.Contains(err.Error(), "no branch") {
+			t.Fatalf("branch %q: %v", name, err)
+		}
+	}
+	if got := strings.TrimSpace(gitAt(t, dir, "rev-parse", "--abbrev-ref", "HEAD")); got != "main" {
+		t.Fatalf("HEAD = %q", got)
 	}
 }
 

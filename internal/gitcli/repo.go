@@ -874,7 +874,46 @@ func (r *Repo) PushMode(ctx context.Context, mode PushMode) error {
 	return r.run(ctx, pushArgs(mode, hasUp, remote, upstream, branch)...)
 }
 
+// PushBranch sends one local branch and leaves HEAD where it is.
+// Upstream is that branch's own upstream, not HEAD's.
+// A missing upstream uses -u origin and the branch name.
+// A force flag, when set, is a single argument before the remote name.
+func (r *Repo) PushBranch(ctx context.Context, branch string, mode PushMode) error {
+	if err := ctx.Err(); err != nil {
+		return err
+	}
+	branch = strings.TrimSpace(branch)
+	if branch == "" {
+		return fmt.Errorf("no branch")
+	}
+	full := "refs/heads/" + branch
+	exists, err := r.hasRef(ctx, full)
+	if err != nil {
+		return err
+	}
+	if !exists {
+		return fmt.Errorf("no branch")
+	}
+	// @{upstream} must follow the short branch name. refs/heads/<name>@{upstream}
+	// is not a branch name git will resolve.
+	remote, upstream, hasUp, err := r.upstreamOf(ctx, branch+"@{upstream}")
+	if err != nil {
+		return err
+	}
+	return r.run(ctx, pushBranchArgs(mode, hasUp, remote, upstream, branch)...)
+}
+
 func pushArgs(mode PushMode, hasUp bool, remote, upstream, branch string) []string {
+	return pushSpecArgs(mode, hasUp, remote, upstream, "HEAD", branch)
+}
+
+// pushBranchArgs names the local branch as the refspec source, so the tip
+// that is sent is that branch even when another branch is checked out.
+func pushBranchArgs(mode PushMode, hasUp bool, remote, upstream, branch string) []string {
+	return pushSpecArgs(mode, hasUp, remote, upstream, branch, branch)
+}
+
+func pushSpecArgs(mode PushMode, hasUp bool, remote, upstream, src, branch string) []string {
 	args := []string{"push"}
 	switch mode {
 	case PushForceWithLease:
@@ -885,7 +924,7 @@ func pushArgs(mode PushMode, hasUp bool, remote, upstream, branch string) []stri
 	if !hasUp {
 		return append(args, "-u", "origin", branch)
 	}
-	return append(args, remote, "HEAD:"+upstream)
+	return append(args, remote, src+":"+upstream)
 }
 
 // CreateTag adds a lightweight tag at hash.
@@ -1279,7 +1318,16 @@ func (r *Repo) upstream(ctx context.Context) (remote, branch string, ok bool, er
 	if !has || detached {
 		return "", "", false, nil
 	}
-	name, err := r.output(ctx, "rev-parse", "--abbrev-ref", "--symbolic-full-name", "@{upstream}")
+	return r.upstreamOf(ctx, "@{upstream}")
+}
+
+// upstreamOf reads the upstream of rev. rev is @{upstream} for HEAD, or
+// <branch>@{upstream} for a local branch. A missing upstream is ok == false.
+func (r *Repo) upstreamOf(ctx context.Context, rev string) (remote, branch string, ok bool, err error) {
+	if err := ctx.Err(); err != nil {
+		return "", "", false, err
+	}
+	name, err := r.output(ctx, "rev-parse", "--abbrev-ref", "--symbolic-full-name", rev)
 	if err != nil {
 		if err := ctx.Err(); err != nil {
 			return "", "", false, err

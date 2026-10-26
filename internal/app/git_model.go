@@ -972,6 +972,21 @@ func (m *gitSession) DoPushMode(mode gitcli.PushMode) {
 	})
 }
 
+// DoPushBranch pushes one local branch. Checkout stays as it is.
+// Status text matches the toolbar Push, and a failure keeps git's error.
+func (m *gitSession) DoPushBranch(branch string, mode gitcli.PushMode) {
+	if !m.CanPushPull() {
+		return
+	}
+	branch = strings.TrimSpace(branch)
+	if branch == "" {
+		return
+	}
+	m.startOp(i18n.StatusGitPushOk, i18n.StatusGitPushFailed, func(ctx context.Context, repo *gitcli.Repo) error {
+		return repo.PushBranch(ctx, branch, mode)
+	})
+}
+
 func (m *gitSession) DoCreateTag(hash, name string, push bool) {
 	if !m.HasRepo() || m.Busy() || hash == "" || hash == gitcli.Uncommitted {
 		return

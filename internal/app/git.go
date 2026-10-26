@@ -1505,13 +1505,17 @@ func (t *GitTool) openPushDialog(lang i18n.Lang, model *GitModel) {
 	if branch == "" {
 		branch = i18n.T(lang, i18n.GitDetached)
 	}
+	t.askPush(lang, branch, func(mode gitcli.PushMode) { model.DoPushMode(mode) })
+}
+
+func (t *GitTool) askPush(lang i18n.Lang, branch string, onChoose func(gitcli.PushMode)) {
 	t.pushDialog.Ask(
 		i18n.T(lang, i18n.GitPushAsk, branch),
 		i18n.T(lang, i18n.GitPushNormal),
 		i18n.T(lang, i18n.GitPushLease),
 		i18n.T(lang, i18n.GitPushForce),
 		i18n.T(lang, i18n.GitCancel),
-		func(mode gitcli.PushMode) { model.DoPushMode(mode) },
+		onChoose,
 	)
 }
 
@@ -1744,7 +1748,13 @@ func (t *GitTool) openBranchMenu(lang i18n.Lang, model *GitModel, ref gitcli.Ref
 		model.SelectCommit(ref.Hash)
 	}
 	target := ref
-	t.branchMenu.Open(target, image.Pt(ebiten.CursorPosition()), i18n.T(lang, i18n.GitRename), i18n.T(lang, i18n.GitDelete), func(ref gitcli.Ref) {
+	t.branchMenu.Open(target, image.Pt(ebiten.CursorPosition()), i18n.T(lang, i18n.GitPush), i18n.T(lang, i18n.GitRename), i18n.T(lang, i18n.GitDelete), func(ref gitcli.Ref) {
+		if ref.Remote != "" || ref.Name == "" {
+			return
+		}
+		name := ref.Name
+		t.askPush(lang, name, func(mode gitcli.PushMode) { model.DoPushBranch(name, mode) })
+	}, func(ref gitcli.Ref) {
 		t.rename.Ask(
 			i18n.T(lang, i18n.GitRenamePrompt),
 			ref.Name,

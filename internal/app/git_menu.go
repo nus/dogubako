@@ -22,17 +22,21 @@ type gitBranchMenu struct {
 
 	pos         image.Point
 	ref         gitcli.Ref
+	pushLabel   string
 	renameLabel string
 	deleteLabel string
+	onPush      func(gitcli.Ref)
 	onRename    func(gitcli.Ref)
 	onDelete    func(gitcli.Ref)
 }
 
-func (m *gitBranchMenu) Open(ref gitcli.Ref, at image.Point, renameLabel, deleteLabel string, onRename, onDelete func(gitcli.Ref)) {
+func (m *gitBranchMenu) Open(ref gitcli.Ref, at image.Point, pushLabel, renameLabel, deleteLabel string, onPush, onRename, onDelete func(gitcli.Ref)) {
 	m.ref = ref
 	m.pos = at
+	m.pushLabel = pushLabel
 	m.renameLabel = renameLabel
 	m.deleteLabel = deleteLabel
+	m.onPush = onPush
 	m.onRename = onRename
 	m.onDelete = onDelete
 	m.menu.SetOpen(true)
@@ -42,25 +46,42 @@ func (m *gitBranchMenu) IsOpen() bool {
 	return m.menu.IsOpen()
 }
 
-func (m *gitBranchMenu) Build(context *guigui.Context, adder *guigui.ChildAdder) error {
-	m.menu.SetItems([]basicwidget.PopupMenuItem[string]{
+// branchMenuItems is Push, then rename, then delete.
+// Push and rename are disabled for a remote-tracking branch.
+// Delete is disabled for the checked-out branch.
+func branchMenuItems(ref gitcli.Ref, push, rename, delete string) []basicwidget.PopupMenuItem[string] {
+	return []basicwidget.PopupMenuItem[string]{
 		{
-			Text:     m.renameLabel,
+			Text:     push,
+			Value:    "push",
+			Disabled: ref.Remote != "",
+		},
+		{
+			Text:     rename,
 			Value:    "rename",
-			Disabled: m.ref.Remote != "",
+			Disabled: ref.Remote != "",
 		},
 		{
-			Text:     m.deleteLabel,
+			Text:     delete,
 			Value:    "delete",
-			Disabled: m.ref.Current,
+			Disabled: ref.Current,
 		},
-	})
+	}
+}
+
+func (m *gitBranchMenu) Build(context *guigui.Context, adder *guigui.ChildAdder) error {
+	m.menu.SetItems(branchMenuItems(m.ref, m.pushLabel, m.renameLabel, m.deleteLabel))
 	m.menu.OnItemSelected(func(context *guigui.Context, index int) {
 		item, ok := m.menu.ItemByIndex(index)
 		if !ok {
 			return
 		}
 		switch item.Value {
+		case "push":
+			if m.ref.Remote != "" || m.onPush == nil {
+				return
+			}
+			m.onPush(m.ref)
 		case "rename":
 			if m.ref.Remote != "" || m.onRename == nil {
 				return
