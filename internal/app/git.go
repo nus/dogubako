@@ -155,6 +155,7 @@ type GitTool struct {
 	branchMenu gitBranchMenu
 	commitMenu gitCommitMenu
 	tagMenu    gitTagMenu
+	pushDialog gitPushDialog
 	selMenu    gitSelectionMenu
 	changeMenu gitChangeMenu
 	confirm    gitConfirm
@@ -335,7 +336,7 @@ func (t *GitTool) Build(context *guigui.Context, adder *guigui.ChildAdder) error
 	t.pullBtn.OnDown(func(context *guigui.Context) { model.DoPull() })
 	context.SetEnabled(&t.pullBtn, enableNet)
 	t.pushBtn.SetText(i18n.T(lang, i18n.GitPush))
-	t.pushBtn.OnDown(func(context *guigui.Context) { model.DoPush() })
+	t.pushBtn.OnDown(func(context *guigui.Context) { t.openPushDialog(lang, model) })
 	context.SetEnabled(&t.pushBtn, enableNet)
 
 	t.commitBtn.SetText(i18n.T(lang, i18n.GitCommit))
@@ -560,6 +561,7 @@ func (t *GitTool) Build(context *guigui.Context, adder *guigui.ChildAdder) error
 	adder.AddWidget(&t.branchMenu)
 	adder.AddWidget(&t.commitMenu)
 	adder.AddWidget(&t.tagMenu)
+	adder.AddWidget(&t.pushDialog)
 	adder.AddWidget(&t.selMenu)
 	adder.AddWidget(&t.changeMenu)
 	adder.AddWidget(&t.confirm)
@@ -901,6 +903,9 @@ func (t *GitTool) layoutOverlays(context *guigui.Context, layouter *guigui.Child
 	}
 	if t.confirm.IsOpen() {
 		center(&t.confirm, t.confirm.contentSize(context))
+	}
+	if t.pushDialog.IsOpen() {
+		center(&t.pushDialog, t.pushDialog.contentSize(context))
 	}
 	if t.rename.IsOpen() {
 		center(&t.rename, t.rename.contentSize(context))
@@ -1489,7 +1494,25 @@ func (t *GitTool) setDiffWhole(on bool) {
 }
 
 func (t *GitTool) menuOpen() bool {
-	return t.rename.IsOpen() || t.confirm.IsOpen() || t.tagMenu.IsOpen() || t.branchMenu.IsOpen() || t.commitMenu.IsOpen() || t.selMenu.IsOpen() || t.changeMenu.IsOpen()
+	return t.rename.IsOpen() || t.confirm.IsOpen() || t.pushDialog.IsOpen() || t.tagMenu.IsOpen() || t.branchMenu.IsOpen() || t.commitMenu.IsOpen() || t.selMenu.IsOpen() || t.changeMenu.IsOpen()
+}
+
+func (t *GitTool) openPushDialog(lang i18n.Lang, model *GitModel) {
+	if !model.CanPushPull() {
+		return
+	}
+	branch := strings.TrimSpace(model.Snapshot().Branch)
+	if branch == "" {
+		branch = i18n.T(lang, i18n.GitDetached)
+	}
+	t.pushDialog.Ask(
+		i18n.T(lang, i18n.GitPushAsk, branch),
+		i18n.T(lang, i18n.GitPushNormal),
+		i18n.T(lang, i18n.GitPushLease),
+		i18n.T(lang, i18n.GitPushForce),
+		i18n.T(lang, i18n.GitCancel),
+		func(mode gitcli.PushMode) { model.DoPushMode(mode) },
+	)
 }
 
 func (t *GitTool) changeAtCursor() (string, bool, bool) {

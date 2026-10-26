@@ -62,6 +62,7 @@ func (t *GitTool) buildEmptyHome(context *guigui.Context, adder *guigui.ChildAdd
 	adder.AddWidget(&t.branchMenu)
 	adder.AddWidget(&t.commitMenu)
 	adder.AddWidget(&t.tagMenu)
+	adder.AddWidget(&t.pushDialog)
 	adder.AddWidget(&t.confirm)
 	adder.AddWidget(&t.rename)
 	return nil

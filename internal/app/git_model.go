@@ -963,12 +963,12 @@ func (m *gitSession) DoPull() {
 	})
 }
 
-func (m *gitSession) DoPush() {
+func (m *gitSession) DoPushMode(mode gitcli.PushMode) {
 	if !m.CanPushPull() {
 		return
 	}
 	m.startOp(i18n.StatusGitPushOk, i18n.StatusGitPushFailed, func(ctx context.Context, repo *gitcli.Repo) error {
-		return repo.Push(ctx)
+		return repo.PushMode(ctx, mode)
 	})
 }
 

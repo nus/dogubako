@@ -832,8 +832,28 @@ func refusedFastForward(err error) bool {
 	return strings.Contains(msg, "早送りできません")
 }
 
+// PushMode selects the force flag for a branch push.
+// Tag pushes do not use it.
+type PushMode int
+
+const (
+	// PushNormal sends the branch with no force flag.
+	PushNormal PushMode = iota
+	// PushForceWithLease adds --force-with-lease and lets git compare the
+	// remote tip with the remote-tracking branch. No expected hash is passed.
+	PushForceWithLease
+	// PushForce adds --force.
+	PushForce
+)
+
 // Push sends the current branch. Sets upstream to origin when missing.
 func (r *Repo) Push(ctx context.Context) error {
+	return r.PushMode(ctx, PushNormal)
+}
+
+// PushMode sends the current branch.
+// A force flag, when set, is a single argument before the remote name.
+func (r *Repo) PushMode(ctx context.Context, mode PushMode) error {
 	if err := ctx.Err(); err != nil {
 		return err
 	}
@@ -851,10 +871,21 @@ func (r *Repo) Push(ctx context.Context) error {
 	if err != nil {
 		return err
 	}
-	if !hasUp {
-		return r.run(ctx, "push", "-u", "origin", branch)
+	return r.run(ctx, pushArgs(mode, hasUp, remote, upstream, branch)...)
+}
+
+func pushArgs(mode PushMode, hasUp bool, remote, upstream, branch string) []string {
+	args := []string{"push"}
+	switch mode {
+	case PushForceWithLease:
+		args = append(args, "--force-with-lease")
+	case PushForce:
+		args = append(args, "--force")
 	}
-	return r.run(ctx, "push", remote, "HEAD:"+upstream)
+	if !hasUp {
+		return append(args, "-u", "origin", branch)
+	}
+	return append(args, remote, "HEAD:"+upstream)
 }
 
 // CreateTag adds a lightweight tag at hash.

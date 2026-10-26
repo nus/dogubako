@@ -1486,6 +1486,212 @@ func TestWholeFileDiffIncludesSkippedLines(t *testing.T) {
 	}
 }
 
+func TestPushArgs(t *testing.T) {
+	cases := []struct {
+		name                     string
+		mode                     PushMode
+		hasUp                    bool
+		remote, upstream, branch string
+		want                     []string
+	}{
+		{"normal missing", PushNormal, false, "", "", "main", []string{"push", "-u", "origin", "main"}},
+		{"lease missing", PushForceWithLease, false, "", "", "main", []string{"push", "--force-with-lease", "-u", "origin", "main"}},
+		{"force missing", PushForce, false, "", "", "topic", []string{"push", "--force", "-u", "origin", "topic"}},
+		{"normal upstream", PushNormal, true, "origin", "main", "main", []string{"push", "origin", "HEAD:main"}},
+		{"lease upstream", PushForceWithLease, true, "origin", "main", "main", []string{"push", "--force-with-lease", "origin", "HEAD:main"}},
+		{"force other remote", PushForce, true, "upstream", "feature", "local", []string{"push", "--force", "upstream", "HEAD:feature"}},
+	}
+	for _, tc := range cases {
+		t.Run(tc.name, func(t *testing.T) {
+			got := pushArgs(tc.mode, tc.hasUp, tc.remote, tc.upstream, tc.branch)
+			if strings.Join(got, "\x00") != strings.Join(tc.want, "\x00") {
+				t.Fatalf("args = %#v, want %#v", got, tc.want)
+			}
+			if strings.Contains(strings.Join(got, " "), "--force-with-lease=") {
+				t.Fatalf("lease must not pin a hash: %#v", got)
+			}
+		})
+	}
+}
+
+func TestPushArgsOnRemoteGit(t *testing.T) {
+	lease := pushArgs(PushForceWithLease, true, "origin", "main", "main")
+	cmd := gitCmd(context.Background(), Loc{Dest: "dev", Dir: "/work/app"}, lease...)
+	if len(cmd.Args) == 0 || cmd.Args[0] != "ssh" {
+		t.Fatalf("args = %#v", cmd.Args)
+	}
+	remote := cmd.Args[len(cmd.Args)-1]
+	leaseAt := strings.Index(remote, "'--force-with-lease'")
+	originAt := strings.Index(remote, "'origin'")
+	headAt := strings.Index(remote, "'HEAD:main'")
+	if leaseAt < 0 || originAt < 0 || headAt < 0 || leaseAt > originAt || originAt > headAt {
+		t.Fatalf("remote = %q", remote)
+	}
+	if strings.Contains(remote, "--force-with-lease=") {
+		t.Fatalf("pinned lease: %q", remote)
+	}
+
+	force := pushArgs(PushForce, false, "", "", "main")
+	cmd = gitCmd(context.Background(), Loc{Dest: "dev", Dir: "/work/app"}, force...)
+	remote = cmd.Args[len(cmd.Args)-1]
+	forceAt := strings.Index(remote, "'--force'")
+	uAt := strings.Index(remote, "'-u'")
+	originAt = strings.Index(remote, "'origin'")
+	branchAt := strings.Index(remote, "'main'")
+	if forceAt < 0 || uAt < 0 || originAt < 0 || branchAt < 0 || forceAt > uAt || uAt > originAt || originAt > branchAt {
+		t.Fatalf("remote = %q", remote)
+	}
+	if strings.Contains(remote, "force-with-lease") {
+		t.Fatalf("lease flag on force push: %q", remote)
+	}
+}
+
+func TestPushRejectsEmptyAndDetached(t *testing.T) {
+	dir := initRepo(t)
+	ctx, cancel := context.WithTimeout(context.Background(), 20*time.Second)
+	defer cancel()
+	repo, err := Open(ctx, dir)
+	if err != nil {
+		t.Fatal(err)
+	}
+	for _, mode := range []PushMode{PushNormal, PushForceWithLease, PushForce} {
+		err := repo.PushMode(ctx, mode)
+		if err == nil || !strings.Contains(err.Error(), "no commits") {
+			t.Fatalf("mode %d empty: %v", mode, err)
+		}
+	}
+	writeCommit(t, dir, "a.txt", "base")
+	gitAt(t, dir, "checkout", "--detach")
+	for _, mode := range []PushMode{PushNormal, PushForceWithLease, PushForce} {
+		err := repo.PushMode(ctx, mode)
+		if err == nil || !strings.Contains(err.Error(), "detached HEAD") {
+			t.Fatalf("mode %d detached: %v", mode, err)
+		}
+	}
+}
+
+func TestPushSetsUpstream(t *testing.T) {
+	modes := []struct {
+		name string
+		mode PushMode
+	}{
+		{"normal", PushNormal},
+		{"lease", PushForceWithLease},
+		{"force", PushForce},
+	}
+	for _, tc := range modes {
+		t.Run(tc.name, func(t *testing.T) {
+			dir := initRepo(t)
+			writeCommit(t, dir, "a.txt", "base")
+			remote := t.TempDir()
+			gitAt(t, remote, "init", "--bare", "-b", "main")
+			gitAt(t, dir, "remote", "add", "origin", remote)
+			ctx, cancel := context.WithTimeout(context.Background(), 20*time.Second)
+			defer cancel()
+			repo, err := Open(ctx, dir)
+			if err != nil {
+				t.Fatal(err)
+			}
+			if err := repo.PushMode(ctx, tc.mode); err != nil {
+				t.Fatal(err)
+			}
+			if got := strings.TrimSpace(gitAt(t, dir, "rev-parse", "--abbrev-ref", "@{upstream}")); got != "origin/main" {
+				t.Fatalf("upstream = %q", got)
+			}
+			want := strings.TrimSpace(gitAt(t, dir, "rev-parse", "HEAD"))
+			if got := strings.TrimSpace(gitAt(t, remote, "rev-parse", "main")); got != want {
+				t.Fatalf("remote = %s want %s", got, want)
+			}
+		})
+	}
+}
+
+func TestPushKeepsUpstreamDestination(t *testing.T) {
+	dir := initRepo(t)
+	writeCommit(t, dir, "a.txt", "base")
+	remote := t.TempDir()
+	gitAt(t, remote, "init", "--bare", "-b", "main")
+	gitAt(t, dir, "remote", "add", "origin", remote)
+	gitAt(t, dir, "push", "-u", "origin", "main:topic")
+	writeCommit(t, dir, "b.txt", "next")
+
+	ctx, cancel := context.WithTimeout(context.Background(), 20*time.Second)
+	defer cancel()
+	repo, err := Open(ctx, dir)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if got := strings.TrimSpace(gitAt(t, dir, "rev-parse", "--abbrev-ref", "@{upstream}")); got != "origin/topic" {
+		t.Fatalf("upstream = %q", got)
+	}
+	if err := repo.PushMode(ctx, PushForce); err != nil {
+		t.Fatal(err)
+	}
+	want := strings.TrimSpace(gitAt(t, dir, "rev-parse", "HEAD"))
+	if got := strings.TrimSpace(gitAt(t, remote, "rev-parse", "topic")); got != want {
+		t.Fatalf("topic = %s want %s", got, want)
+	}
+	if out, err := exec.Command("git", "-C", remote, "rev-parse", "--verify", "--quiet", "main").CombinedOutput(); err == nil {
+		t.Fatalf("push created main: %s", out)
+	}
+}
+
+func TestPushForceModes(t *testing.T) {
+	dir := initRepo(t)
+	writeCommit(t, dir, "a.txt", "base")
+	remote := t.TempDir()
+	gitAt(t, remote, "init", "--bare", "-b", "main")
+	gitAt(t, dir, "remote", "add", "origin", remote)
+	gitAt(t, dir, "push", "-u", "origin", "main")
+	writeCommit(t, dir, "b.txt", "local")
+
+	other := t.TempDir()
+	gitAt(t, other, "clone", remote, ".")
+	gitAt(t, other, "config", "user.name", "Test")
+	gitAt(t, other, "config", "user.email", "test@example.com")
+	gitAt(t, other, "config", "commit.gpgsign", "false")
+	writeCommit(t, other, "a.txt", "rewritten")
+	gitAt(t, other, "push", "--force", "origin", "main")
+	gitAt(t, dir, "fetch", "origin")
+
+	ctx, cancel := context.WithTimeout(context.Background(), 30*time.Second)
+	defer cancel()
+	repo, err := Open(ctx, dir)
+	if err != nil {
+		t.Fatal(err)
+	}
+	remoteBefore := strings.TrimSpace(gitAt(t, remote, "rev-parse", "main"))
+	if err := repo.Push(ctx); err == nil {
+		t.Fatal("normal push should refuse a diverged history")
+	}
+	if got := strings.TrimSpace(gitAt(t, remote, "rev-parse", "main")); got != remoteBefore {
+		t.Fatalf("refused push moved remote %s -> %s", remoteBefore, got)
+	}
+	if err := repo.PushMode(ctx, PushForceWithLease); err != nil {
+		t.Fatal(err)
+	}
+	local := strings.TrimSpace(gitAt(t, dir, "rev-parse", "HEAD"))
+	if got := strings.TrimSpace(gitAt(t, remote, "rev-parse", "main")); got != local {
+		t.Fatalf("lease remote = %s want %s", got, local)
+	}
+
+	writeCommit(t, other, "d.txt", "later")
+	gitAt(t, other, "push", "--force", "origin", "main")
+	moved := strings.TrimSpace(gitAt(t, remote, "rev-parse", "main"))
+	if err := repo.PushMode(ctx, PushForceWithLease); err == nil {
+		t.Fatal("lease should refuse a remote that moved after fetch")
+	}
+	if got := strings.TrimSpace(gitAt(t, remote, "rev-parse", "main")); got != moved {
+		t.Fatalf("refused lease moved remote %s -> %s", moved, got)
+	}
+	if err := repo.PushMode(ctx, PushForce); err != nil {
+		t.Fatal(err)
+	}
+	if got := strings.TrimSpace(gitAt(t, remote, "rev-parse", "main")); got != local {
+		t.Fatalf("force remote = %s want %s", got, local)
+	}
+}
+
 func commitHasDecoration(cs []Commit, kind, name string) bool {
 	for _, c := range cs {
 		if hasDecoration(c.Decorations, kind, name) {

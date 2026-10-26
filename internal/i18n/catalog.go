@@ -114,6 +114,10 @@ const (
 	GitFetch            Key = "git.fetch"
 	GitPull             Key = "git.pull"
 	GitPush             Key = "git.push"
+	GitPushNormal       Key = "git.push_normal"
+	GitPushLease        Key = "git.push_lease"
+	GitPushForce        Key = "git.push_force"
+	GitPushAsk          Key = "git.push_ask"
 	GitCommit           Key = "git.commit"
 	GitGraph            Key = "git.graph"
 	GitTitle            Key = "git.title"
@@ -450,6 +454,10 @@ var catalogs = map[Lang]map[Key]string{
 		GitFetch:                       "Fetch",
 		GitPull:                        "Pull",
 		GitPush:                        "Push",
+		GitPushNormal:                  "通常",
+		GitPushLease:                   "Force with lease",
+		GitPushForce:                   "Force",
+		GitPushAsk:                     "ブランチ「%s」をどのように push しますか？",
 		GitCommit:                      "コミット",
 		GitGraph:                       "グラフ",
 		GitTitle:                       "タイトル",
@@ -489,7 +497,7 @@ var catalogs = map[Lang]map[Key]string{
 		GitUnstaged:                    "未ステージ",
 		GitEmpty:                       "Git リポジトリのフォルダを開いてください。",
 		GitNoCommits:                   "表示するコミットがありません。",
-		GitHint:                        "ブランチをクリックすると先端のコミットを表示。グラフのブランチをダブルクリックすると切り替え。タグをダブルクリックすると切り替え。右クリックで名前の変更と削除。コミットを右クリックしてブランチやタグを作成。コミットをクリックして詳細。変更を右クリックして Stage、Unstage、破棄。",
+		GitHint:                        "ブランチをクリックすると先端のコミットを表示。グラフのブランチをダブルクリックすると切り替え。タグをダブルクリックすると切り替え。右クリックで名前の変更と削除。コミットを右クリックしてブランチやタグを作成。コミットをクリックして詳細。変更を右クリックして Stage、Unstage、破棄。Push を押すと通常、Force with lease、Force を選べる。",
 		GitDetached:                    "detached HEAD",
 		GitUncommitted:                 "未コミットの変更",
 		GitAheadBehind:                 "ahead %d / behind %d",
@@ -770,6 +778,10 @@ var catalogs = map[Lang]map[Key]string{
 		GitFetch:                       "Fetch",
 		GitPull:                        "Pull",
 		GitPush:                        "Push",
+		GitPushNormal:                  "Normal",
+		GitPushLease:                   "Force with lease",
+		GitPushForce:                   "Force",
+		GitPushAsk:                     "How do you want to push branch \"%s\"?",
 		GitCommit:                      "Commit",
 		GitGraph:                       "Graph",
 		GitTitle:                       "Title",
@@ -809,7 +821,7 @@ var catalogs = map[Lang]map[Key]string{
 		GitUnstaged:                    "Unstaged",
 		GitEmpty:                       "Open a folder that is a Git repository.",
 		GitNoCommits:                   "No commits to show.",
-		GitHint:                        "Click a branch to show its tip commit. Double-click a branch on the graph to switch. Double-click a tag to switch. Right-click a branch to rename or delete. Right-click a commit to create a branch or tag. Click a commit for details. Right-click a change to stage, unstage, or discard it.",
+		GitHint:                        "Click a branch to show its tip commit. Double-click a branch on the graph to switch. Double-click a tag to switch. Right-click a branch to rename or delete. Right-click a commit to create a branch or tag. Click a commit for details. Right-click a change to stage, unstage, or discard it. Press Push to choose Normal, Force with lease, or Force.",
 		GitDetached:                    "detached HEAD",
 		GitUncommitted:                 "Uncommitted changes",
 		GitAheadBehind:                 "ahead %d / behind %d",
