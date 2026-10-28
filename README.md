@@ -56,13 +56,16 @@ sudo apt install gnome-screenshot scrot
 
 macOS ではシステムの `screencapture` を使います。初回は「画面収録」の許可が必要です（システム設定 → プライバシーとセキュリティ）。
 
-### Android 画面
+### Android
 
-USB デバッグ（または無線デバッグ）が有効な Android 端末の画面を、ADB プロトコルで撮影します。pure Go の [go-adbkit](https://github.com/codeskyblue/go-adbkit) が、起動済みの ADB サーバー（`127.0.0.1:5037`）と通信します。
+USB デバッグ（または無線デバッグ）が有効な Android 端末のファイルと画面を、ADB プロトコルで扱います。pure Go の [go-adbkit](https://github.com/codeskyblue/go-adbkit) が、起動済みの ADB サーバー（`127.0.0.1:5037`）と通信します。
 
-- 接続中のデバイス一覧から選択
-- 端末の画面をライブプレビュー（ツールを開くと自動開始。トグルで停止 / 再開）
-- 「いっぱいに表示」でプレビューをこの機能の表示領域いっぱいまで広げる（端末の画面は領域に収まる最大サイズ）。「元に戻す」でデバイス一覧と保存済みリストを戻す
+接続中のデバイスはファイルと画面で共通です。一覧の下の「画面」「ファイル」で切り替えます。前回開いた面を覚えて、次に Android を開いたときにその面にします。
+
+画面:
+
+- 端末の画面をライブプレビュー（画面を表示すると自動開始。トグルで停止 / 再開。ファイルや別のツールへ移ると止まり、画面に戻ると、止めていなければ再開します）
+- 「いっぱいに表示」でプレビューをこの機能の表示領域いっぱいまで広げる（端末の画面は領域に収まる最大サイズ）。デバイス一覧、ファイル / 画面の切り替え、保存済みリストは隠し、「元に戻す」で戻します
 - ライブはまず `screenrecord` の H.264 を復号します。**macOS は VideoToolbox**、Ubuntu は [OpenH264](https://www.openh264.org/)（Cisco の事前ビルド、`ebitengine/purego` で実行時ロード）です。復号できないときは `screencap` の連写に戻します
 - Ubuntu では OpenH264 Video Codec provided by Cisco Systems, Inc. 初回だけ Cisco の CDN から共有ライブラリをユーザキャッシュへ取得します。使いたくないときは環境変数 `DOGUBAKO_OPENH264=0`、またはキャッシュファイルの削除で無効にできます。macOS のバイナリに OpenH264 は含まれません
 - 遅延（秒）のあと、端末の画面全体を PNG で取得（ライブ中は表示中のフレームを保存）
@@ -70,7 +73,7 @@ USB デバッグ（または無線デバッグ）が有効な Android 端末の�
 - 保存先フォルダの画像をサムネイル付きリストで表示し、クリックでプレビュー
 - プレビューはホイールまたは − / + で拡大縮小、ドラッグで移動、ダブルクリックまたは「全体」でフィット
 - クリップボードへコピー、名前を付けて保存、画像ツールへ送る
-- 保存済みリストの画像をクリックするとライブを止めてその画像を表示します
+- 保存済みリストの画像をクリックするとライブを止めてその画像を表示します。その画像を見ているあいだはライブを再開しません
 
 既定の保存先は画面キャプチャと同じピクチャ配下で、その中の `Android` フォルダです。
 
@@ -79,18 +82,13 @@ USB デバッグ（または無線デバッグ）が有効な Android 端末の�
 | macOS | `~/Pictures/Screenshots/Android` |
 | Ubuntu | 画面キャプチャと同じ `Screenshots` の下の `Android` |
 
-ADB サーバーは Android Studio や SDK Platform-Tools などが起動している必要があります。端末側で USB デバッグを許可してください。
-
-ショートカット（macOS は ⌘、Ubuntu は Ctrl）:
+ショートカットは画面を表示しているときだけです（macOS は ⌘、Ubuntu は Ctrl）:
 
 - S: 保存先へもう一度保存（別ファイル名）
 - C: クリップボードにコピー
 
-### Android ファイル
+ファイル:
 
-USB デバッグ（または無線デバッグ）が有効な Android 端末のファイルを、ADB プロトコルで閲覧・コピーします。pure Go の [go-adbkit](https://github.com/codeskyblue/go-adbkit) が、起動済みの ADB サーバー（`127.0.0.1:5037`）と通信します。
-
-- 接続中のデバイス一覧から選択
 - ファイル / フォルダのツリー表示
 - サイズ、更新日時（列ヘッダーのクリックで昇順 / 降順を切り替え、境界のドラッグで列幅を変更できます）
 - Android → PC、PC → Android のファイル / フォルダコピー
@@ -248,7 +246,7 @@ make test
 
 - `cmd/dogubako` — エントリポイント
 - `internal/cjkembed` — Linux は Noto Sans CJK を埋め込み、macOS はヒラギノ角ゴシックを `/System/Library/Fonts` から開く
-- `internal/app` — シェル（サイドメニューとメインパネル）、画像ツール、画面キャプチャ、Android 画面、Android ファイル、MTP ファイル（macOS）、ストップウォッチ、Git
+- `internal/app` — シェル（サイドメニューとメインパネル）、画像ツール、画面キャプチャ、Android、MTP ファイル（macOS）、ストップウォッチ、Git
 - `internal/gitcli` — git コマンドでログ・グラフ・コミット操作を行う
 - `internal/adbfs` — ADB プロトコルによるデバイス一覧・画面撮影・ファイル同期（pure Go）
 - `internal/mtpfs` — MTP プロトコルによるデバイス一覧・ファイル同期（pure Go）

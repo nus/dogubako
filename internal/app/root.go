@@ -31,8 +31,7 @@ type Root struct {
 	sidebar        Sidebar
 	imageTool      ImageTool
 	screenshotTool ScreenshotTool
-	androidTool    AndroidTool
-	androidShot    AndroidShotTool
+	androidPanel   AndroidPanel
 	stopwatchTool  StopwatchTool
 	gitTool        GitTool
 	mtpTool        MTPTool
@@ -72,6 +71,8 @@ func (r *Root) WriteStateKey(context *guigui.Context, w *guigui.StateKeyWriter) 
 	w.WriteUint64(r.model.Screenshot().Generation())
 	w.WriteUint64(r.model.Android().Generation())
 	w.WriteUint64(r.model.AndroidShot().Generation())
+	w.WriteString(string(r.model.AndroidFace()))
+	w.WriteBool(r.androidPanel.shot.previewFill)
 	w.WriteUint64(r.model.Stopwatch().Generation())
 	w.WriteUint64(r.model.Git().Generation())
 	w.WriteUint64(r.model.MTP().Generation())
@@ -93,9 +94,7 @@ func (r *Root) contentWidget() guigui.Widget {
 	case ToolScreenshot:
 		return &r.screenshotTool
 	case ToolAndroid:
-		return &r.androidTool
-	case ToolAndroidShot:
-		return &r.androidShot
+		return &r.androidPanel
 	case ToolStopwatch:
 		return &r.stopwatchTool
 	case ToolGit:
@@ -143,37 +142,37 @@ func (r *Root) Build(context *guigui.Context, adder *guigui.ChildAdder) error {
 	r.screenshotTool.OnShowFolder(func(context *guigui.Context) {
 		r.showScreenshotFolder()
 	})
-	r.androidTool.OnRefresh(func(context *guigui.Context) {
+	r.androidPanel.files.OnRefresh(func(context *guigui.Context) {
 		r.model.Android().Reload()
 	})
-	r.androidTool.OnUp(func(context *guigui.Context) {
+	r.androidPanel.files.OnUp(func(context *guigui.Context) {
 		r.model.Android().GoUp()
 	})
-	r.androidTool.OnPull(func(context *guigui.Context) {
+	r.androidPanel.files.OnPull(func(context *guigui.Context) {
 		r.startAndroidPull()
 	})
-	r.androidTool.OnPushFile(func(context *guigui.Context) {
+	r.androidPanel.files.OnPushFile(func(context *guigui.Context) {
 		r.startAndroidPush(false)
 	})
-	r.androidTool.OnPushFolder(func(context *guigui.Context) {
+	r.androidPanel.files.OnPushFolder(func(context *guigui.Context) {
 		r.startAndroidPush(true)
 	})
-	r.androidShot.OnRefresh(func(context *guigui.Context) {
-		r.model.AndroidShot().RefreshDevices()
+	r.androidPanel.shot.OnRefresh(func(context *guigui.Context) {
+		r.model.AndroidShot().Reload()
 	})
-	r.androidShot.OnCapture(func(context *guigui.Context) {
+	r.androidPanel.shot.OnCapture(func(context *guigui.Context) {
 		r.model.AndroidShot().StartCapture()
 	})
-	r.androidShot.OnSaveAs(func(context *guigui.Context) {
+	r.androidPanel.shot.OnSaveAs(func(context *guigui.Context) {
 		r.startAndroidShotSave()
 	})
-	r.androidShot.OnCopy(func(context *guigui.Context) {
+	r.androidPanel.shot.OnCopy(func(context *guigui.Context) {
 		r.copyAndroidShot()
 	})
-	r.androidShot.OnSendToImage(func(context *guigui.Context) {
+	r.androidPanel.shot.OnSendToImage(func(context *guigui.Context) {
 		r.sendAndroidShotToImage()
 	})
-	r.androidShot.OnShowFolder(func(context *guigui.Context) {
+	r.androidPanel.shot.OnShowFolder(func(context *guigui.Context) {
 		r.showAndroidShotFolder()
 	})
 	r.stopwatchTool.OnCopy(func(context *guigui.Context) {
@@ -236,7 +235,8 @@ func (r *Root) Tick(context *guigui.Context, widgetBounds *guigui.WidgetBounds) 
 	if r.model.Mode() == ToolScreenshot {
 		r.model.Screenshot().PollFiles()
 	}
-	if r.model.Mode() == ToolAndroidShot {
+	if r.model.AndroidScreenVisible() {
+		r.model.AndroidShot().EnsureLoaded()
 		r.model.AndroidShot().PollFiles()
 		r.model.AndroidShot().EnsureLive()
 	} else {
@@ -283,8 +283,9 @@ func (r *Root) HandleButtonInput(context *guigui.Context, widgetBounds *guigui.W
 			return guigui.HandleInputByWidget(r)
 		}
 	case ToolAndroid:
-		return guigui.HandleInputResult{}
-	case ToolAndroidShot:
+		if r.model.AndroidFace() != AndroidFaceScreen {
+			return guigui.HandleInputResult{}
+		}
 		switch {
 		case inpututil.IsKeyJustPressed(ebiten.KeyS):
 			_ = r.model.AndroidShot().SaveDefault()

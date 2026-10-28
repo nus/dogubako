@@ -45,10 +45,11 @@ func loadMode() ToolID {
 		return ToolImage
 	}
 	id := ToolID(strings.TrimSpace(string(data)))
-	if !knownTool(id) {
-		return ToolImage
+	// android-shot is no longer a sidebar tool, but a saved value still opens Android.
+	if id == ToolAndroidShot || knownTool(id) {
+		return id
 	}
-	return id
+	return ToolImage
 }
 
 func saveMode(id ToolID) error {

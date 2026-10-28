@@ -65,6 +65,9 @@ type AndroidModel struct {
 	pendingDevices <-chan devicesResult
 	pendingList    <-chan listResult
 	pendingCopy    <-chan copyResult
+
+	// shared is the device list used by both Android panes. Nil in standalone tests.
+	shared *adbDevices
 }
 
 func (m *AndroidModel) Generation() uint64 { return m.generation }
@@ -101,11 +104,25 @@ func (m *AndroidModel) Client() adbfs.Client {
 }
 
 func (m *AndroidModel) Busy() bool {
+	if m.shared != nil && m.shared.pending != nil {
+		return true
+	}
 	return m.pendingDevices != nil || m.pendingList != nil || m.pendingCopy != nil
 }
 
-func (m *AndroidModel) Devices() []adbfs.Device { return m.devices }
-func (m *AndroidModel) Serial() string          { return m.serial }
+func (m *AndroidModel) Devices() []adbfs.Device {
+	if m.shared != nil {
+		return m.shared.devices
+	}
+	return m.devices
+}
+
+func (m *AndroidModel) Serial() string {
+	if m.shared != nil {
+		return m.shared.serial
+	}
+	return m.serial
+}
 func (m *AndroidModel) Root() string {
 	if m.root == "" {
 		return "/"
@@ -120,7 +137,7 @@ func (m *AndroidModel) HasSelection() bool {
 }
 
 func (m *AndroidModel) CanGoUp() bool {
-	return m.serial != "" && m.Root() != "/"
+	return m.Serial() != "" && m.Root() != "/"
 }
 
 func (m *AndroidModel) PushDest() string {
@@ -198,11 +215,22 @@ func (m *AndroidModel) EnsureLoaded() {
 	if m.loaded || m.Busy() {
 		return
 	}
+	if m.shared != nil && m.shared.fetched && m.shared.pending == nil {
+		m.loaded = true
+		if m.Serial() != "" && m.device(m.Serial()).Online() && m.children == nil {
+			m.beginRootProbe()
+		}
+		return
+	}
 	m.RefreshDevices()
 }
 
 func (m *AndroidModel) Drain() {
-	m.drainDevices()
+	if m.shared != nil {
+		m.shared.drain()
+	} else {
+		m.drainDevices()
+	}
 	m.drainList()
 	m.drainCopy()
 }
@@ -244,7 +272,7 @@ func (m *AndroidModel) drainCopy() {
 			m.SetStatus(i18n.StatusAdbCopyFailed, res.err)
 		} else {
 			m.SetStatus(i18n.StatusAdbCopied, res.n, res.dest)
-			if res.reload && m.serial != "" {
+			if res.reload && m.Serial() != "" {
 				m.startList(m.Root(), false)
 			}
 		}
@@ -284,7 +312,7 @@ func (m *AndroidModel) applyDevices(devs []adbfs.Device, err error) {
 }
 
 func (m *AndroidModel) device(serial string) adbfs.Device {
-	for _, d := range m.devices {
+	for _, d := range m.Devices() {
 		if d.Serial == serial {
 			return d
 		}
@@ -346,6 +374,15 @@ func (m *AndroidModel) applyList(res listResult) {
 }
 
 func (m *AndroidModel) RefreshDevices() {
+	if m.shared != nil {
+		if m.pendingList != nil || m.pendingCopy != nil || m.shared.pending != nil {
+			return
+		}
+		m.loaded = true
+		m.SetStatus(i18n.StatusAdbListing)
+		m.shared.refresh(m.Client(), AndroidFaceFiles, false)
+		return
+	}
 	if m.Busy() {
 		return
 	}
@@ -364,13 +401,23 @@ func (m *AndroidModel) RefreshDevices() {
 }
 
 func (m *AndroidModel) Reload() {
-	if m.Busy() || m.serial == "" {
+	if m.shared != nil {
+		if m.pendingList != nil || m.pendingCopy != nil || m.shared.pending != nil {
+			return
+		}
+		online := m.Serial() != "" && m.device(m.Serial()).Online()
+		m.loaded = true
+		m.SetStatus(i18n.StatusAdbListing)
+		m.shared.refresh(m.Client(), AndroidFaceFiles, online)
+		return
+	}
+	if m.Busy() || m.Serial() == "" {
 		if !m.Busy() {
 			m.RefreshDevices()
 		}
 		return
 	}
-	d := m.device(m.serial)
+	d := m.device(m.Serial())
 	if !d.Online() {
 		m.RefreshDevices()
 		return
@@ -381,6 +428,17 @@ func (m *AndroidModel) Reload() {
 }
 
 func (m *AndroidModel) SelectDevice(serial string) {
+	if m.shared != nil {
+		if m.Busy() || serial == "" || serial == m.Serial() {
+			return
+		}
+		m.shared.serial = serial
+		m.reactSerial()
+		if m.shared.shot != nil {
+			m.shared.shot.reactSerial()
+		}
+		return
+	}
 	if m.Busy() || serial == "" || serial == m.serial {
 		return
 	}
@@ -393,6 +451,66 @@ func (m *AndroidModel) SelectDevice(serial string) {
 		return
 	}
 	m.beginRootProbe()
+}
+
+// reactSerial applies a device change that already updated the shared serial.
+func (m *AndroidModel) reactSerial() {
+	m.generation++
+	d := m.device(m.Serial())
+	if !d.Online() {
+		m.children = nil
+		m.SetStatus(i18n.StatusAdbDeviceOffline, d.State)
+		return
+	}
+	m.beginRootProbe()
+}
+
+// onSharedDevices applies a device fetch that updated the shared list.
+// primary is set when this pane's reload started the fetch.
+func (m *AndroidModel) onSharedDevices(err error, prev string, primary bool) {
+	m.generation++
+	serial := m.Serial()
+	if err != nil {
+		if primary || prev != serial {
+			m.children = nil
+		}
+		if primary {
+			m.SetStatus(i18n.StatusAdbConnectFailed, err)
+		}
+		return
+	}
+	if serial == "" {
+		if primary || prev != "" {
+			m.children = nil
+		}
+		if primary {
+			m.SetStatus(i18n.StatusAdbNoDevices)
+		}
+		return
+	}
+	d := m.device(serial)
+	if !d.Online() {
+		if primary || prev != serial {
+			m.children = nil
+		}
+		if primary {
+			m.SetStatus(i18n.StatusAdbDeviceOffline, d.State)
+		}
+		return
+	}
+	if primary {
+		if m.shared != nil && m.shared.keepRoot && prev == serial {
+			m.children = map[string][]adbfs.Entry{}
+			m.expanded = map[string]bool{}
+			m.startList(m.Root(), false)
+			return
+		}
+		m.beginRootProbe()
+		return
+	}
+	if prev != serial && m.loaded {
+		m.beginRootProbe()
+	}
 }
 
 func (m *AndroidModel) SelectPath(path string) {
@@ -439,7 +557,8 @@ func (m *AndroidModel) GoUp() {
 }
 
 func (m *AndroidModel) startList(path string, probe bool) {
-	if m.pendingList != nil || m.serial == "" {
+	serial := m.Serial()
+	if m.pendingList != nil || serial == "" {
 		return
 	}
 	path = adbfs.Clean(path)
@@ -448,7 +567,6 @@ func (m *AndroidModel) startList(path string, probe bool) {
 	m.pendingList = ch
 	m.generation++
 	client := m.Client()
-	serial := m.serial
 	go func() {
 		ctx, cancel := context.WithTimeout(context.Background(), adbListTimeout)
 		defer cancel()
@@ -473,7 +591,7 @@ func (m *AndroidModel) StartPush(local string) {
 	if m.Busy() {
 		return
 	}
-	if m.serial == "" || !m.device(m.serial).Online() {
+	if m.Serial() == "" || !m.device(m.Serial()).Online() {
 		m.SetStatus(i18n.StatusAdbSelectOnline)
 		return
 	}
@@ -486,7 +604,7 @@ func (m *AndroidModel) startCopy(pull bool, src, dest string) {
 	m.pendingCopy = ch
 	m.generation++
 	client := m.Client()
-	serial := m.serial
+	serial := m.Serial()
 	go func() {
 		ctx, cancel := context.WithTimeout(context.Background(), adbCopyTimeout)
 		defer cancel()

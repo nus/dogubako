@@ -17,9 +17,11 @@ import (
 type ToolID string
 
 const (
-	ToolImage       ToolID = "image"
-	ToolScreenshot  ToolID = "screenshot"
-	ToolAndroid     ToolID = "android"
+	ToolImage      ToolID = "image"
+	ToolScreenshot ToolID = "screenshot"
+	ToolAndroid    ToolID = "android"
+	// ToolAndroidShot is the legacy id of the screen pane. It is not a sidebar
+	// entry. A saved mode of this id opens Android on the screen pane.
 	ToolAndroidShot ToolID = "android-shot"
 	ToolStopwatch   ToolID = "stopwatch"
 	ToolGit         ToolID = "git"
@@ -36,7 +38,6 @@ var Tools = []Tool{
 	{ID: ToolImage},
 	{ID: ToolScreenshot},
 	{ID: ToolAndroid},
-	{ID: ToolAndroidShot},
 	{ID: ToolStopwatch},
 	{ID: ToolGit},
 }
@@ -76,9 +77,14 @@ type Model struct {
 	screenshot  ScreenshotModel
 	android     AndroidModel
 	androidShot AndroidShotModel
-	stopwatch   StopwatchModel
-	git         GitModel
-	mtp         MTPModel
+	adb         *adbDevices
+	adbBound    bool
+	// androidMigrated remembers that a legacy android-shot mode was applied.
+	androidMigrated bool
+	androidFace     androidFacePref
+	stopwatch       StopwatchModel
+	git             GitModel
+	mtp             MTPModel
 }
 
 func (m *Model) Lang() i18n.Lang {
@@ -104,11 +110,18 @@ func (m *Model) applyLang(lang i18n.Lang, persist bool) {
 }
 
 func (m *Model) Mode() ToolID {
+	m.migrateAndroidMode()
 	return m.mode.current()
 }
 
 func (m *Model) SetMode(mode ToolID) {
-	if m.Mode() == ToolAndroidShot && mode != ToolAndroidShot {
+	// An explicit android-shot request opens the shared Android tool on the screen pane.
+	if mode == ToolAndroidShot {
+		m.SetAndroidFace(AndroidFaceScreen)
+		mode = ToolAndroid
+	}
+	screen := m.Mode() == ToolAndroid && m.AndroidFace() == AndroidFaceScreen
+	if screen && mode != ToolAndroid {
 		m.androidShot.StopLive()
 	}
 	m.mode.set(mode)
@@ -138,10 +151,12 @@ func (m *Model) Screenshot() *ScreenshotModel {
 }
 
 func (m *Model) Android() *AndroidModel {
+	m.bindAndroid()
 	return &m.android
 }
 
 func (m *Model) AndroidShot() *AndroidShotModel {
+	m.bindAndroid()
 	return &m.androidShot
 }
 
