@@ -1578,6 +1578,8 @@ func (t *GitTool) setGraphDragPassthrough(context *guigui.Context, pass bool) {
 		&t.pushBtn,
 		&t.status,
 		&t.hint,
+		&t.consoleToggle,
+		&t.console,
 		&t.expand,
 		&t.commitList,
 		&t.graphEmpty,

@@ -114,6 +114,7 @@ ADB サーバーは Android Studio や SDK Platform-Tools などが起動して�
 - ブランチの右クリックメニューから、そのローカルブランチを通常、Force with lease、Force で push できる
 - コミット / amend（「変更をすべて含める」で `git add -A`）
 - fetch / pull / push。Push を押すとダイアログで通常、Force with lease、Force を選べる
+- 画面下部のコンソール。実行した git コマンドと、その標準出力・標準エラーを表示する。状態表示の右端のアイコンで開閉する
 - origin などの remote はチェックを外すとグラフとブランチ一覧から非表示
 
 リポジトリはタブごとに開きます。同じフォルダを再度開くとそのタブに切り替わります。開いているタブは次回起動時も覚えています。

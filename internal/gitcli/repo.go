@@ -5,6 +5,7 @@ import (
 	"context"
 	"errors"
 	"fmt"
+	"io"
 	"os"
 	"os/exec"
 	"path"
@@ -27,6 +28,13 @@ const (
 	maxWalk = 20000
 )
 
+// CommandTrace records a user-facing git command.
+// begin is true before the process starts. args are the ones the operation
+// passed, without pager options, -C, or an ssh wrapper.
+// When begin is false, stdout and stderr are the process output. A failure
+// still reports both.
+type CommandTrace func(begin bool, args []string, stdout, stderr string)
+
 // Repo is a git working tree. Operations run the git binary in Dir.
 // Dest is an ssh destination when the tree is on another host. Port is set
 // only for an explicit destination, not for a Host alias from ssh config.
@@ -34,6 +42,19 @@ type Repo struct {
 	Dir  string
 	Dest string
 	Port string
+
+	// trace records commands that change the repository or talk to a remote.
+	// Reads go through gitOutput and leave it nil.
+	trace CommandTrace
+}
+
+// SetCommandTrace installs the recorder used by local and SSH commands.
+// A nil trace records nothing.
+func (r *Repo) SetCommandTrace(trace CommandTrace) {
+	if r == nil {
+		return
+	}
+	r.trace = trace
 }
 
 func (r *Repo) loc() Loc {
@@ -706,22 +727,8 @@ func (r *Repo) ApplyIndex(ctx context.Context, patch string, reverse bool) error
 		args = append(args, "--reverse")
 	}
 	args = append(args, "-")
-	cmd := gitCmd(ctx, r.loc(), args...)
-	cmd.Stdin = strings.NewReader(patch)
-	var stderr bytes.Buffer
-	cmd.Stdout = &stderr
-	cmd.Stderr = &stderr
-	if err := cmd.Run(); err != nil {
-		if ctx.Err() != nil {
-			return ctx.Err()
-		}
-		msg := strings.TrimSpace(stderr.String())
-		if msg == "" {
-			return err
-		}
-		return errors.New(msg)
-	}
-	return nil
+	_, err := gitExec(ctx, r.loc(), args, strings.NewReader(patch), r.trace)
+	return err
 }
 
 func (r *Repo) diffOutput(ctx context.Context, args ...string) (string, error) {
@@ -1001,7 +1008,7 @@ func (r *Repo) tagRef(ctx context.Context, name string) (string, error) {
 		return "", fmt.Errorf("invalid tag name")
 	}
 	ref := "refs/tags/" + name
-	if err := r.run(ctx, "check-ref-format", ref); err != nil {
+	if _, err := r.output(ctx, "check-ref-format", ref); err != nil {
 		if ctx.Err() != nil {
 			return "", ctx.Err()
 		}
@@ -1059,7 +1066,7 @@ func (r *Repo) CreateBranch(ctx context.Context, name, hash string) error {
 	if name == "" {
 		return fmt.Errorf("invalid branch name")
 	}
-	if err := r.run(ctx, "check-ref-format", "--branch", name); err != nil {
+	if _, err := r.output(ctx, "check-ref-format", "--branch", name); err != nil {
 		if ctx.Err() != nil {
 			return ctx.Err()
 		}
@@ -1092,7 +1099,7 @@ func (r *Repo) RenameBranch(ctx context.Context, ref Ref, newName string) error 
 	if newName == "" || newName == ref.Name || ref.Name == "" {
 		return fmt.Errorf("invalid branch name")
 	}
-	if err := r.run(ctx, "check-ref-format", "--branch", newName); err != nil {
+	if _, err := r.output(ctx, "check-ref-format", "--branch", newName); err != nil {
 		if ctx.Err() != nil {
 			return ctx.Err()
 		}
@@ -1533,33 +1540,50 @@ func (r *Repo) exists(ctx context.Context, rel string) bool {
 }
 
 func (r *Repo) run(ctx context.Context, args ...string) error {
-	_, err := r.output(ctx, args...)
+	_, err := gitExec(ctx, r.loc(), args, nil, r.trace)
 	return err
 }
 
 func gitOutput(ctx context.Context, loc Loc, args ...string) (string, error) {
+	return gitExec(ctx, loc, args, nil, nil)
+}
+
+// gitExec runs git and, when trace is set, records the command the operation
+// asked for. Local and SSH both come through here. gitCmd adds the pager
+// flags, -C, and the ssh wrapper after the trace has seen args.
+func gitExec(ctx context.Context, loc Loc, args []string, stdin io.Reader, trace CommandTrace) (string, error) {
 	if err := ctx.Err(); err != nil {
 		return "", err
 	}
+	if trace != nil {
+		trace(true, args, "", "")
+	}
 	cmd := gitCmd(ctx, loc, args...)
+	if stdin != nil {
+		cmd.Stdin = stdin
+	}
 	var stdout, stderr bytes.Buffer
 	cmd.Stdout = &stdout
 	cmd.Stderr = &stderr
 	err := cmd.Run()
+	out, errOut := stdout.String(), stderr.String()
+	if trace != nil {
+		trace(false, args, out, errOut)
+	}
 	if err != nil {
 		if ctx.Err() != nil {
 			return "", ctx.Err()
 		}
-		msg := strings.TrimSpace(stderr.String())
+		msg := strings.TrimSpace(errOut)
 		if msg == "" {
-			msg = strings.TrimSpace(stdout.String())
+			msg = strings.TrimSpace(out)
 		}
 		if msg == "" {
 			return "", err
 		}
 		return "", errors.New(msg)
 	}
-	return stdout.String(), nil
+	return out, nil
 }
 
 func gitCmd(ctx context.Context, loc Loc, args ...string) *exec.Cmd {

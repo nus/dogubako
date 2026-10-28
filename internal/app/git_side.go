@@ -185,6 +185,8 @@ func (t *GitTool) setSideDragPassthrough(context *guigui.Context, pass bool) {
 		&t.pushBtn,
 		&t.status,
 		&t.hint,
+		&t.consoleToggle,
+		&t.console,
 		&t.workPanes,
 		&t.workTree,
 		&t.msgInput,

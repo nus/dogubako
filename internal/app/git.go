@@ -151,6 +151,12 @@ type GitTool struct {
 	msgInput    guigui.WidgetWithSize[*basicwidget.TextInput]
 	status      basicwidget.Text
 	hint        basicwidget.Text
+	// consoleOpen lasts for this launch. The next launch starts closed.
+	consoleOpen   bool
+	consoleToggle gitConsoleToggle
+	console       gitConsole
+	statusItems   []guigui.LinearLayoutItem
+	statusRow     guigui.LinearLayout
 
 	branchMenu gitBranchMenu
 	commitMenu gitCommitMenu
@@ -192,6 +198,7 @@ func (t *GitTool) WriteStateKey(context *guigui.Context, w *guigui.StateKeyWrite
 	w.WriteBool(m.HistoryLoading())
 	w.WriteBool(m.HasMoreHistory())
 	w.WriteBool(t.commitView)
+	w.WriteBool(t.consoleOpen)
 	w.WriteString(t.openHash)
 	w.WriteString(t.histFile)
 }
@@ -248,6 +255,10 @@ func (t *GitTool) Build(context *guigui.Context, adder *guigui.ChildAdder) error
 	}
 	adder.AddWidget(&t.status)
 	adder.AddWidget(&t.hint)
+	adder.AddWidget(&t.consoleToggle)
+	if t.consoleOpen {
+		adder.AddWidget(&t.console)
+	}
 	t.sidePane.setOwner(t)
 	adder.AddWidget(&t.sidePane)
 	t.sideSplit.tool = t
@@ -555,8 +566,14 @@ func (t *GitTool) Build(context *guigui.Context, adder *guigui.ChildAdder) error
 
 	t.status.SetValue(model.StatusText(lang))
 	t.status.SetVerticalAlign(basicwidget.VerticalAlignMiddle)
+	t.status.SetEllipsisString("…")
+	t.status.SetWrapMode(basicwidget.WrapModeNone)
 	t.hint.SetValue(i18n.T(lang, i18n.GitHint))
 	t.hint.SetVerticalAlign(basicwidget.VerticalAlignMiddle)
+	t.consoleToggle.set(context, lang, t.consoleOpen, func(*guigui.Context) {
+		t.consoleOpen = !t.consoleOpen
+		guigui.RequestRebuild()
+	})
 
 	adder.AddWidget(&t.branchMenu)
 	adder.AddWidget(&t.commitMenu)
@@ -729,7 +746,11 @@ func (t *GitTool) Layout(context *guigui.Context, widgetBounds *guigui.WidgetBou
 		t.layoutHistoryColumn(u)
 	}
 
-	inner := image.Rect(rest.Min.X+u/2, rest.Min.Y+u/4, rest.Max.X-u/2, rest.Max.Y-u/2)
+	listBottom, rightBottom, consoleR := gitViewBottoms(rest, u, t.consoleOpen)
+	if !consoleR.Empty() {
+		layouter.LayoutWidget(&t.console, consoleR)
+	}
+	inner := image.Rect(rest.Min.X+u/2, rest.Min.Y+u/4, rest.Max.X-u/2, rightBottom)
 	if inner.Max.X < inner.Min.X {
 		inner.Max.X = inner.Min.X
 	}
@@ -743,9 +764,10 @@ func (t *GitTool) Layout(context *guigui.Context, widgetBounds *guigui.WidgetBou
 		pref = int(t.sideUnits*float64(u) + 0.5)
 	}
 	sideW := gitSideWidth(inner.Dx(), splitW, pref, 6*u, 16*u)
-	// The filter field sits on the bottom edge. The right column keeps its margin.
-	sideR := image.Rect(inner.Min.X, inner.Min.Y, inner.Min.X+sideW, rest.Max.Y)
-	splitR := image.Rect(sideR.Max.X, inner.Min.Y, sideR.Max.X+splitW, rest.Max.Y)
+	// The filter field sits on the bottom edge. The right column keeps its margin
+	// until the console opens, and then both columns stop on the console.
+	sideR := image.Rect(inner.Min.X, inner.Min.Y, inner.Min.X+sideW, listBottom)
+	splitR := image.Rect(sideR.Max.X, inner.Min.Y, sideR.Max.X+splitW, listBottom)
 	rightR := image.Rect(splitR.Max.X, inner.Min.Y, inner.Max.X, inner.Max.Y)
 	layouter.LayoutWidget(&t.sidePane, sideR)
 	layouter.LayoutWidget(&t.sideSplit, splitR)
@@ -852,19 +874,38 @@ func (t *GitTool) layoutHistoryColumn(u int) {
 		guigui.LinearLayoutItem{Size: guigui.FixedSize(u), Layout: &t.netRow},
 		guigui.LinearLayoutItem{Widget: &t.histStack, Size: guigui.FlexibleSize(1)},
 	)
+	t.layoutStatusRow(u)
 	t.rightItems = append(t.rightItems,
-		guigui.LinearLayoutItem{Widget: &t.status, Size: guigui.FixedSize(u * 3 / 4)},
+		guigui.LinearLayoutItem{Layout: &t.statusRow, Size: guigui.FixedSize(u * 3 / 4)},
 		guigui.LinearLayoutItem{Widget: &t.hint, Size: guigui.FixedSize(u * 3 / 4)},
 	)
 	t.rightCol = guigui.LinearLayout{Direction: guigui.LayoutDirectionVertical, Items: t.rightItems, Gap: u / 6}
 }
 
+func (t *GitTool) layoutStatusRow(u int) {
+	h := u * 3 / 4
+	if h < 1 {
+		h = 1
+	}
+	t.statusItems = slices.Delete(t.statusItems, 0, len(t.statusItems))
+	t.statusItems = append(t.statusItems,
+		guigui.LinearLayoutItem{Widget: &t.status, Size: guigui.FlexibleSize(1)},
+		guigui.LinearLayoutItem{Widget: &t.consoleToggle, Size: guigui.FixedSize(h)},
+	)
+	t.statusRow = guigui.LinearLayout{
+		Direction: guigui.LayoutDirectionHorizontal,
+		Items:     t.statusItems,
+		Gap:       u / 8,
+	}
+}
+
 func (t *GitTool) layoutCommitColumn(u int) {
 	t.msgInput.SetIntrinsicSize()
+	t.layoutStatusRow(u)
 	t.rightItems = slices.Delete(t.rightItems, 0, len(t.rightItems))
 	t.rightItems = append(t.rightItems,
 		guigui.LinearLayoutItem{Widget: &t.workPanes, Size: guigui.FlexibleSize(1)},
-		guigui.LinearLayoutItem{Widget: &t.status, Size: guigui.FixedSize(u * 3 / 4)},
+		guigui.LinearLayoutItem{Layout: &t.statusRow, Size: guigui.FixedSize(u * 3 / 4)},
 		guigui.LinearLayoutItem{Widget: &t.hint, Size: guigui.FixedSize(u * 3 / 4)},
 	)
 	t.rightCol = guigui.LinearLayout{Direction: guigui.LayoutDirectionVertical, Items: t.rightItems, Gap: u / 6}
