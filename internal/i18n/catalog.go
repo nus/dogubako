@@ -70,6 +70,7 @@ const (
 
 	AndroidDevices          Key = "android.devices"
 	AndroidFiles            Key = "android.files"
+	AndroidScreen           Key = "android.screen"
 	AndroidRefresh          Key = "android.refresh"
 	AndroidUp               Key = "android.up"
 	AndroidPull             Key = "android.pull"
@@ -347,7 +348,7 @@ var catalogs = map[Lang]map[Key]string{
 		SidebarExpand:                  "サイドバーを開く（%s）",
 		ToolImage:                      "画像",
 		ToolScreenshot:                 "画面キャプチャ",
-		ToolAndroid:                    "Android ファイル",
+		ToolAndroid:                    "Android",
 		ToolAndroidShot:                "Android 画面",
 		ToolStopwatch:                  "ストップウォッチ",
 		ToolGit:                        "Git",
@@ -403,6 +404,7 @@ var catalogs = map[Lang]map[Key]string{
 		ScreenshotShowFolder:           "フォルダを開く",
 		AndroidDevices:                 "デバイス",
 		AndroidFiles:                   "ファイル",
+		AndroidScreen:                  "画面",
 		AndroidRefresh:                 "再読み込み",
 		AndroidUp:                      "上へ",
 		AndroidPull:                    "PCへコピー",
@@ -671,7 +673,7 @@ var catalogs = map[Lang]map[Key]string{
 		SidebarExpand:                  "Expand sidebar (%s)",
 		ToolImage:                      "Image",
 		ToolScreenshot:                 "Screenshot",
-		ToolAndroid:                    "Android Files",
+		ToolAndroid:                    "Android",
 		ToolAndroidShot:                "Android Screen",
 		ToolStopwatch:                  "Stopwatch",
 		ToolGit:                        "Git",
@@ -727,6 +729,7 @@ var catalogs = map[Lang]map[Key]string{
 		ScreenshotShowFolder:           "Open Folder",
 		AndroidDevices:                 "Devices",
 		AndroidFiles:                   "Files",
+		AndroidScreen:                  "Screen",
 		AndroidRefresh:                 "Reload",
 		AndroidUp:                      "Up",
 		AndroidPull:                    "Copy to PC",

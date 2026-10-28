@@ -38,6 +38,8 @@ type AndroidShotTool struct {
 	captureBtn  basicwidget.Button
 	fillBtn     basicwidget.Button
 	previewFill bool
+	// embedded hides the device list. The Android panel owns that list.
+	embedded bool
 
 	listLabel basicwidget.Text
 	fileList  basicwidget.List[string]
@@ -121,8 +123,10 @@ func (t *AndroidShotTool) Build(context *guigui.Context, adder *guigui.ChildAdde
 		adder.AddWidget(&t.previewZoom)
 		adder.AddWidget(&t.status)
 	} else {
-		adder.AddWidget(&t.deviceLabel)
-		adder.AddWidget(&t.deviceList)
+		if !t.embedded {
+			adder.AddWidget(&t.deviceLabel)
+			adder.AddWidget(&t.deviceList)
+		}
 		adder.AddWidget(&t.refreshBtn)
 		adder.AddWidget(&t.delayText)
 		adder.AddWidget(&t.delayInput)
@@ -160,31 +164,33 @@ func (t *AndroidShotTool) Build(context *guigui.Context, adder *guigui.ChildAdde
 	model.EnsureLoaded()
 	model.RefreshFiles()
 
-	setBoldText(&t.deviceLabel, true)
-	t.deviceLabel.SetValue(i18n.T(lang, i18n.AndroidDevices))
-
 	devs := model.Devices()
-	t.deviceItems = slices.Delete(t.deviceItems, 0, len(t.deviceItems))
-	for _, d := range devs {
-		t.deviceItems = append(t.deviceItems, basicwidget.ListItem[string]{
-			Text:  d.Label(),
-			Value: d.Serial,
-		})
-	}
-	t.deviceList.SetStyle(basicwidget.ListStyleNormal)
-	t.deviceList.SetHighlightVisibleWhenUnfocused(true)
-	t.deviceList.SetItems(t.deviceItems)
-	if model.Serial() != "" {
-		t.deviceList.SelectItemByValue(model.Serial())
-	}
-	t.deviceList.OnItemSelected(func(context *guigui.Context, index int) {
-		item, ok := t.deviceList.ItemByIndex(index)
-		if !ok || item.Value == "" {
-			return
+	if !t.embedded && !t.previewFill {
+		setBoldText(&t.deviceLabel, true)
+		t.deviceLabel.SetValue(i18n.T(lang, i18n.AndroidDevices))
+
+		t.deviceItems = slices.Delete(t.deviceItems, 0, len(t.deviceItems))
+		for _, d := range devs {
+			t.deviceItems = append(t.deviceItems, basicwidget.ListItem[string]{
+				Text:  d.Label(),
+				Value: d.Serial,
+			})
 		}
-		model.SelectDevice(item.Value)
-	})
-	context.SetEnabled(&t.deviceList, !busy)
+		t.deviceList.SetStyle(basicwidget.ListStyleNormal)
+		t.deviceList.SetHighlightVisibleWhenUnfocused(true)
+		t.deviceList.SetItems(t.deviceItems)
+		if model.Serial() != "" {
+			t.deviceList.SelectItemByValue(model.Serial())
+		}
+		t.deviceList.OnItemSelected(func(context *guigui.Context, index int) {
+			item, ok := t.deviceList.ItemByIndex(index)
+			if !ok || item.Value == "" {
+				return
+			}
+			model.SelectDevice(item.Value)
+		})
+		context.SetEnabled(&t.deviceList, !busy)
+	}
 
 	t.refreshBtn.SetText(i18n.T(lang, i18n.AndroidRefresh))
 	t.refreshBtn.OnDown(func(context *guigui.Context) {
@@ -418,10 +424,18 @@ func (t *AndroidShotTool) Layout(context *guigui.Context, widgetBounds *guigui.W
 	}
 
 	deviceH := 3 * u
+	pad := u / 2
+	if t.embedded {
+		pad = 0
+	}
 	t.layoutItems = slices.Delete(t.layoutItems, 0, len(t.layoutItems))
+	if !t.embedded {
+		t.layoutItems = append(t.layoutItems,
+			guigui.LinearLayoutItem{Widget: &t.deviceLabel, Size: guigui.FixedSize(u)},
+			guigui.LinearLayoutItem{Widget: &t.deviceList, Size: guigui.FixedSize(deviceH)},
+		)
+	}
 	t.layoutItems = append(t.layoutItems,
-		guigui.LinearLayoutItem{Widget: &t.deviceLabel, Size: guigui.FixedSize(u)},
-		guigui.LinearLayoutItem{Widget: &t.deviceList, Size: guigui.FixedSize(deviceH)},
 		guigui.LinearLayoutItem{Size: guigui.FixedSize(u), Layout: &t.toolbar},
 		guigui.LinearLayoutItem{Size: guigui.FlexibleSize(1), Layout: &t.bodyRow},
 		guigui.LinearLayoutItem{Size: guigui.FixedSize(u), Layout: &t.outputRow},
@@ -432,10 +446,10 @@ func (t *AndroidShotTool) Layout(context *guigui.Context, widgetBounds *guigui.W
 		Items:     t.layoutItems,
 		Gap:       u / 4,
 		Padding: guigui.Padding{
-			Start:  u / 2,
-			Top:    u / 2,
-			End:    u / 2,
-			Bottom: u / 2,
+			Start:  pad,
+			Top:    pad,
+			End:    pad,
+			Bottom: pad,
 		},
 	}).LayoutWidgets(context, widgetBounds.Bounds(), layouter)
 }

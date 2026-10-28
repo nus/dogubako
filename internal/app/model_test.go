@@ -176,11 +176,16 @@ func TestToolTitle(t *testing.T) {
 		t.Fatalf("en screenshot = %q", got)
 	}
 	android := Tool{ID: ToolAndroid}
-	if got := android.Title(i18n.JA); got != "Android ファイル" {
+	if got := android.Title(i18n.JA); got != "Android" {
 		t.Fatalf("ja android = %q", got)
 	}
-	if got := android.Title(i18n.EN); got != "Android Files" {
+	if got := android.Title(i18n.EN); got != "Android" {
 		t.Fatalf("en android = %q", got)
+	}
+	for _, tool := range Tools {
+		if tool.ID == ToolAndroidShot {
+			t.Fatal("android-shot should not be a sidebar tool")
+		}
 	}
 	androidShot := Tool{ID: ToolAndroidShot}
 	if got := androidShot.Title(i18n.JA); got != "Android 画面" {

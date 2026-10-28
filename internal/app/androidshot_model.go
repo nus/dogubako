@@ -62,6 +62,9 @@ type AndroidShotModel struct {
 	pendingLive <-chan androidLiveResult
 	liveCancel  context.CancelFunc
 	downloadPct int // -1 when not downloading
+
+	// shared is the device list used by both Android panes. Nil in standalone tests.
+	shared *adbDevices
 }
 
 func (m *AndroidShotModel) SetClient(c adbfs.Client) {
@@ -75,20 +78,38 @@ func (m *AndroidShotModel) Client() adbfs.Client {
 	return m.client
 }
 
-func (m *AndroidShotModel) Devices() []adbfs.Device { return m.devices }
-func (m *AndroidShotModel) Serial() string          { return m.serial }
+func (m *AndroidShotModel) Devices() []adbfs.Device {
+	if m.shared != nil {
+		return m.shared.devices
+	}
+	return m.devices
+}
+
+func (m *AndroidShotModel) Serial() string {
+	if m.shared != nil {
+		return m.shared.serial
+	}
+	return m.serial
+}
+
+func (m *AndroidShotModel) fetchingDevices() bool {
+	if m.pendingDevices != nil {
+		return true
+	}
+	return m.shared != nil && m.shared.pending != nil
+}
 
 func (m *AndroidShotModel) Busy() bool {
-	return m.pendingDevices != nil || m.pendingCapture != nil || m.Capturing()
+	return m.fetchingDevices() || m.pendingCapture != nil || m.Capturing()
 }
 
 func (m *AndroidShotModel) Online() bool {
-	d := m.device(m.serial)
+	d := m.device(m.Serial())
 	return d.Serial != "" && d.Online()
 }
 
 func (m *AndroidShotModel) device(serial string) adbfs.Device {
-	for _, d := range m.devices {
+	for _, d := range m.Devices() {
 		if d.Serial == serial {
 			return d
 		}
@@ -102,6 +123,10 @@ func (m *AndroidShotModel) EnsureLoaded() {
 		m.SetDelaySec(0)
 	}
 	if m.loaded || m.Busy() {
+		return
+	}
+	if m.shared != nil && m.shared.fetched && m.shared.pending == nil {
+		m.loaded = true
 		return
 	}
 	m.RefreshDevices()
@@ -131,7 +156,11 @@ func (m *AndroidShotModel) DownloadPercent() int {
 }
 
 func (m *AndroidShotModel) Drain() {
-	m.drainDevices()
+	if m.shared != nil {
+		m.shared.drain()
+	} else {
+		m.drainDevices()
+	}
 	m.drainCapture()
 	m.drainLive()
 }
@@ -297,6 +326,15 @@ func (m *AndroidShotModel) applyDevices(devs []adbfs.Device, err error) {
 }
 
 func (m *AndroidShotModel) RefreshDevices() {
+	if m.shared != nil {
+		if m.pendingCapture != nil || m.Capturing() || m.shared.pending != nil {
+			return
+		}
+		m.loaded = true
+		m.SetStatus(i18n.StatusAdbListing)
+		m.shared.refresh(m.Client(), AndroidFaceScreen, false)
+		return
+	}
 	if m.Busy() {
 		return
 	}
@@ -314,7 +352,24 @@ func (m *AndroidShotModel) RefreshDevices() {
 	}()
 }
 
+// Reload refreshes the saved-image list and the shared device list.
+func (m *AndroidShotModel) Reload() {
+	m.RefreshFiles()
+	m.RefreshDevices()
+}
+
 func (m *AndroidShotModel) SelectDevice(serial string) {
+	if m.shared != nil {
+		if m.fetchingDevices() || m.pendingCapture != nil || serial == "" || serial == m.Serial() {
+			return
+		}
+		m.shared.serial = serial
+		if m.shared.files != nil {
+			m.shared.files.reactSerial()
+		}
+		m.reactSerial()
+		return
+	}
 	if m.pendingDevices != nil || m.pendingCapture != nil || serial == "" || serial == m.serial {
 		return
 	}
@@ -333,8 +388,68 @@ func (m *AndroidShotModel) SelectDevice(serial string) {
 	}
 }
 
+// reactSerial applies a device change that already updated the shared serial.
+func (m *AndroidShotModel) reactSerial() {
+	resume := m.live && !m.liveStopped
+	m.StopLive()
+	m.generation++
+	d := m.device(m.Serial())
+	if !d.Online() {
+		m.SetStatus(i18n.StatusAdbDeviceOffline, d.State)
+		return
+	}
+	m.SetStatus(i18n.StatusAdbDeviceReady, d.Label())
+	if resume {
+		m.StartLive()
+	}
+}
+
+// onSharedDevices applies a device fetch that updated the shared list.
+// primary is set when this pane's reload started the fetch.
+func (m *AndroidShotModel) onSharedDevices(err error, prev string, primary bool) {
+	wasLive := m.live && !m.liveStopped
+	m.generation++
+	serial := m.Serial()
+	if err != nil {
+		if m.live {
+			m.StopLive()
+		}
+		if primary {
+			m.SetStatus(i18n.StatusAdbConnectFailed, err)
+		}
+		return
+	}
+	if serial == "" {
+		if m.live {
+			m.StopLive()
+		}
+		if primary {
+			m.SetStatus(i18n.StatusAdbNoDevices)
+		}
+		return
+	}
+	d := m.device(serial)
+	if !d.Online() {
+		if m.live {
+			m.StopLive()
+		}
+		if primary {
+			m.SetStatus(i18n.StatusAdbDeviceOffline, d.State)
+		}
+		return
+	}
+	if wasLive && (prev != serial || !m.live) {
+		m.StopLive()
+		m.StartLive()
+		return
+	}
+	if primary && !m.live {
+		m.SetStatus(i18n.StatusAdbDeviceReady, d.Label())
+	}
+}
+
 func (m *AndroidShotModel) StartCapture() {
-	if m.pendingDevices != nil {
+	if m.fetchingDevices() {
 		return
 	}
 	if m.live && m.image != nil {
@@ -357,7 +472,7 @@ func (m *AndroidShotModel) StartCapture() {
 	m.pendingCapture = ch
 	m.generation++
 	client := m.Client()
-	serial := m.serial
+	serial := m.Serial()
 	go func() {
 		if delay > 0 {
 			timer := time.NewTimer(delay)
@@ -440,13 +555,13 @@ func (m *AndroidShotModel) SetLive(on bool) {
 		return
 	}
 	if m.Online() {
-		d := m.device(m.serial)
+		d := m.device(m.Serial())
 		m.SetStatus(i18n.StatusAdbDeviceReady, d.Label())
 	}
 }
 
 func (m *AndroidShotModel) EnsureLive() {
-	if m.live || m.liveStopped || m.pendingCapture != nil || m.pendingDevices != nil || !m.Online() {
+	if m.live || m.liveStopped || m.pendingCapture != nil || m.fetchingDevices() || !m.Online() {
 		return
 	}
 	m.StartLive()
@@ -473,7 +588,7 @@ func (m *AndroidShotModel) StartLive() {
 		m.SetStatus(i18n.StatusAdbLiveStarting)
 	}
 	client := m.Client()
-	serial := m.serial
+	serial := m.Serial()
 	go liveLoop(ctx, client, serial, ch)
 }
 
