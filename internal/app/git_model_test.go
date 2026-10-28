@@ -873,3 +873,212 @@ func TestHighlightCommitLeavesDetail(t *testing.T) {
 		t.Fatalf("empty highlight selected=%s", m.Selected())
 	}
 }
+
+func TestGitModelRebase(t *testing.T) {
+	requireGitBin(t)
+	dir := t.TempDir()
+	gitRun(t, dir, "init", "-b", "main")
+	gitRun(t, dir, "config", "user.name", "Test")
+	gitRun(t, dir, "config", "user.email", "test@example.com")
+	gitRun(t, dir, "config", "commit.gpgsign", "false")
+	gitRun(t, dir, "config", "rebase.autoStash", "false")
+	writeModelFile(t, dir, "a.txt", "base\n")
+	gitRun(t, dir, "add", "a.txt")
+	gitRun(t, dir, "commit", "-m", "base")
+	gitRun(t, dir, "checkout", "-b", "feature")
+	writeModelFile(t, dir, "b.txt", "feat\n")
+	gitRun(t, dir, "add", "b.txt")
+	gitRun(t, dir, "commit", "-m", "feat")
+	gitRun(t, dir, "checkout", "main")
+	writeModelFile(t, dir, "c.txt", "main\n")
+	gitRun(t, dir, "add", "c.txt")
+	gitRun(t, dir, "commit", "-m", "main")
+	onto := gitOutput(t, dir, "rev-parse", "HEAD")
+	gitRun(t, dir, "checkout", "feature")
+	old := gitOutput(t, dir, "rev-parse", "HEAD")
+
+	m := openGitModel(t, dir)
+	m.DoRebase(onto)
+	waitGit(t, m)
+	snap := m.Snapshot()
+	if snap.Branch != "feature" || snap.Detached || snap.HEAD == "" || snap.HEAD == old {
+		t.Fatalf("branch=%s detached=%v head=%s old=%s status=%s", snap.Branch, snap.Detached, snap.HEAD, old, m.StatusText(i18n.EN))
+	}
+	if m.StatusText(i18n.EN) != "Rebased" || m.StatusText(i18n.JA) != "rebase しました" {
+		t.Fatalf("en=%q ja=%q", m.StatusText(i18n.EN), m.StatusText(i18n.JA))
+	}
+	if _, err := os.Stat(filepath.Join(dir, "b.txt")); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := os.Stat(filepath.Join(dir, "c.txt")); err != nil {
+		t.Fatal(err)
+	}
+
+	parent := ""
+	for _, c := range snap.Commits {
+		if c.Hash == snap.HEAD && len(c.Parents) > 0 {
+			parent = c.Parents[0]
+		}
+	}
+	if parent == "" {
+		t.Fatal("no parent")
+	}
+	head := snap.HEAD
+	m.DoRebase(parent)
+	waitGit(t, m)
+	if m.Snapshot().HEAD != head {
+		t.Fatalf("HEAD moved to %s", m.Snapshot().HEAD)
+	}
+	if m.StatusText(i18n.EN) != "Already based on this commit" || m.StatusText(i18n.JA) != "すでにこのコミットの上にあります" {
+		t.Fatalf("en=%q ja=%q", m.StatusText(i18n.EN), m.StatusText(i18n.JA))
+	}
+
+	m.DoRebase(m.Snapshot().HEAD)
+	waitGit(t, m)
+	if m.Snapshot().HEAD != head || m.StatusText(i18n.EN) != "Already based on this commit" {
+		t.Fatalf("head=%s status=%s", m.Snapshot().HEAD, m.StatusText(i18n.EN))
+	}
+}
+
+func TestGitModelRebaseDirty(t *testing.T) {
+	requireGitBin(t)
+	dir, onto := modelRebaseFeature(t)
+	writeModelFile(t, dir, "b.txt", "local\n")
+	head := gitOutput(t, dir, "rev-parse", "HEAD")
+
+	m := openGitModel(t, dir)
+	m.DoRebase(onto)
+	waitGit(t, m)
+	if m.Snapshot().HEAD != head {
+		t.Fatalf("HEAD = %s, want %s", m.Snapshot().HEAD, head)
+	}
+	if !strings.HasPrefix(m.StatusText(i18n.EN), "Could not rebase: ") || !strings.HasPrefix(m.StatusText(i18n.JA), "rebase に失敗しました: ") {
+		t.Fatalf("en=%q ja=%q", m.StatusText(i18n.EN), m.StatusText(i18n.JA))
+	}
+	body, err := os.ReadFile(filepath.Join(dir, "b.txt"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	if string(body) != "local\n" {
+		t.Fatalf("b.txt = %q", body)
+	}
+	if stash := gitOutput(t, dir, "stash", "list"); stash != "" {
+		t.Fatalf("stash = %q", stash)
+	}
+}
+
+func TestGitModelRebaseConflict(t *testing.T) {
+	requireGitBin(t)
+	dir := t.TempDir()
+	gitRun(t, dir, "init", "-b", "main")
+	gitRun(t, dir, "config", "user.name", "Test")
+	gitRun(t, dir, "config", "user.email", "test@example.com")
+	gitRun(t, dir, "config", "commit.gpgsign", "false")
+	gitRun(t, dir, "config", "rebase.autoStash", "false")
+	writeModelFile(t, dir, "a.txt", "base\n")
+	gitRun(t, dir, "add", "a.txt")
+	gitRun(t, dir, "commit", "-m", "base")
+	gitRun(t, dir, "checkout", "-b", "feature")
+	writeModelFile(t, dir, "a.txt", "feature\n")
+	gitRun(t, dir, "add", "a.txt")
+	gitRun(t, dir, "commit", "-m", "feature")
+	gitRun(t, dir, "checkout", "main")
+	writeModelFile(t, dir, "a.txt", "main\n")
+	gitRun(t, dir, "add", "a.txt")
+	gitRun(t, dir, "commit", "-m", "main")
+	onto := gitOutput(t, dir, "rev-parse", "HEAD")
+	gitRun(t, dir, "checkout", "feature")
+
+	m := openGitModel(t, dir)
+	m.DoRebase(onto)
+	waitGit(t, m)
+	if !strings.HasPrefix(m.StatusText(i18n.EN), "Could not rebase: ") {
+		t.Fatalf("status = %q", m.StatusText(i18n.EN))
+	}
+	if !modelRebaseInProgress(dir) {
+		t.Fatal("conflict was aborted")
+	}
+}
+
+func TestGitModelRebaseDetached(t *testing.T) {
+	requireGitBin(t)
+	dir := t.TempDir()
+	gitRun(t, dir, "init", "-b", "main")
+	gitRun(t, dir, "config", "user.name", "Test")
+	gitRun(t, dir, "config", "user.email", "test@example.com")
+	gitRun(t, dir, "config", "commit.gpgsign", "false")
+	writeModelFile(t, dir, "a.txt", "base\n")
+	gitRun(t, dir, "add", "a.txt")
+	gitRun(t, dir, "commit", "-m", "base")
+	parent := gitOutput(t, dir, "rev-parse", "HEAD")
+	writeModelFile(t, dir, "b.txt", "next\n")
+	gitRun(t, dir, "add", "b.txt")
+	gitRun(t, dir, "commit", "-m", "next")
+	gitRun(t, dir, "checkout", "--detach")
+
+	m := openGitModel(t, dir)
+	if !m.Snapshot().Detached {
+		t.Fatal("expected detached")
+	}
+	head := m.Snapshot().HEAD
+	status := m.StatusText(i18n.EN)
+	m.DoRebase(parent)
+	waitGit(t, m)
+	if m.Snapshot().HEAD != head || m.StatusText(i18n.EN) != status {
+		t.Fatalf("head=%s status=%s", m.Snapshot().HEAD, m.StatusText(i18n.EN))
+	}
+}
+
+func openGitModel(t *testing.T, dir string) *GitModel {
+	t.Helper()
+	cfg := t.TempDir()
+	restore := overrideSidebarConfigDir(func() (string, error) { return cfg, nil })
+	t.Cleanup(restore)
+	var m GitModel
+	m.Open(dir)
+	waitGit(t, &m)
+	if !m.HasRepo() {
+		t.Fatalf("status = %s", m.StatusText(i18n.EN))
+	}
+	return &m
+}
+
+func modelRebaseFeature(t *testing.T) (dir, onto string) {
+	t.Helper()
+	dir = t.TempDir()
+	gitRun(t, dir, "init", "-b", "main")
+	gitRun(t, dir, "config", "user.name", "Test")
+	gitRun(t, dir, "config", "user.email", "test@example.com")
+	gitRun(t, dir, "config", "commit.gpgsign", "false")
+	gitRun(t, dir, "config", "rebase.autoStash", "false")
+	writeModelFile(t, dir, "a.txt", "base\n")
+	gitRun(t, dir, "add", "a.txt")
+	gitRun(t, dir, "commit", "-m", "base")
+	gitRun(t, dir, "checkout", "-b", "feature")
+	writeModelFile(t, dir, "b.txt", "feat\n")
+	gitRun(t, dir, "add", "b.txt")
+	gitRun(t, dir, "commit", "-m", "feat")
+	gitRun(t, dir, "checkout", "main")
+	writeModelFile(t, dir, "c.txt", "main\n")
+	gitRun(t, dir, "add", "c.txt")
+	gitRun(t, dir, "commit", "-m", "main")
+	onto = gitOutput(t, dir, "rev-parse", "HEAD")
+	gitRun(t, dir, "checkout", "feature")
+	return dir, onto
+}
+
+func writeModelFile(t *testing.T, dir, name, body string) {
+	t.Helper()
+	if err := os.WriteFile(filepath.Join(dir, name), []byte(body), 0o644); err != nil {
+		t.Fatal(err)
+	}
+}
+
+func modelRebaseInProgress(dir string) bool {
+	for _, name := range []string{"rebase-merge", "rebase-apply"} {
+		if _, err := os.Stat(filepath.Join(dir, ".git", name)); err == nil {
+			return true
+		}
+	}
+	return false
+}

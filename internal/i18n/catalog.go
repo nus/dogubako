@@ -133,6 +133,9 @@ const (
 	GitRenamePrompt     Key = "git.rename_prompt"
 	GitCreateBranch     Key = "git.create_branch"
 	GitBranchPrompt     Key = "git.branch_prompt"
+	GitRebaseOnto       Key = "git.rebase_onto"
+	GitRebase           Key = "git.rebase"
+	GitRebaseAsk        Key = "git.rebase_ask"
 	GitWorkspace        Key = "git.workspace"
 	GitWorkingCopy      Key = "git.working_copy"
 	GitHistory          Key = "git.history"
@@ -307,6 +310,9 @@ const (
 	StatusGitCheckoutFailed Key = "status.git_checkout_failed"
 	StatusGitCheckoutDirty  Key = "status.git_checkout_dirty"
 	StatusGitCheckoutPullOk Key = "status.git_checkout_pull_ok"
+	StatusGitRebaseOk       Key = "status.git_rebase_ok"
+	StatusGitRebaseAlready  Key = "status.git_rebase_already"
+	StatusGitRebaseFailed   Key = "status.git_rebase_failed"
 	StatusGitTagSwitchOk    Key = "status.git_tag_switch_ok"
 	StatusGitTagSwitchErr   Key = "status.git_tag_switch_err"
 	StatusGitDeleteOk       Key = "status.git_delete_ok"
@@ -475,6 +481,9 @@ var catalogs = map[Lang]map[Key]string{
 		GitRenamePrompt:                "新しいブランチ名",
 		GitCreateBranch:                "ブランチを作成",
 		GitBranchPrompt:                "ブランチ名",
+		GitRebaseOnto:                  "このコミットへ rebase",
+		GitRebase:                      "Rebase",
+		GitRebaseAsk:                   "ブランチ %s を %s の上へ rebase しますか？コミットは書き換わります。",
 		GitWorkspace:                   "ワークスペース",
 		GitWorkingCopy:                 "変更",
 		GitHistory:                     "履歴",
@@ -636,6 +645,9 @@ var catalogs = map[Lang]map[Key]string{
 		StatusGitCheckoutFailed:        "ブランチの切り替えに失敗しました: %v",
 		StatusGitCheckoutDirty:         "ローカルの変更が上書きされるため、ブランチを切り替えられません: %v",
 		StatusGitCheckoutPullOk:        "切り替えて pull しました",
+		StatusGitRebaseOk:              "rebase しました",
+		StatusGitRebaseAlready:         "すでにこのコミットの上にあります",
+		StatusGitRebaseFailed:          "rebase に失敗しました: %v",
 		StatusGitTagSwitchOk:           "タグに切り替えました",
 		StatusGitTagSwitchErr:          "タグへの切り替えに失敗しました: %v",
 		StatusGitDeleteOk:              "ブランチを削除しました",
@@ -801,6 +813,9 @@ var catalogs = map[Lang]map[Key]string{
 		GitRenamePrompt:                "New branch name",
 		GitCreateBranch:                "Create branch",
 		GitBranchPrompt:                "Branch name",
+		GitRebaseOnto:                  "Rebase onto this commit",
+		GitRebase:                      "Rebase",
+		GitRebaseAsk:                   "Rebase branch %s onto %s? This rewrites commits.",
 		GitWorkspace:                   "Workspace",
 		GitWorkingCopy:                 "Changes",
 		GitHistory:                     "History",
@@ -962,6 +977,9 @@ var catalogs = map[Lang]map[Key]string{
 		StatusGitCheckoutFailed:        "Could not switch branch: %v",
 		StatusGitCheckoutDirty:         "Cannot switch branch because local changes would be overwritten: %v",
 		StatusGitCheckoutPullOk:        "Checked out and pulled",
+		StatusGitRebaseOk:              "Rebased",
+		StatusGitRebaseAlready:         "Already based on this commit",
+		StatusGitRebaseFailed:          "Could not rebase: %v",
 		StatusGitTagSwitchOk:           "Switched to the tag",
 		StatusGitTagSwitchErr:          "Could not switch to the tag: %v",
 		StatusGitDeleteOk:              "Deleted branch",

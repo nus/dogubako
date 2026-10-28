@@ -1644,9 +1644,12 @@ func (t *GitTool) openCommitMenu(lang i18n.Lang, model *GitModel, hash string) {
 		return
 	}
 	model.SelectCommit(hash)
+	snap := model.Snapshot()
 	t.commitMenu.Open(hash, image.Pt(ebiten.CursorPosition()),
 		i18n.T(lang, i18n.GitCreateBranch),
 		i18n.T(lang, i18n.GitCreateTag),
+		i18n.T(lang, i18n.GitRebaseOnto),
+		commitRebaseDisabled(snap.Detached, snap.Branch, snap.HEAD, hash),
 		func(hash string) {
 			t.rename.Ask(
 				i18n.T(lang, i18n.GitBranchPrompt),
@@ -1663,6 +1666,18 @@ func (t *GitTool) openCommitMenu(lang i18n.Lang, model *GitModel, hash string) {
 				i18n.T(lang, i18n.GitCreateTag),
 				i18n.T(lang, i18n.GitCancel),
 				func(name string, push bool) { model.DoCreateTag(hash, name, push) },
+			)
+		},
+		func(hash string) {
+			snap := model.Snapshot()
+			if commitRebaseDisabled(snap.Detached, snap.Branch, snap.HEAD, hash) {
+				return
+			}
+			t.confirm.Ask(
+				i18n.T(lang, i18n.GitRebaseAsk, snap.Branch, gitcli.Commit{Hash: hash}.Short()),
+				i18n.T(lang, i18n.GitRebase),
+				i18n.T(lang, i18n.GitCancel),
+				func() { model.DoRebase(hash) },
 			)
 		},
 	)

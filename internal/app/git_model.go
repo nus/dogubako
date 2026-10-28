@@ -539,9 +539,20 @@ func (m *gitSession) drainOp() {
 		if res.err != nil {
 			var status statusError
 			if errors.As(res.err, &status) {
-				m.SetStatus(status.key, status.err)
+				if status.err != nil {
+					m.SetStatus(status.key, status.err)
+				} else {
+					m.SetStatus(status.key)
+				}
 				if status.reload {
-					m.reload()
+					if status.quiet {
+						// A history page started before this op must not land
+						// on top of the rebased graph.
+						m.pendingMore = nil
+						m.refresh()
+					} else {
+						m.reload()
+					}
 				}
 			} else {
 				key := res.errKey
@@ -1055,16 +1066,44 @@ func (m *gitSession) DoDeleteRemoteTag(name string) {
 	})
 }
 
-// statusError is an operation failure that uses its own status text.
-// reload asks the session to read the repository again after a partial success.
+// statusError is an operation outcome that uses its own status text.
+// reload asks the session to read the repository again.
+// quiet keeps that status text. The ordinary reload replaces it with the open message.
 type statusError struct {
 	key    i18n.Key
 	err    error
 	reload bool
+	quiet  bool
 }
 
-func (e statusError) Error() string { return e.err.Error() }
+func (e statusError) Error() string {
+	if e.err == nil {
+		return string(e.key)
+	}
+	return e.err.Error()
+}
 func (e statusError) Unwrap() error { return e.err }
+
+// DoRebase replays the current branch onto hash.
+// A detached HEAD, or a request to rebase onto HEAD itself, does nothing.
+func (m *gitSession) DoRebase(hash string) {
+	if !m.HasRepo() || m.Busy() || hash == "" || hash == gitcli.Uncommitted {
+		return
+	}
+	if commitRebaseDisabled(m.snap.Detached, m.snap.Branch, m.snap.HEAD, hash) {
+		return
+	}
+	m.startOp(i18n.StatusGitRebaseOk, i18n.StatusGitRebaseFailed, func(ctx context.Context, repo *gitcli.Repo) error {
+		err := repo.Rebase(ctx, hash)
+		if errors.Is(err, gitcli.ErrRebaseUnchanged) {
+			return statusError{key: i18n.StatusGitRebaseAlready}
+		}
+		if err != nil {
+			return statusError{key: i18n.StatusGitRebaseFailed, err: err, reload: true, quiet: true}
+		}
+		return statusError{key: i18n.StatusGitRebaseOk, reload: true, quiet: true}
+	})
+}
 
 func (m *gitSession) DoCreateBranch(hash, name string) {
 	if !m.HasRepo() || m.Busy() || hash == "" || hash == gitcli.Uncommitted {

@@ -1157,6 +1157,38 @@ func (r *Repo) Checkout(ctx context.Context, ref Ref) error {
 	return r.switchTo(ctx, "switch", "-c", local, "--track", track)
 }
 
+// ErrRebaseUnchanged is returned when rebase exits 0 and HEAD stays on the
+// same commit. The branch was already based on the target.
+var ErrRebaseUnchanged = errors.New("already based on this commit")
+
+// Rebase replays commits that are on the current branch and not reachable
+// from hash, onto that commit. It does not pass -i or --autostash, and it
+// does not abort when git stops on a conflict.
+func (r *Repo) Rebase(ctx context.Context, hash string) error {
+	if err := ctx.Err(); err != nil {
+		return err
+	}
+	hash = strings.TrimSpace(hash)
+	if hash == "" || hash == Uncommitted {
+		return fmt.Errorf("no commit")
+	}
+	before, _, _, beforeOK, err := r.head(ctx)
+	if err != nil {
+		return err
+	}
+	if err := r.run(ctx, "rebase", hash); err != nil {
+		return err
+	}
+	after, _, _, afterOK, err := r.head(ctx)
+	if err != nil {
+		return err
+	}
+	if beforeOK && afterOK && before == after {
+		return ErrRebaseUnchanged
+	}
+	return nil
+}
+
 func (r *Repo) switchTo(ctx context.Context, args ...string) error {
 	err := r.run(ctx, args...)
 	if checkoutWouldOverwrite(err) {
