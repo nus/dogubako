@@ -111,6 +111,11 @@ type gitSession struct {
 
 	// reveal is a commit hash the graph should scroll into view. Empty means none.
 	reveal string
+
+	console       gitConsoleLog
+	consoleSeen   bool
+	consoleFollow bool
+	consoleOffset float64
 }
 
 type gitStatusResult struct {
@@ -322,6 +327,7 @@ func (m *gitSession) loadMoreHistory() {
 }
 
 func (m *gitSession) Drain() {
+	m.drainConsole()
 	m.drainLoad()
 	m.drainMore()
 	m.drainOp()
@@ -450,6 +456,7 @@ func (m *gitSession) drainLoad() {
 			return
 		}
 		m.repo = res.repo
+		m.watchCommands(res.repo)
 		if res.repo.IsRemote() {
 			m.path = res.repo.Key()
 		} else {
