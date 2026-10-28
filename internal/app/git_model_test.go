@@ -271,10 +271,21 @@ func TestGitModelHistoryPages(t *testing.T) {
 	if m.Snapshot().Commits[0].Subject != "c4" {
 		t.Fatalf("newest = %q", m.Snapshot().Commits[0].Subject)
 	}
+	rev := m.GraphRev()
+	if rev == 0 {
+		t.Fatal("opening a repository did not publish a graph")
+	}
+	m.SelectCommit(m.Snapshot().Commits[1].Hash)
+	if m.GraphRev() != rev {
+		t.Fatal("selecting a commit replaced the graph")
+	}
 	m.LoadMoreHistory()
 	waitGit(t, &m)
 	if len(m.Snapshot().Commits) != 4 || !m.HasMoreHistory() {
 		t.Fatalf("second page commits=%d more=%v", len(m.Snapshot().Commits), m.HasMoreHistory())
+	}
+	if m.GraphRev() == rev {
+		t.Fatal("the next page did not publish a new graph")
 	}
 	if m.Snapshot().Commits[0].Subject != "c4" || m.Snapshot().Commits[3].Subject != "c1" {
 		t.Fatalf("subjects = %q … %q", m.Snapshot().Commits[0].Subject, m.Snapshot().Commits[3].Subject)

@@ -79,6 +79,10 @@ type GitModel struct {
 type gitSession struct {
 	owner      *GitModel
 	generation uint64
+	// graphRev changes when the commit graph is replaced.
+	// Selection, the draft, and a history page that is still in flight leave it
+	// alone, so the list can keep the rows already on screen.
+	graphRev uint64
 
 	path     string
 	repo     *gitcli.Repo
@@ -148,7 +152,11 @@ func (m *gitSession) HasRepo() bool {
 	return m.repo != nil && m.path != ""
 }
 func (m *gitSession) Snapshot() gitcli.Snapshot { return m.snap }
-func (m *gitSession) Selected() string          { return m.sel }
+
+// GraphRev is the commit-graph revision. It changes when the loaded graph is
+// replaced, not when the selection or draft changes.
+func (m *gitSession) GraphRev() uint64 { return m.graphRev }
+func (m *gitSession) Selected() string { return m.sel }
 func (m *gitSession) Detail() gitcli.CommitDetail {
 	return m.detail
 }
@@ -394,6 +402,7 @@ func (m *gitSession) applyWatched(st gitcli.State) {
 	m.snap.Detached = st.Status.Detached || m.snap.Branch == ""
 	if wasDirty != st.Status.Dirty() {
 		gitcli.ApplyWorkTree(&m.snap)
+		m.graphRev++
 	}
 	m.generation++
 	guigui.RequestRebuild()
@@ -505,6 +514,7 @@ func (m *gitSession) drainMore() {
 
 func (m *gitSession) applySnap(snap gitcli.Snapshot) {
 	m.snap = snap
+	m.graphRev++
 	m.histMore = snap.MoreCommits
 	if m.sel == "" && snap.HEAD != "" {
 		m.sel = snap.HEAD
