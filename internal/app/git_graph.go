@@ -175,6 +175,41 @@ func (g *gitGraphGlyph) Set(row gitcli.GraphRow, lanes int, head, expandAbove, e
 	g.expandBelow = expandBelow
 }
 
+// same reports that Set would leave the glyph as it already is.
+func (g *gitGraphGlyph) same(row gitcli.GraphRow, lanes int, head, expandAbove, expandBelow bool) bool {
+	if g.lanes != lanes || g.head != head || g.expandAbove != expandAbove || g.expandBelow != expandBelow {
+		return false
+	}
+	if g.row.Lane != row.Lane || g.row.Color != row.Color || g.row.Commit.Hash != row.Commit.Hash || g.row.Commit.Subject != row.Commit.Subject || g.row.Commit.Author != row.Commit.Author || !g.row.Commit.When.Equal(row.Commit.When) {
+		return false
+	}
+	return edgesSame(g.row.Incoming, row.Incoming) && edgesSame(g.row.Outgoing, row.Outgoing) && decosSame(g.row.Commit.Decorations, row.Commit.Decorations)
+}
+
+func edgesSame(a, b []gitcli.Edge) bool {
+	if len(a) != len(b) {
+		return false
+	}
+	for i := range a {
+		if a[i] != b[i] {
+			return false
+		}
+	}
+	return true
+}
+
+func decosSame(a, b []gitcli.Decoration) bool {
+	if len(a) != len(b) {
+		return false
+	}
+	for i := range a {
+		if a[i] != b[i] {
+			return false
+		}
+	}
+	return true
+}
+
 func (g *gitGraphGlyph) WriteStateKey(context *guigui.Context, w *guigui.StateKeyWriter) {
 	w.WriteString(g.row.Commit.Hash)
 	w.WriteInt(g.row.Lane)
@@ -1109,10 +1144,6 @@ type gitCommitRow struct {
 	author      basicwidget.Text
 	hash        basicwidget.Text
 	date        basicwidget.Text
-	graphUnits  float64
-	authorUnits float64
-	hashUnits   float64
-	dateUnits   float64
 	uncommitted bool
 
 	layoutItems []guigui.LinearLayoutItem
@@ -1175,8 +1206,15 @@ func (r *gitCommitRow) layoutRow(context *guigui.Context, rowW int) guigui.Linea
 	if n < 1 {
 		n = 1
 	}
-	graphW := gitGraphColWidth(rowW, u, n, preferGraphUnits(r.graphUnits))
-	authorU, hashU, dateU := preferMetaUnits(r.authorUnits, r.hashUnits, r.dateUnits)
+	var graphU, authorU, hashU, dateU float64
+	if r.tool != nil {
+		graphU = r.tool.graphUnits
+		authorU = r.tool.authorUnits
+		hashU = r.tool.hashUnits
+		dateU = r.tool.dateUnits
+	}
+	graphW := gitGraphColWidth(rowW, u, n, preferGraphUnits(graphU))
+	authorU, hashU, dateU = preferMetaUnits(authorU, hashU, dateU)
 	authorW, hashW, dateW := gitMetaColWidths(rowW, u, graphW, authorU, hashU, dateU)
 	r.layoutItems = slices.Delete(r.layoutItems, 0, len(r.layoutItems))
 	r.layoutItems = append(r.layoutItems,
@@ -1332,16 +1370,19 @@ func (h *gitCommitHeader) Measure(context *guigui.Context, constraints guigui.Co
 }
 
 func (r *gitCommitRow) Measure(context *guigui.Context, constraints guigui.Constraints) image.Point {
+	// Subjects do not wrap, so every commit row is one unit tall.
+	// Measuring the texts would shape them again whenever the window width
+	// changes, including rows that are only in the list's off-screen sample.
 	u := basicwidget.UnitSize(context)
-	rowW := 0
-	if w, ok := constraints.FixedWidth(); ok {
-		rowW = w
+	w := u
+	if fixed, ok := constraints.FixedWidth(); ok && fixed > 0 {
+		w = fixed
 	}
-	s := r.layoutRow(context, rowW).Measure(context, constraints)
-	if s.Y < u {
-		s.Y = u
+	h := u
+	if fixed, ok := constraints.FixedHeight(); ok && fixed > 0 {
+		h = fixed
 	}
-	return s
+	return image.Pt(w, h)
 }
 
 // branchSwitchRef is the branch a graph badge switches to. A merged badge
@@ -1463,9 +1504,6 @@ func (s *gitGraphSplit) Draw(context *guigui.Context, widgetBounds *guigui.Widge
 func (t *GitTool) setGraphUnits(units float64) {
 	changed := units != t.graphUnits
 	t.graphUnits = units
-	for i := 0; i < t.commitRows.Len(); i++ {
-		t.commitRows.At(i).graphUnits = units
-	}
 	t.expand.graphUnits = units
 	if changed {
 		rememberGitGraphUnits(units)
@@ -1520,9 +1558,6 @@ func (t *GitTool) ensureGraphWidth() {
 	}
 	if u := preferredGitGraphUnits(); u > 0 {
 		t.graphUnits = u
-		for i := 0; i < t.commitRows.Len(); i++ {
-			t.commitRows.At(i).graphUnits = u
-		}
 		t.expand.graphUnits = u
 	}
 	t.ensureMetaWidths()
@@ -1542,18 +1577,6 @@ func (t *GitTool) ensureMetaWidths() {
 	}
 	if t.dateUnits == 0 {
 		t.dateUnits = date
-	}
-	for i := 0; i < t.commitRows.Len(); i++ {
-		r := t.commitRows.At(i)
-		if r.authorUnits == 0 {
-			r.authorUnits = t.authorUnits
-		}
-		if r.hashUnits == 0 {
-			r.hashUnits = t.hashUnits
-		}
-		if r.dateUnits == 0 {
-			r.dateUnits = t.dateUnits
-		}
 	}
 }
 
@@ -1653,12 +1676,6 @@ func (t *GitTool) applyMetaUnits(author, hash, date float64) {
 	t.authorUnits = author
 	t.hashUnits = hash
 	t.dateUnits = date
-	for i := 0; i < t.commitRows.Len(); i++ {
-		r := t.commitRows.At(i)
-		r.authorUnits = author
-		r.hashUnits = hash
-		r.dateUnits = date
-	}
 	if changed {
 		rememberGitMetaUnits(author, hash, date)
 	}

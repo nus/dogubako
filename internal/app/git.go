@@ -63,9 +63,26 @@ type GitTool struct {
 	// refFilter narrows branches, tags, and remote branches in the sidebar.
 	refFilter string
 
-	commitList     basicwidget.List[string]
-	commitRows     guigui.WidgetSlice[*gitCommitRow]
-	commitItems    []basicwidget.ListItem[string]
+	commitList  basicwidget.List[string]
+	commitRows  guigui.WidgetSlice[*gitCommitRow]
+	commitItems []basicwidget.ListItem[string]
+	// commitReady reports that commitRows already show commitRev for commitPath.
+	// A resize or scroll rebuilds the tree, and those stay cheap while this matches.
+	commitReady    bool
+	commitRev      uint64
+	commitPath     string
+	commitLang     i18n.Lang
+	commitOpen     string
+	commitSel      string
+	commitOpenAt   int
+	expandSet      bool
+	expandRev      uint64
+	expandLang     i18n.Lang
+	expandOpen     string
+	expandFile     string
+	expandDetail   string
+	expandDetached bool
+	expandLanes    int
 	graphEmpty     basicwidget.Text
 	showEmpty      bool
 	openHash       string
@@ -442,65 +459,18 @@ func (t *GitTool) Build(context *guigui.Context, adder *guigui.ChildAdder) error
 		t.histStack.showDiff = false
 		adder.AddWidget(&t.histStack)
 	} else if !t.commitView {
-		if t.openHash != "" {
-			found := false
-			for _, row := range rows {
-				if row.Commit.Hash == t.openHash {
-					found = true
-					break
-				}
-			}
-			if !found {
-				t.openHash = ""
-			}
-		}
-		t.syncHistFile()
-		t.commitRows.SetLen(len(rows))
-		t.commitItems = slices.Delete(t.commitItems, 0, len(t.commitItems))
-		lanes := snap.Lanes
-		if lanes < 1 {
-			lanes = 1
-		}
-		t.graphLanes = lanes
-		for i, row := range rows {
-			r := t.commitRows.At(i)
-			r.tool = t
-			r.Set(row, lanes, row.Commit.Hash == snap.HEAD, i > 0 && rows[i-1].Commit.Hash == t.openHash, row.Commit.Hash == t.openHash, lang, func(ref gitcli.Ref) {
-				t.switchBranch(lang, model, ref)
-			}, onMenu)
-			r.graphUnits = t.graphUnits
-			r.authorUnits = t.authorUnits
-			r.hashUnits = t.hashUnits
-			r.dateUnits = t.dateUnits
-			t.commitItems = append(t.commitItems, basicwidget.ListItem[string]{
-				Content: r,
-				Value:   row.Commit.Hash,
-			})
-			if row.Commit.Hash == t.openHash {
-				opened := row
-				t.expand.tool = t
-				t.expand.Set(lang, model, opened, lanes, t.histFile, func(hash string) {
-					t.openHash = hash
-					t.revealCommit(model, hash)
-				}, func(path string) {
-					t.histFile = path
-					t.histFor = t.openHash
-					guigui.RequestRebuild()
-				})
-				t.expand.graphUnits = t.graphUnits
-				t.commitItems = append(t.commitItems, basicwidget.ListItem[string]{
-					Content:      &t.expand,
-					Unselectable: true,
-				})
-			}
-		}
+		rebuilt := t.syncCommitRows(lang, model, snap, onMenu)
 		t.commitList.SetStyle(basicwidget.ListStyleNormal)
 		t.commitList.SetHighlightVisibleWhenUnfocused(true)
 		t.commitList.SetHeaderHeight(gitCommitHeaderHeight(basicwidget.UnitSize(context)))
-		t.commitList.SetItems(t.commitItems)
+		if rebuilt {
+			t.commitList.SetItems(t.commitItems)
+			t.commitSel = ""
+		}
 		t.histStack.header.SetLang(lang)
-		if sel := model.Selected(); sel != "" {
+		if sel := model.Selected(); sel != "" && sel != t.commitSel {
 			t.commitList.SelectItemByValue(sel)
+			t.commitSel = sel
 		}
 		if reveal := model.TakeReveal(); reveal != "" {
 			if idx := t.commitList.IndexByValue(reveal); idx >= 0 {
@@ -832,6 +802,105 @@ func nextGraphCommit(n int, commit func(int) bool, from int, down bool) int {
 		}
 	}
 	return from
+}
+
+// syncCommitRows fills the commit list when the graph, the open row, or the
+// language changed. A later rebuild, such as a window resize or a scroll,
+// leaves the existing rows in place.
+func (t *GitTool) syncCommitRows(lang i18n.Lang, model *GitModel, snap gitcli.Snapshot, onMenu func(gitcli.Ref)) bool {
+	rows := snap.Graph
+	lanes := snap.Lanes
+	if lanes < 1 {
+		lanes = 1
+	}
+	if t.commitReady && t.commitRev == model.GraphRev() && t.commitPath == model.Path() && t.commitLang == lang && t.commitOpen == t.openHash {
+		t.graphLanes = lanes
+		if t.openHash != "" && t.commitOpenAt >= 0 && t.commitOpenAt < len(rows) {
+			t.syncExpand(lang, model, rows[t.commitOpenAt], lanes, snap.Detached)
+		}
+		return false
+	}
+	if t.openHash != "" {
+		found := false
+		for _, row := range rows {
+			if row.Commit.Hash == t.openHash {
+				found = true
+				break
+			}
+		}
+		if !found {
+			t.openHash = ""
+		}
+	}
+	t.syncHistFile()
+	t.graphLanes = lanes
+	t.commitRows.SetLen(len(rows))
+	t.commitItems = slices.Delete(t.commitItems, 0, len(t.commitItems))
+	t.commitOpenAt = -1
+	onSwitch := func(ref gitcli.Ref) {
+		t.switchBranch(lang, model, ref)
+	}
+	force := t.commitLang != lang
+	for i, row := range rows {
+		r := t.commitRows.At(i)
+		r.tool = t
+		head := row.Commit.Hash == snap.HEAD
+		above := i > 0 && rows[i-1].Commit.Hash == t.openHash
+		below := row.Commit.Hash == t.openHash
+		if force || row.Commit.Hash == gitcli.Uncommitted || !r.graph.same(row, lanes, head, above, below) {
+			r.Set(row, lanes, head, above, below, lang, onSwitch, onMenu)
+		}
+		t.commitItems = append(t.commitItems, basicwidget.ListItem[string]{
+			Content: r,
+			Value:   row.Commit.Hash,
+		})
+		if !below {
+			continue
+		}
+		t.commitOpenAt = i
+		t.syncExpand(lang, model, row, lanes, snap.Detached)
+		t.commitItems = append(t.commitItems, basicwidget.ListItem[string]{
+			Content:      &t.expand,
+			Unselectable: true,
+		})
+	}
+	t.commitReady = true
+	t.commitRev = model.GraphRev()
+	t.commitPath = model.Path()
+	t.commitLang = lang
+	t.commitOpen = t.openHash
+	return true
+}
+
+// syncExpand refreshes the open commit's detail when its inputs changed.
+// Column widths are read from the tool at layout time, so a drag does not
+// rebuild this panel.
+func (t *GitTool) syncExpand(lang i18n.Lang, model *GitModel, row gitcli.GraphRow, lanes int, detached bool) {
+	t.expand.graphUnits = t.graphUnits
+	t.expand.tool = t
+	detail := ""
+	if model != nil {
+		detail = model.Detail().Hash
+	}
+	if t.expandSet && t.expandRev == model.GraphRev() && t.expandLang == lang && t.expandOpen == row.Commit.Hash && t.expandFile == t.histFile && t.expandDetail == detail && t.expandDetached == detached && t.expandLanes == lanes {
+		return
+	}
+	t.expand.Set(lang, model, row, lanes, t.histFile, func(hash string) {
+		t.openHash = hash
+		t.revealCommit(model, hash)
+	}, func(path string) {
+		t.histFile = path
+		t.histFor = t.openHash
+		guigui.RequestRebuild()
+	})
+	t.expandSet = true
+	t.expandRev = model.GraphRev()
+	t.expandLang = lang
+	t.expandOpen = row.Commit.Hash
+	t.expandFile = t.histFile
+	t.expandDetail = detail
+	t.expandDetached = detached
+	t.expandLanes = lanes
 }
 
 func (t *GitTool) syncHistFile() {

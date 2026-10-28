@@ -7,6 +7,7 @@ import (
 	"testing"
 
 	"github.com/nus/dogubako/internal/gitcli"
+	"github.com/nus/dogubako/internal/i18n"
 )
 
 func TestGitGraphColWidth(t *testing.T) {
@@ -423,6 +424,66 @@ func TestHistoryEndHold(t *testing.T) {
 	tool.trackHistoryEnd("other")
 	if tool.holdHistoryEnd(true, false) {
 		t.Fatal("another repository should release")
+	}
+}
+
+func TestSyncCommitRowsSkipsUnchangedGraph(t *testing.T) {
+	commits := []gitcli.Commit{
+		{Hash: "bbbbbbbb", Subject: "second", Author: "A"},
+		{Hash: "aaaaaaaa", Subject: "first", Author: "A"},
+	}
+	rows := gitcli.LayoutGraph(commits, "bbbbbbbb")
+	var model GitModel
+	model.ensure()
+	model.path = "repo"
+	model.repo = &gitcli.Repo{Dir: "repo"}
+	model.graphRev = 3
+	model.snap = gitcli.Snapshot{
+		HEAD:    "bbbbbbbb",
+		Commits: commits,
+		Graph:   rows,
+		Lanes:   gitcli.LaneCount(rows),
+	}
+
+	var tool GitTool
+	if !tool.syncCommitRows(i18n.EN, &model, model.snap, nil) {
+		t.Fatal("first fill")
+	}
+	if n := len(tool.commitItems); n != 2 {
+		t.Fatalf("items = %d", n)
+	}
+	first := tool.commitRows.At(0)
+	if tool.syncCommitRows(i18n.EN, &model, model.snap, nil) {
+		t.Fatal("unchanged graph should keep the rows")
+	}
+	if tool.commitRows.At(0) != first {
+		t.Fatal("unchanged graph rebuilt the first row")
+	}
+
+	tool.openHash = "aaaaaaaa"
+	if !tool.syncCommitRows(i18n.EN, &model, model.snap, nil) {
+		t.Fatal("opening a commit should insert the detail row")
+	}
+	if n := len(tool.commitItems); n != 3 {
+		t.Fatalf("open items = %d", n)
+	}
+	if tool.syncCommitRows(i18n.EN, &model, model.snap, nil) {
+		t.Fatal("open detail should stay put")
+	}
+
+	more := append(commits, gitcli.Commit{Hash: "cccccccc", Subject: "older", Author: "A"})
+	model.snap.Commits = more
+	model.snap.Graph = gitcli.LayoutGraph(more, "bbbbbbbb")
+	model.snap.Lanes = gitcli.LaneCount(model.snap.Graph)
+	model.graphRev++
+	if !tool.syncCommitRows(i18n.EN, &model, model.snap, nil) {
+		t.Fatal("next page")
+	}
+	if tool.commitRows.At(0) != first {
+		t.Fatal("next page rebuilt the first row")
+	}
+	if tool.commitRows.Len() != 3 || len(tool.commitItems) != 4 {
+		t.Fatalf("rows = %d items = %d", tool.commitRows.Len(), len(tool.commitItems))
 	}
 }
 
