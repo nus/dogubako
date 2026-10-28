@@ -150,7 +150,6 @@ type GitTool struct {
 	workPanes   gitWorkPanes
 	msgInput    guigui.WidgetWithSize[*basicwidget.TextInput]
 	status      basicwidget.Text
-	hint        basicwidget.Text
 	// consoleOpen lasts for this launch. The next launch starts closed.
 	consoleOpen   bool
 	consoleToggle gitConsoleToggle
@@ -254,7 +253,6 @@ func (t *GitTool) Build(context *guigui.Context, adder *guigui.ChildAdder) error
 		adder.AddWidget(&t.pushBtn)
 	}
 	adder.AddWidget(&t.status)
-	adder.AddWidget(&t.hint)
 	adder.AddWidget(&t.consoleToggle)
 	if t.consoleOpen {
 		adder.AddWidget(&t.console)
@@ -568,8 +566,6 @@ func (t *GitTool) Build(context *guigui.Context, adder *guigui.ChildAdder) error
 	t.status.SetVerticalAlign(basicwidget.VerticalAlignMiddle)
 	t.status.SetEllipsisString("…")
 	t.status.SetWrapMode(basicwidget.WrapModeNone)
-	t.hint.SetValue(i18n.T(lang, i18n.GitHint))
-	t.hint.SetVerticalAlign(basicwidget.VerticalAlignMiddle)
 	t.consoleToggle.set(context, lang, t.consoleOpen, func(*guigui.Context) {
 		t.consoleOpen = !t.consoleOpen
 		guigui.RequestRebuild()
@@ -877,7 +873,6 @@ func (t *GitTool) layoutHistoryColumn(u int) {
 	t.layoutStatusRow(u)
 	t.rightItems = append(t.rightItems,
 		guigui.LinearLayoutItem{Layout: &t.statusRow, Size: guigui.FixedSize(u * 3 / 4)},
-		guigui.LinearLayoutItem{Widget: &t.hint, Size: guigui.FixedSize(u * 3 / 4)},
 	)
 	t.rightCol = guigui.LinearLayout{Direction: guigui.LayoutDirectionVertical, Items: t.rightItems, Gap: u / 6}
 }
@@ -906,7 +901,6 @@ func (t *GitTool) layoutCommitColumn(u int) {
 	t.rightItems = append(t.rightItems,
 		guigui.LinearLayoutItem{Widget: &t.workPanes, Size: guigui.FlexibleSize(1)},
 		guigui.LinearLayoutItem{Layout: &t.statusRow, Size: guigui.FixedSize(u * 3 / 4)},
-		guigui.LinearLayoutItem{Widget: &t.hint, Size: guigui.FixedSize(u * 3 / 4)},
 	)
 	t.rightCol = guigui.LinearLayout{Direction: guigui.LayoutDirectionVertical, Items: t.rightItems, Gap: u / 6}
 }
