@@ -527,6 +527,7 @@ func (r *Repo) Unstage(ctx context.Context, paths []string) error {
 // Discard throws away changes to paths.
 // staged restores the index and the worktree to HEAD.
 // Otherwise the worktree is restored to the index, and untracked paths are deleted.
+// A submodule is checked out at that commit, and untracked files inside it are removed.
 func (r *Repo) Discard(ctx context.Context, paths []string, staged bool) error {
 	if err := ctx.Err(); err != nil {
 		return err
@@ -550,8 +551,21 @@ func (r *Repo) discardIndex(ctx context.Context, paths []string) error {
 		args := append([]string{"rm", "-f", "--"}, paths...)
 		return r.run(ctx, args...)
 	}
-	args := append([]string{"restore", "--source=HEAD", "--staged", "--worktree", "--"}, paths...)
-	return r.run(ctx, args...)
+	subs, err := r.submodulePaths(ctx, paths, true)
+	if err != nil {
+		return err
+	}
+	args := []string{"restore", "--source=HEAD", "--staged", "--worktree"}
+	// Without --recurse-submodules, restore only rewrites the parent's gitlink.
+	if len(subs) > 0 {
+		args = append(args, "--recurse-submodules")
+	}
+	args = append(args, "--")
+	args = append(args, paths...)
+	if err := r.run(ctx, args...); err != nil {
+		return err
+	}
+	return r.cleanSubmodules(ctx, subs)
 }
 
 func (r *Repo) discardWorktree(ctx context.Context, paths []string) error {
@@ -559,8 +573,18 @@ func (r *Repo) discardWorktree(ctx context.Context, paths []string) error {
 	if err != nil {
 		return err
 	}
+	var subs []string
 	if len(tracked) > 0 {
-		args := append([]string{"restore", "--worktree", "--"}, tracked...)
+		subs, err = r.submodulePaths(ctx, tracked, false)
+		if err != nil {
+			return err
+		}
+		args := []string{"restore", "--worktree"}
+		if len(subs) > 0 {
+			args = append(args, "--recurse-submodules")
+		}
+		args = append(args, "--")
+		args = append(args, tracked...)
 		if err := r.run(ctx, args...); err != nil {
 			return err
 		}
@@ -568,6 +592,62 @@ func (r *Repo) discardWorktree(ctx context.Context, paths []string) error {
 	if len(untracked) > 0 {
 		args := append([]string{"clean", "-f", "--"}, untracked...)
 		if err := r.run(ctx, args...); err != nil {
+			return err
+		}
+	}
+	return r.cleanSubmodules(ctx, subs)
+}
+
+// submodulePaths returns paths recorded as gitlinks.
+// head also looks at HEAD, so a staged deletion is included.
+func (r *Repo) submodulePaths(ctx context.Context, paths []string, head bool) ([]string, error) {
+	if len(paths) == 0 {
+		return nil, nil
+	}
+	indexed, err := r.output(ctx, append([]string{"ls-files", "-z", "-s", "--"}, paths...)...)
+	if err != nil {
+		return nil, err
+	}
+	have := gitlinkPaths(indexed)
+	if have == nil {
+		have = make(map[string]bool)
+	}
+	if head {
+		tree, err := r.output(ctx, append([]string{"ls-tree", "-z", "HEAD", "--"}, paths...)...)
+		if err != nil {
+			return nil, err
+		}
+		for p := range gitlinkPaths(tree) {
+			have[p] = true
+		}
+	}
+	var subs []string
+	for _, p := range paths {
+		if have[p] {
+			subs = append(subs, p)
+		}
+	}
+	return subs, nil
+}
+
+// cleanSubmodules removes untracked files inside submodule checkouts.
+// restore --recurse-submodules resets the checked-out commit and tracked
+// files, and leaves untracked files. Those still show the submodule as
+// modified in the parent. A path that is not a checkout is left alone.
+func (r *Repo) cleanSubmodules(ctx context.Context, paths []string) error {
+	for _, p := range paths {
+		cleaned, ok := cleanSubmodulePath(p)
+		if !ok {
+			return fmt.Errorf("invalid submodule path")
+		}
+		own, err := r.OwnWorkTree(ctx, cleaned)
+		if err != nil {
+			return err
+		}
+		if !own {
+			continue
+		}
+		if err := r.run(ctx, "-C", cleaned, "clean", "-fd"); err != nil {
 			return err
 		}
 	}

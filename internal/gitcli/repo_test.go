@@ -1157,6 +1157,395 @@ func TestDiscardAddedAndRename(t *testing.T) {
 	}
 }
 
+func initParentWithSubmodule(t *testing.T) (parent, rel string) {
+	t.Helper()
+	lib := initRepo(t)
+	writeCommit(t, lib, "a.txt", "base")
+	parent = initRepo(t)
+	writeCommit(t, parent, "r.txt", "root")
+	rel = "vendor/lib"
+	gitAt(t, parent, "-c", "protocol.file.allow=always", "submodule", "add", "--", lib, rel)
+	gitAt(t, parent, "commit", "-m", "add submodule")
+	return parent, rel
+}
+
+func TestDiscardSubmodule(t *testing.T) {
+	parent, rel := initParentWithSubmodule(t)
+	work := filepath.Join(parent, filepath.FromSlash(rel))
+	file := filepath.Join(work, "a.txt")
+	extra := filepath.Join(work, "extra.txt")
+
+	ctx, cancel := context.WithTimeout(context.Background(), 30*time.Second)
+	defer cancel()
+	repo, err := Open(ctx, parent)
+	if err != nil {
+		t.Fatal(err)
+	}
+	recorded := strings.TrimSpace(gitAt(t, parent, "rev-parse", "HEAD:"+rel))
+
+	if err := os.WriteFile(file, []byte("dirty\n"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	if err := repo.Discard(ctx, []string{rel}, false); err != nil {
+		t.Fatal(err)
+	}
+	body, err := os.ReadFile(file)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if string(body) != "base\n" {
+		t.Fatalf("tracked discard = %q", body)
+	}
+	st, err := repo.Status(ctx)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if st.Dirty() {
+		t.Fatalf("status after tracked discard: %v", st.Entries)
+	}
+
+	if err := os.WriteFile(extra, []byte("extra\n"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	nested := filepath.Join(work, "nested")
+	if err := os.MkdirAll(nested, 0o755); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(filepath.Join(nested, "z.txt"), []byte("z\n"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	st, err = repo.Status(ctx)
+	if err != nil {
+		t.Fatal(err)
+	}
+	assertEntry(t, st, rel, false, true)
+	if err := repo.Discard(ctx, []string{rel}, false); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := os.Stat(extra); !os.IsNotExist(err) {
+		t.Fatalf("untracked file remains: %v", err)
+	}
+	if _, err := os.Stat(nested); !os.IsNotExist(err) {
+		t.Fatalf("untracked directory remains: %v", err)
+	}
+	st, err = repo.Status(ctx)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if st.Dirty() {
+		t.Fatalf("status after untracked discard: %v", st.Entries)
+	}
+
+	writeCommit(t, work, "a.txt", "next")
+	if strings.TrimSpace(gitAt(t, work, "rev-parse", "HEAD")) == recorded {
+		t.Fatal("submodule commit did not move")
+	}
+	if err := repo.Discard(ctx, []string{rel}, false); err != nil {
+		t.Fatal(err)
+	}
+	if got := strings.TrimSpace(gitAt(t, work, "rev-parse", "HEAD")); got != recorded {
+		t.Fatalf("submodule HEAD = %s, want %s", got, recorded)
+	}
+	body, err = os.ReadFile(file)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if string(body) != "base\n" {
+		t.Fatalf("commit discard = %q", body)
+	}
+	st, err = repo.Status(ctx)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if st.Dirty() {
+		t.Fatalf("status after commit discard: %v", st.Entries)
+	}
+
+	writeCommit(t, work, "a.txt", "next")
+	gitAt(t, parent, "add", rel)
+	if err := os.WriteFile(file, []byte("dirtier\n"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(extra, []byte("extra\n"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	index := strings.TrimSpace(gitAt(t, parent, "rev-parse", ":"+rel))
+	if index == recorded {
+		t.Fatal("index gitlink did not move")
+	}
+	if err := repo.Discard(ctx, []string{rel}, false); err != nil {
+		t.Fatal(err)
+	}
+	if got := strings.TrimSpace(gitAt(t, work, "rev-parse", "HEAD")); got != index {
+		t.Fatalf("unstaged discard HEAD = %s, want index %s", got, index)
+	}
+	body, err = os.ReadFile(file)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if string(body) != "next\n" {
+		t.Fatalf("unstaged discard content = %q", body)
+	}
+	if _, err := os.Stat(extra); !os.IsNotExist(err) {
+		t.Fatalf("untracked file remains after unstaged discard: %v", err)
+	}
+	st, err = repo.Status(ctx)
+	if err != nil {
+		t.Fatal(err)
+	}
+	assertEntry(t, st, rel, true, false)
+	if len(st.Entries) != 1 {
+		t.Fatalf("status after unstaged discard: %v", st.Entries)
+	}
+
+	if err := repo.Discard(ctx, []string{rel}, true); err != nil {
+		t.Fatal(err)
+	}
+	if got := strings.TrimSpace(gitAt(t, work, "rev-parse", "HEAD")); got != recorded {
+		t.Fatalf("staged discard HEAD = %s, want %s", got, recorded)
+	}
+	body, err = os.ReadFile(file)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if string(body) != "base\n" {
+		t.Fatalf("staged discard content = %q", body)
+	}
+	st, err = repo.Status(ctx)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if st.Dirty() {
+		t.Fatalf("status after staged discard: %v", st.Entries)
+	}
+
+	writeCommit(t, work, "a.txt", "next")
+	gitAt(t, parent, "add", rel)
+	if err := os.WriteFile(file, []byte("dirtier\n"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(extra, []byte("extra\n"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	if err := repo.Discard(ctx, []string{rel}, true); err != nil {
+		t.Fatal(err)
+	}
+	if got := strings.TrimSpace(gitAt(t, work, "rev-parse", "HEAD")); got != recorded {
+		t.Fatalf("staged dirty discard HEAD = %s, want %s", got, recorded)
+	}
+	body, err = os.ReadFile(file)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if string(body) != "base\n" {
+		t.Fatalf("staged dirty discard content = %q", body)
+	}
+	if _, err := os.Stat(extra); !os.IsNotExist(err) {
+		t.Fatalf("untracked file remains after staged discard: %v", err)
+	}
+	st, err = repo.Status(ctx)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if st.Dirty() {
+		t.Fatalf("status after staged dirty discard: %v", st.Entries)
+	}
+
+	if err := os.WriteFile(filepath.Join(parent, "r.txt"), []byte("changed\n"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(file, []byte("dirty\n"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	if err := repo.Discard(ctx, []string{"r.txt"}, false); err != nil {
+		t.Fatal(err)
+	}
+	body, err = os.ReadFile(filepath.Join(parent, "r.txt"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	if string(body) != "root\n" {
+		t.Fatalf("file discard = %q", body)
+	}
+	body, err = os.ReadFile(file)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if string(body) != "dirty\n" {
+		t.Fatalf("submodule changed while discarding a file: %q", body)
+	}
+	st, err = repo.Status(ctx)
+	if err != nil {
+		t.Fatal(err)
+	}
+	assertEntry(t, st, rel, false, true)
+	if err := repo.Discard(ctx, []string{rel}, false); err != nil {
+		t.Fatal(err)
+	}
+	st, err = repo.Status(ctx)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if st.Dirty() {
+		t.Fatalf("status after file and submodule discard: %v", st.Entries)
+	}
+}
+
+func TestDiscardSelectedSubmodules(t *testing.T) {
+	parent, rel := initParentWithSubmodule(t)
+	lib2 := initRepo(t)
+	writeCommit(t, lib2, "b.txt", "two")
+	keepLib := initRepo(t)
+	writeCommit(t, keepLib, "c.txt", "keep")
+	other := "vendor/other"
+	keep := "vendor/keep"
+	gitAt(t, parent, "-c", "protocol.file.allow=always", "submodule", "add", "--", lib2, other)
+	gitAt(t, parent, "-c", "protocol.file.allow=always", "submodule", "add", "--", keepLib, keep)
+	gitAt(t, parent, "commit", "-m", "add more submodules")
+
+	libWork := filepath.Join(parent, filepath.FromSlash(rel))
+	otherWork := filepath.Join(parent, filepath.FromSlash(other))
+	keepWork := filepath.Join(parent, filepath.FromSlash(keep))
+	recordedOther := strings.TrimSpace(gitAt(t, parent, "rev-parse", "HEAD:"+other))
+
+	ctx, cancel := context.WithTimeout(context.Background(), 30*time.Second)
+	defer cancel()
+	repo, err := Open(ctx, parent)
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	if err := os.WriteFile(filepath.Join(libWork, "a.txt"), []byte("dirty\n"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(filepath.Join(libWork, "extra.txt"), []byte("extra\n"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	writeCommit(t, otherWork, "b.txt", "next")
+	nested := filepath.Join(otherWork, "nested")
+	if err := os.MkdirAll(nested, 0o755); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(filepath.Join(nested, "z.txt"), []byte("z\n"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(filepath.Join(parent, "r.txt"), []byte("changed\n"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(filepath.Join(parent, "new.txt"), []byte("new\n"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(filepath.Join(keepWork, "c.txt"), []byte("dirty\n"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+
+	if err := repo.Discard(ctx, []string{rel, other, "r.txt", "new.txt"}, false); err != nil {
+		t.Fatal(err)
+	}
+	body, err := os.ReadFile(filepath.Join(libWork, "a.txt"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	if string(body) != "base\n" {
+		t.Fatalf("selected submodule file = %q", body)
+	}
+	if _, err := os.Stat(filepath.Join(libWork, "extra.txt")); !os.IsNotExist(err) {
+		t.Fatalf("selected submodule untracked file remains: %v", err)
+	}
+	if got := strings.TrimSpace(gitAt(t, otherWork, "rev-parse", "HEAD")); got != recordedOther {
+		t.Fatalf("selected submodule HEAD = %s, want %s", got, recordedOther)
+	}
+	body, err = os.ReadFile(filepath.Join(otherWork, "b.txt"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	if string(body) != "two\n" {
+		t.Fatalf("selected submodule commit = %q", body)
+	}
+	if _, err := os.Stat(nested); !os.IsNotExist(err) {
+		t.Fatalf("selected submodule untracked directory remains: %v", err)
+	}
+	body, err = os.ReadFile(filepath.Join(parent, "r.txt"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	if string(body) != "root\n" {
+		t.Fatalf("selected file = %q", body)
+	}
+	if _, err := os.Stat(filepath.Join(parent, "new.txt")); !os.IsNotExist(err) {
+		t.Fatalf("selected untracked file remains: %v", err)
+	}
+	body, err = os.ReadFile(filepath.Join(keepWork, "c.txt"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	if string(body) != "dirty\n" {
+		t.Fatalf("unselected submodule = %q", body)
+	}
+	st, err := repo.Status(ctx)
+	if err != nil {
+		t.Fatal(err)
+	}
+	assertEntry(t, st, keep, false, true)
+	if len(st.Entries) != 1 {
+		t.Fatalf("status after selected discard: %v", st.Entries)
+	}
+
+	writeCommit(t, otherWork, "b.txt", "next")
+	gitAt(t, parent, "add", other)
+	if err := os.WriteFile(filepath.Join(otherWork, "b.txt"), []byte("dirtier\n"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(filepath.Join(otherWork, "extra.txt"), []byte("extra\n"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(filepath.Join(parent, "r.txt"), []byte("staged\n"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	gitAt(t, parent, "add", "r.txt")
+	if err := os.WriteFile(filepath.Join(parent, "r.txt"), []byte("work\n"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	if err := repo.Discard(ctx, []string{other, "r.txt"}, true); err != nil {
+		t.Fatal(err)
+	}
+	if got := strings.TrimSpace(gitAt(t, otherWork, "rev-parse", "HEAD")); got != recordedOther {
+		t.Fatalf("staged selection HEAD = %s, want %s", got, recordedOther)
+	}
+	body, err = os.ReadFile(filepath.Join(otherWork, "b.txt"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	if string(body) != "two\n" {
+		t.Fatalf("staged selection submodule = %q", body)
+	}
+	if _, err := os.Stat(filepath.Join(otherWork, "extra.txt")); !os.IsNotExist(err) {
+		t.Fatalf("untracked file remains after staged selection discard: %v", err)
+	}
+	body, err = os.ReadFile(filepath.Join(parent, "r.txt"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	if string(body) != "root\n" {
+		t.Fatalf("staged selection file = %q", body)
+	}
+	body, err = os.ReadFile(filepath.Join(keepWork, "c.txt"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	if string(body) != "dirty\n" {
+		t.Fatalf("unselected submodule changed: %q", body)
+	}
+	st, err = repo.Status(ctx)
+	if err != nil {
+		t.Fatal(err)
+	}
+	assertEntry(t, st, keep, false, true)
+	if len(st.Entries) != 1 {
+		t.Fatalf("status after staged selection discard: %v", st.Entries)
+	}
+}
+
 func TestDiscardWithoutHEAD(t *testing.T) {
 	dir := initRepo(t)
 	if err := os.WriteFile(filepath.Join(dir, "a.txt"), []byte("new\n"), 0o644); err != nil {

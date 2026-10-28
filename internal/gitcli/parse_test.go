@@ -407,6 +407,26 @@ func TestParseGitlinks(t *testing.T) {
 	}
 }
 
+func TestGitlinkPaths(t *testing.T) {
+	const hash = "0123456789abcdef0123456789abcdef01234567"
+	files := "100644 " + hash + " 0\tREADME\x00" +
+		"160000 " + hash + " 0\tvendor/lib\x00" +
+		"160000 " + hash + " 1\tvendor/lib\x00"
+	tree := "100644 blob " + hash + "\tREADME\x00" +
+		"160000 commit " + hash + "\tvendor/my lib\x00"
+	got := gitlinkPaths(files)
+	if len(got) != 1 || !got["vendor/lib"] {
+		t.Fatalf("ls-files paths = %#v", got)
+	}
+	got = gitlinkPaths(tree)
+	if len(got) != 1 || !got["vendor/my lib"] {
+		t.Fatalf("ls-tree paths = %#v", got)
+	}
+	if len(gitlinkPaths("")) != 0 {
+		t.Fatal("empty output should have no gitlinks")
+	}
+}
+
 func TestParseWorktrees(t *testing.T) {
 	out := "" +
 		"worktree /repo\n" +
