@@ -27,7 +27,7 @@ func main() {
 		WindowSize:    image.Pt(1100, 760),
 		WindowMinSize: image.Pt(800, 560),
 	}
-	if err := guigui.Run(&app.Root{}, op); err != nil {
+	if err := guigui.RunWithCustomFunc(&app.Root{}, op, app.RunGame); err != nil {
 		fmt.Fprintln(os.Stderr, err)
 		os.Exit(1)
 	}
