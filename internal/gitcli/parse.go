@@ -471,6 +471,38 @@ func parseGitlink(rec string) (Submodule, bool) {
 	return Submodule{Path: file, Hash: hash}, true
 }
 
+// gitlinkPaths reads NUL-separated `git ls-files -z -s` or `git ls-tree -z`
+// records and returns every path whose mode is 160000.
+func gitlinkPaths(out string) map[string]bool {
+	var set map[string]bool
+	for _, rec := range strings.Split(out, "\x00") {
+		path, ok := gitlinkRecordPath(rec)
+		if !ok {
+			continue
+		}
+		if set == nil {
+			set = make(map[string]bool)
+		}
+		set[path] = true
+	}
+	return set
+}
+
+func gitlinkRecordPath(rec string) (string, bool) {
+	if rec == "" {
+		return "", false
+	}
+	meta, file, ok := strings.Cut(rec, "\t")
+	if !ok || file == "" {
+		return "", false
+	}
+	mode, _, _ := strings.Cut(meta, " ")
+	if mode != "160000" {
+		return "", false
+	}
+	return file, true
+}
+
 func isFullHash(s string) bool {
 	if len(s) != 40 && len(s) != 64 {
 		return false
