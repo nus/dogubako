@@ -938,7 +938,6 @@ func (t *GitTool) setHistDragPassthrough(context *guigui.Context, pass bool) {
 		&t.pullBtn,
 		&t.pushBtn,
 		&t.status,
-		&t.hint,
 		&t.consoleToggle,
 		&t.console,
 		&t.expand,

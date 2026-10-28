@@ -322,7 +322,7 @@ func (t *gitConsoleToggle) Layout(context *guigui.Context, widgetBounds *guigui.
 	layouter.LayoutWidget(&t.tip, bounds)
 }
 
-// gitConsole is the transcript under the status line and the hint.
+// gitConsole is the transcript under the status line.
 type gitConsole struct {
 	guigui.DefaultWidget
 

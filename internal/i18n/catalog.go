@@ -158,7 +158,6 @@ const (
 	GitUnstaged         Key = "git.unstaged"
 	GitEmpty            Key = "git.empty"
 	GitNoCommits        Key = "git.no_commits"
-	GitHint             Key = "git.hint"
 	GitConsoleShow      Key = "git.console_show"
 	GitConsoleHide      Key = "git.console_hide"
 	GitDetached         Key = "git.detached"
@@ -501,7 +500,6 @@ var catalogs = map[Lang]map[Key]string{
 		GitUnstaged:                    "未ステージ",
 		GitEmpty:                       "Git リポジトリのフォルダを開いてください。",
 		GitNoCommits:                   "表示するコミットがありません。",
-		GitHint:                        "ブランチをクリックすると先端のコミットを表示。グラフのブランチをダブルクリックすると切り替え。タグをダブルクリックすると切り替え。右クリックで Push、名前の変更、削除。コミットを右クリックしてブランチやタグを作成。コミットをクリックして詳細。変更を右クリックして Stage、Unstage、破棄。Push を押すと通常、Force with lease、Force を選べる。",
 		GitConsoleShow:                 "コンソールを開く",
 		GitConsoleHide:                 "コンソールを閉じる",
 		GitDetached:                    "detached HEAD",
@@ -828,7 +826,6 @@ var catalogs = map[Lang]map[Key]string{
 		GitUnstaged:                    "Unstaged",
 		GitEmpty:                       "Open a folder that is a Git repository.",
 		GitNoCommits:                   "No commits to show.",
-		GitHint:                        "Click a branch to show its tip commit. Double-click a branch on the graph to switch. Double-click a tag to switch. Right-click a branch to push, rename, or delete. Right-click a commit to create a branch or tag. Click a commit for details. Right-click a change to stage, unstage, or discard it. Press Push to choose Normal, Force with lease, or Force.",
 		GitConsoleShow:                 "Show console",
 		GitConsoleHide:                 "Hide console",
 		GitDetached:                    "detached HEAD",
