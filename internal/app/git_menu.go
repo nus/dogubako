@@ -118,21 +118,27 @@ type gitCommitMenu struct {
 
 	menu basicwidget.PopupMenu[string]
 
-	pos         image.Point
-	hash        string
-	branchLabel string
-	tagLabel    string
-	onBranch    func(hash string)
-	onTag       func(hash string)
+	pos            image.Point
+	hash           string
+	branchLabel    string
+	tagLabel       string
+	rebaseLabel    string
+	rebaseDisabled bool
+	onBranch       func(hash string)
+	onTag          func(hash string)
+	onRebase       func(hash string)
 }
 
-func (m *gitCommitMenu) Open(hash string, at image.Point, branchLabel, tagLabel string, onBranch, onTag func(hash string)) {
+func (m *gitCommitMenu) Open(hash string, at image.Point, branchLabel, tagLabel, rebaseLabel string, rebaseDisabled bool, onBranch, onTag, onRebase func(hash string)) {
 	m.hash = hash
 	m.pos = at
 	m.branchLabel = branchLabel
 	m.tagLabel = tagLabel
+	m.rebaseLabel = rebaseLabel
+	m.rebaseDisabled = rebaseDisabled
 	m.onBranch = onBranch
 	m.onTag = onTag
+	m.onRebase = onRebase
 	m.menu.SetOpen(true)
 }
 
@@ -140,11 +146,27 @@ func (m *gitCommitMenu) IsOpen() bool {
 	return m.menu.IsOpen()
 }
 
+// commitMenuItems is create branch, create tag, then rebase onto this commit.
+// Rebase stays visible when it cannot run. Branch and tag stay enabled.
+func commitMenuItems(branch, tag, rebase string, rebaseDisabled bool) []basicwidget.PopupMenuItem[string] {
+	return []basicwidget.PopupMenuItem[string]{
+		{Text: branch, Value: "branch"},
+		{Text: tag, Value: "tag"},
+		{Text: rebase, Value: "rebase", Disabled: rebaseDisabled},
+	}
+}
+
+// commitRebaseDisabled reports that there is no branch to replay, or the
+// clicked commit is already HEAD.
+func commitRebaseDisabled(detached bool, branch, head, hash string) bool {
+	if detached || branch == "" {
+		return true
+	}
+	return head != "" && hash == head
+}
+
 func (m *gitCommitMenu) Build(context *guigui.Context, adder *guigui.ChildAdder) error {
-	m.menu.SetItems([]basicwidget.PopupMenuItem[string]{
-		{Text: m.branchLabel, Value: "branch"},
-		{Text: m.tagLabel, Value: "tag"},
-	})
+	m.menu.SetItems(commitMenuItems(m.branchLabel, m.tagLabel, m.rebaseLabel, m.rebaseDisabled))
 	m.menu.OnItemSelected(func(context *guigui.Context, index int) {
 		item, ok := m.menu.ItemByIndex(index)
 		if !ok || m.hash == "" {
@@ -159,6 +181,11 @@ func (m *gitCommitMenu) Build(context *guigui.Context, adder *guigui.ChildAdder)
 			if m.onTag != nil {
 				m.onTag(m.hash)
 			}
+		case "rebase":
+			if m.rebaseDisabled || m.onRebase == nil {
+				return
+			}
+			m.onRebase(m.hash)
 		}
 	})
 	if m.menu.IsOpen() {

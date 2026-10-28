@@ -1982,6 +1982,185 @@ func TestPushBranchRejectsMissing(t *testing.T) {
 	}
 }
 
+func TestRebaseOntoCommit(t *testing.T) {
+	dir, onto := rebaseFeatureRepo(t)
+	old := strings.TrimSpace(gitAt(t, dir, "rev-parse", "HEAD"))
+
+	ctx, cancel := context.WithTimeout(context.Background(), 20*time.Second)
+	defer cancel()
+	repo, err := Open(ctx, dir)
+	if err != nil {
+		t.Fatal(err)
+	}
+	var cmds [][]string
+	repo.SetCommandTrace(func(begin bool, args []string, stdout, stderr string) {
+		if begin {
+			cmds = append(cmds, append([]string(nil), args...))
+		}
+	})
+	if err := repo.Rebase(ctx, onto); err != nil {
+		t.Fatal(err)
+	}
+	if len(cmds) != 1 || len(cmds[0]) != 2 || cmds[0][0] != "rebase" || cmds[0][1] != onto {
+		t.Fatalf("commands = %#v", cmds)
+	}
+	snap, err := repo.Snapshot(ctx, SnapshotOpts{})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if snap.Branch != "feature" || snap.Detached || snap.HEAD == old || snap.HEAD == "" {
+		t.Fatalf("branch=%s detached=%v head=%s old=%s", snap.Branch, snap.Detached, snap.HEAD, old)
+	}
+	gitAt(t, dir, "merge-base", "--is-ancestor", onto, "HEAD")
+	if _, err := os.Stat(filepath.Join(dir, "b.txt")); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := os.Stat(filepath.Join(dir, "c.txt")); err != nil {
+		t.Fatal(err)
+	}
+	if rebaseInProgress(dir) {
+		t.Fatal("rebase left in progress")
+	}
+}
+
+func TestRebaseAlreadyBased(t *testing.T) {
+	dir := initRepo(t)
+	writeCommit(t, dir, "a.txt", "first")
+	parent := strings.TrimSpace(gitAt(t, dir, "rev-parse", "HEAD"))
+	writeCommit(t, dir, "b.txt", "second")
+	head := strings.TrimSpace(gitAt(t, dir, "rev-parse", "HEAD"))
+
+	ctx, cancel := context.WithTimeout(context.Background(), 20*time.Second)
+	defer cancel()
+	repo, err := Open(ctx, dir)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if err := repo.Rebase(ctx, parent); !errors.Is(err, ErrRebaseUnchanged) {
+		t.Fatalf("err = %v", err)
+	}
+	if got := strings.TrimSpace(gitAt(t, dir, "rev-parse", "HEAD")); got != head {
+		t.Fatalf("HEAD = %s, want %s", got, head)
+	}
+}
+
+func TestRebaseDirtyKeepsHead(t *testing.T) {
+	dir, onto := rebaseFeatureRepo(t)
+	head := strings.TrimSpace(gitAt(t, dir, "rev-parse", "HEAD"))
+	if err := os.WriteFile(filepath.Join(dir, "b.txt"), []byte("local\n"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+
+	ctx, cancel := context.WithTimeout(context.Background(), 20*time.Second)
+	defer cancel()
+	repo, err := Open(ctx, dir)
+	if err != nil {
+		t.Fatal(err)
+	}
+	rebaseErr := repo.Rebase(ctx, onto)
+	if rebaseErr == nil || errors.Is(rebaseErr, ErrRebaseUnchanged) {
+		t.Fatalf("err = %v", rebaseErr)
+	}
+	if got := strings.TrimSpace(gitAt(t, dir, "rev-parse", "HEAD")); got != head {
+		t.Fatalf("HEAD = %s, want %s", got, head)
+	}
+	body, err := os.ReadFile(filepath.Join(dir, "b.txt"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	if string(body) != "local\n" {
+		t.Fatalf("b.txt = %q", body)
+	}
+	if stash := strings.TrimSpace(gitAt(t, dir, "stash", "list")); stash != "" {
+		t.Fatalf("stash = %q", stash)
+	}
+	if rebaseInProgress(dir) {
+		t.Fatal("refused rebase left state behind")
+	}
+}
+
+func TestRebaseConflictDoesNotAbort(t *testing.T) {
+	dir := initRepo(t)
+	writeCommit(t, dir, "a.txt", "base")
+	gitAt(t, dir, "checkout", "-b", "feature")
+	writeCommit(t, dir, "a.txt", "feature")
+	gitAt(t, dir, "checkout", "main")
+	writeCommit(t, dir, "a.txt", "main")
+	onto := strings.TrimSpace(gitAt(t, dir, "rev-parse", "HEAD"))
+	gitAt(t, dir, "checkout", "feature")
+
+	ctx, cancel := context.WithTimeout(context.Background(), 20*time.Second)
+	defer cancel()
+	repo, err := Open(ctx, dir)
+	if err != nil {
+		t.Fatal(err)
+	}
+	var cmds [][]string
+	repo.SetCommandTrace(func(begin bool, args []string, stdout, stderr string) {
+		if begin {
+			cmds = append(cmds, append([]string(nil), args...))
+		}
+	})
+	rebaseErr := repo.Rebase(ctx, onto)
+	if rebaseErr == nil || errors.Is(rebaseErr, ErrRebaseUnchanged) {
+		t.Fatalf("err = %v", rebaseErr)
+	}
+	if !rebaseInProgress(dir) {
+		t.Fatal("conflict was aborted or never started")
+	}
+	for _, cmd := range cmds {
+		joined := strings.Join(cmd, " ")
+		if strings.Contains(joined, "--abort") || strings.Contains(joined, "stash") || strings.Contains(joined, "--autostash") || strings.Contains(joined, "-i") {
+			t.Fatalf("commands = %#v", cmds)
+		}
+	}
+	if len(cmds) != 1 || cmds[0][0] != "rebase" || cmds[0][1] != onto {
+		t.Fatalf("commands = %#v", cmds)
+	}
+}
+
+func TestRebaseCommandOnRemoteGit(t *testing.T) {
+	cmd := gitCmd(context.Background(), Loc{Dest: "dev", Dir: "/work/app"}, "rebase", "abcdef1")
+	if len(cmd.Args) == 0 || cmd.Args[0] != "ssh" {
+		t.Fatalf("args = %#v", cmd.Args)
+	}
+	remote := cmd.Args[len(cmd.Args)-1]
+	if !strings.Contains(remote, "GIT_SEQUENCE_EDITOR=true") || !strings.Contains(remote, "GIT_EDITOR=true") {
+		t.Fatalf("remote = %q", remote)
+	}
+	rebaseAt := strings.Index(remote, "'rebase'")
+	hashAt := strings.Index(remote, "'abcdef1'")
+	if rebaseAt < 0 || hashAt < 0 || rebaseAt > hashAt {
+		t.Fatalf("remote = %q", remote)
+	}
+	if strings.Contains(remote, "'-i'") || strings.Contains(remote, "--autostash") || strings.Contains(remote, "--abort") {
+		t.Fatalf("remote = %q", remote)
+	}
+}
+
+func rebaseFeatureRepo(t *testing.T) (dir, onto string) {
+	t.Helper()
+	dir = initRepo(t)
+	gitAt(t, dir, "config", "rebase.autoStash", "false")
+	writeCommit(t, dir, "a.txt", "base")
+	gitAt(t, dir, "checkout", "-b", "feature")
+	writeCommit(t, dir, "b.txt", "feat")
+	gitAt(t, dir, "checkout", "main")
+	writeCommit(t, dir, "c.txt", "main")
+	onto = strings.TrimSpace(gitAt(t, dir, "rev-parse", "HEAD"))
+	gitAt(t, dir, "checkout", "feature")
+	return dir, onto
+}
+
+func rebaseInProgress(dir string) bool {
+	for _, name := range []string{"rebase-merge", "rebase-apply"} {
+		if _, err := os.Stat(filepath.Join(dir, ".git", name)); err == nil {
+			return true
+		}
+	}
+	return false
+}
+
 func commitHasDecoration(cs []Commit, kind, name string) bool {
 	for _, c := range cs {
 		if hasDecoration(c.Decorations, kind, name) {
