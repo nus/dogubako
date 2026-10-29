@@ -2,6 +2,7 @@ package app
 
 import (
 	"image"
+	"strings"
 
 	"github.com/hajimehoshi/ebiten/v2"
 	"github.com/hajimehoshi/ebiten/v2/inpututil"
@@ -14,8 +15,8 @@ import (
 	"github.com/nus/dogubako/internal/i18n"
 )
 
-// buildEmptyHome is the new-tab view: recent repositories and the open button,
-// centered in the area under the tab bar.
+// buildEmptyHome is the new-tab view: recent repositories, a text filter, and
+// the open buttons, centered in the area under the tab bar.
 func (t *GitTool) buildEmptyHome(context *guigui.Context, adder *guigui.ChildAdder, lang i18n.Lang, model *GitModel) error {
 	busy := model.Busy()
 	t.openBtn.SetText(i18n.T(lang, i18n.GitOpen))
@@ -40,23 +41,32 @@ func (t *GitTool) buildEmptyHome(context *guigui.Context, adder *guigui.ChildAdd
 		t.recentTitle.SetHorizontalAlign(basicwidget.HorizontalAlignCenter)
 		t.recentTitle.SetVerticalAlign(basicwidget.VerticalAlignMiddle)
 		adder.AddWidget(&t.recentTitle)
+		t.recentFilter.owner = t
+		adder.AddWidget(&t.recentFilter)
 
+		shown := gitRecentVisible(paths, t.recentQuery)
 		t.recentRows.SetLen(len(paths))
 		t.recentItems = t.recentItems[:0]
+		j := 0
 		for i, p := range paths {
 			row := t.recentRows.At(i)
 			row.Set(p)
-			t.recentItems = append(t.recentItems, basicwidget.ListItem[string]{
-				Content: row,
-				Value:   p,
-			})
+			if j < len(shown) && shown[j] == p {
+				t.recentItems = append(t.recentItems, basicwidget.ListItem[string]{
+					Content: row,
+					Value:   p,
+				})
+				j++
+			}
 		}
 		t.recentList.SetStyle(basicwidget.ListStyleNormal)
 		t.recentList.SetHighlightVisibleWhenUnfocused(true)
 		t.recentList.SetHoverBackgroundVisible(true)
 		t.recentList.SetItems(t.recentItems)
-		context.SetEnabled(&t.recentList, !busy)
-		adder.AddWidget(&t.recentList)
+		if len(shown) > 0 {
+			context.SetEnabled(&t.recentList, !busy)
+			adder.AddWidget(&t.recentList)
+		}
 	}
 
 	adder.AddWidget(&t.branchMenu)
@@ -65,6 +75,7 @@ func (t *GitTool) buildEmptyHome(context *guigui.Context, adder *guigui.ChildAdd
 	adder.AddWidget(&t.pushDialog)
 	adder.AddWidget(&t.confirm)
 	adder.AddWidget(&t.rename)
+	t.noteRecentFilter(t.showRecent)
 	return nil
 }
 
@@ -78,7 +89,7 @@ func (t *GitTool) layoutEmptyHome(context *guigui.Context, bounds image.Rectangl
 	ssh := t.sshBtn.Measure(context, guigui.Constraints{})
 	gap := u / 2
 
-	var titleH, listH, listW int
+	var titleH, filterH, listH, listW int
 	if t.showRecent {
 		listW = btn.X
 		minW := 16 * u
@@ -101,7 +112,10 @@ func (t *GitTool) layoutEmptyHome(context *guigui.Context, bounds image.Rectangl
 		if titleH < u*3/4 {
 			titleH = u * 3 / 4
 		}
-		listH = t.recentList.Measure(context, guigui.FixedWidthConstraints(listW)).Y
+		filterH = t.recentFilter.Measure(context, guigui.FixedWidthConstraints(listW)).Y
+		if len(t.recentItems) > 0 {
+			listH = t.recentList.Measure(context, guigui.FixedWidthConstraints(listW)).Y
+		}
 	}
 
 	total := btn.Y + gap + ssh.Y
@@ -110,7 +124,7 @@ func (t *GitTool) layoutEmptyHome(context *guigui.Context, bounds image.Rectangl
 		room = bounds.Dy()
 	}
 	if t.showRecent {
-		overhead := titleH + gap + gap + btn.Y + gap + ssh.Y
+		overhead := titleH + gap + filterH + gap + gap + btn.Y + gap + ssh.Y
 		maxList := room - overhead
 		if maxList < 2*u {
 			maxList = 2 * u
@@ -118,7 +132,11 @@ func (t *GitTool) layoutEmptyHome(context *guigui.Context, bounds image.Rectangl
 		if listH > maxList {
 			listH = maxList
 		}
-		total = overhead + listH
+		if listH == 0 {
+			total = titleH + gap + filterH + gap + btn.Y + gap + ssh.Y
+		} else {
+			total = overhead + listH
+		}
 	}
 	y := bounds.Min.Y + (bounds.Dy()-total)/2
 	if y < bounds.Min.Y {
@@ -129,8 +147,12 @@ func (t *GitTool) layoutEmptyHome(context *guigui.Context, bounds image.Rectangl
 		x := bounds.Min.X + (bounds.Dx()-listW)/2
 		layouter.LayoutWidget(&t.recentTitle, image.Rect(x, y, x+listW, y+titleH))
 		y += titleH + gap
-		layouter.LayoutWidget(&t.recentList, image.Rect(x, y, x+listW, y+listH))
-		y += listH + gap
+		layouter.LayoutWidget(&t.recentFilter, image.Rect(x, y, x+listW, y+filterH))
+		y += filterH + gap
+		if listH > 0 {
+			layouter.LayoutWidget(&t.recentList, image.Rect(x, y, x+listW, y+listH))
+			y += listH + gap
+		}
 	}
 	bx := bounds.Min.X + (bounds.Dx()-btn.X)/2
 	if bx < bounds.Min.X {
@@ -146,7 +168,7 @@ func (t *GitTool) layoutEmptyHome(context *guigui.Context, bounds image.Rectangl
 }
 
 func (t *GitTool) openRecentAtCursor(model *GitModel) {
-	if !t.showRecent || !inpututil.IsMouseButtonJustPressed(ebiten.MouseButtonLeft) {
+	if !t.showRecent || len(t.recentItems) == 0 || !inpututil.IsMouseButtonJustPressed(ebiten.MouseButtonLeft) {
 		return
 	}
 	c := image.Pt(ebiten.CursorPosition())
@@ -158,13 +180,132 @@ func (t *GitTool) openRecentAtCursor(model *GitModel) {
 		if !ok || item.Value == "" {
 			return
 		}
-		if i < t.recentRows.Len() && c.In(t.recentRows.At(i).closeBox) {
+		if row, ok := item.Content.(*gitRecentRow); ok && c.In(row.closeBox) {
 			model.forgetRecent(item.Value)
 			return
 		}
 		model.Open(item.Value)
 		return
 	}
+}
+
+// noteRecentSession drops the recent-list filter when the open tab changes.
+// The text is not stored, so a later visit starts empty.
+func (t *GitTool) noteRecentSession(session *gitSession) {
+	if t.recentQuerySession != nil && session != t.recentQuerySession {
+		t.clearRecentQuery()
+	}
+	t.recentQuerySession = session
+}
+
+func (t *GitTool) clearRecentQuery() {
+	t.recentQuery = ""
+	t.recentFilter.input.ForceSetValue("")
+}
+
+// noteRecentFilter requests focus when the new-tab filter appears.
+// Staying on that screen, including a rebuild, does not move focus again.
+func (t *GitTool) noteRecentFilter(shown bool) {
+	if shown && !t.recentFilterOn {
+		t.focusRecentFilter = true
+	}
+	t.recentFilterOn = shown
+}
+
+func (t *GitTool) focusRecentFilterIfNeeded(context *guigui.Context) {
+	if !t.focusRecentFilter {
+		return
+	}
+	t.focusRecentFilter = false
+	if !t.emptyHome || t.sshPick || !t.showRecent {
+		return
+	}
+	context.SetFocused(&t.recentFilter.input, true)
+}
+
+// gitRecentVisible keeps paths whose folder name or displayed path contains
+// query. Matching ignores case and surrounding space. Blank text returns paths
+// in the same order. paths is left unchanged.
+func gitRecentVisible(paths []string, query string) []string {
+	query = strings.TrimSpace(query)
+	if query == "" {
+		return paths
+	}
+	q := strings.ToLower(query)
+	out := make([]string, 0, len(paths))
+	for _, p := range paths {
+		if gitRecentMatch(p, q) {
+			out = append(out, p)
+		}
+	}
+	return out
+}
+
+func gitRecentMatch(repoPath, queryLower string) bool {
+	if strings.Contains(strings.ToLower(repoFolder(repoPath)), queryLower) {
+		return true
+	}
+	return strings.Contains(strings.ToLower(gitcli.ParseLoc(repoPath).Display()), queryLower)
+}
+
+// gitRecentFilter is the text field under the recent-repositories heading.
+// It matches the sidebar filter: the same placeholder, and a clear mark on
+// the trailing edge while the field has text.
+type gitRecentFilter struct {
+	guigui.DefaultWidget
+
+	owner *GitTool
+	input basicwidget.TextInput
+	clear gitFilterClear
+}
+
+func (f *gitRecentFilter) Build(context *guigui.Context, adder *guigui.ChildAdder) error {
+	context.SetClipChildren(f, true)
+	adder.AddWidget(&f.input)
+	var lang i18n.Lang
+	if v, ok := context.Env(f, EnvKeyModel); ok {
+		lang = v.(*Model).Lang()
+	}
+	f.input.SetPlaceholder(i18n.T(lang, i18n.GitFilter))
+	f.input.OnValueChanged(func(_ *guigui.Context, text string, _ bool) {
+		if f.owner == nil || f.owner.recentQuery == text {
+			return
+		}
+		f.owner.recentQuery = text
+		guigui.RequestRebuild()
+	})
+	f.clear.clear = f.clearText
+	if f.input.HasValue() {
+		adder.AddWidget(&f.clear)
+	}
+	return nil
+}
+
+func (f *gitRecentFilter) clearText() {
+	f.input.ForceSetValue("")
+	if f.owner != nil {
+		f.owner.recentQuery = ""
+	}
+	guigui.RequestRebuild()
+}
+
+func (f *gitRecentFilter) Layout(context *guigui.Context, widgetBounds *guigui.WidgetBounds, layouter *guigui.ChildLayouter) {
+	field := widgetBounds.Bounds()
+	layouter.LayoutWidget(&f.input, field)
+	layouter.LayoutWidget(&f.clear, gitFilterClearBounds(field, basicwidget.UnitSize(context)))
+}
+
+func (f *gitRecentFilter) Measure(context *guigui.Context, constraints guigui.Constraints) image.Point {
+	u := basicwidget.UnitSize(context)
+	w, ok := constraints.FixedWidth()
+	if !ok || w < 1 {
+		w = 16 * u
+	}
+	h := f.input.Measure(context, guigui.FixedWidthConstraints(w)).Y
+	if h < 1 {
+		h = u
+	}
+	return image.Pt(w, h)
 }
 
 type gitRecentRow struct {
