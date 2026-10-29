@@ -62,6 +62,16 @@ type GitTool struct {
 	navSel          string
 	// refFilter narrows branches, tags, and remote branches in the sidebar.
 	refFilter string
+	// recentQuery narrows folder names and paths on the new-tab recent list.
+	// Another tab clears it. It is not saved.
+	recentQuery        string
+	recentQuerySession *gitSession
+	recentFilter       gitRecentFilter
+	// focusRecentFilter is consumed by Tick once the new-tab filter is on screen.
+	focusRecentFilter bool
+	// recentFilterOn remembers that the filter is already showing, so a rebuild
+	// does not take focus again.
+	recentFilterOn bool
 
 	commitList  basicwidget.List[string]
 	commitRows  guigui.WidgetSlice[*gitCommitRow]
@@ -210,6 +220,7 @@ func (t *GitTool) WriteStateKey(context *guigui.Context, w *guigui.StateKeyWrite
 	w.WriteString(m.Path())
 	w.WriteString(m.Selected())
 	w.WriteString(t.refFilter)
+	w.WriteString(t.recentQuery)
 	w.WriteBool(m.Busy())
 	w.WriteBool(m.HistoryLoading())
 	w.WriteBool(m.HasMoreHistory())
@@ -232,6 +243,8 @@ func (t *GitTool) Build(context *guigui.Context, adder *guigui.ChildAdder) error
 	model := appModel.Git()
 	lang := appModel.Lang()
 	model.EnsureLoaded()
+	model.ensure()
+	t.noteRecentSession(model.tabs[model.active])
 	busy := model.Busy()
 	has := model.HasRepo()
 	onMenu := func(ref gitcli.Ref) { t.openBranchMenu(lang, model, ref) }
@@ -256,6 +269,7 @@ func (t *GitTool) Build(context *guigui.Context, adder *guigui.ChildAdder) error
 	t.emptyHome = model.Path() == ""
 	t.sshPick = t.emptyHome && model.SSHActive()
 	if t.sshPick {
+		t.noteRecentFilter(false)
 		return t.buildSSH(context, adder, lang, model)
 	}
 	t.sshWas = false
@@ -263,6 +277,7 @@ func (t *GitTool) Build(context *guigui.Context, adder *guigui.ChildAdder) error
 	if t.emptyHome {
 		return t.buildEmptyHome(context, adder, lang, model)
 	}
+	t.noteRecentFilter(false)
 
 	if !t.commitView {
 		adder.AddWidget(&t.fetchBtn)
@@ -1037,6 +1052,7 @@ func (t *GitTool) histSpinBounds(u int) image.Rectangle {
 }
 
 func (t *GitTool) Tick(context *guigui.Context, widgetBounds *guigui.WidgetBounds) error {
+	t.focusRecentFilterIfNeeded(context)
 	if v, ok := context.Env(t, EnvKeyModel); ok {
 		t.maybeLoadMoreHistory(v.(*Model).Git())
 	}
