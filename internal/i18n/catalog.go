@@ -346,6 +346,14 @@ const (
 	DesktopWriteFile       Key = "desktop.write_file"
 	DesktopRemoveFile      Key = "desktop.remove_file"
 	DesktopBadPath         Key = "desktop.bad_path"
+
+	CLIArgDirectory Key = "cli.arg_directory"
+	CLIArgFile      Key = "cli.arg_file"
+	CLINoMTP        Key = "cli.no_mtp"
+	CLINeedPath     Key = "cli.need_path"
+	CLINotDirectory Key = "cli.not_directory"
+	CLINotFile      Key = "cli.not_file"
+	CLIPathCheck    Key = "cli.path_check"
 )
 
 var catalogs = map[Lang]map[Key]string{
@@ -680,6 +688,13 @@ var catalogs = map[Lang]map[Key]string{
 		DesktopWriteFile:               "ファイルを書けません: %v",
 		DesktopRemoveFile:              "ファイルを消せません: %v",
 		DesktopBadPath:                 "AppImage のパスをデスクトップエントリに書けません",
+		CLIArgDirectory:                "ディレクトリ",
+		CLIArgFile:                     "ファイル",
+		CLINoMTP:                       "mtp はこの環境にはありません",
+		CLINeedPath:                    "パスを指定してください",
+		CLINotDirectory:                "%s はディレクトリではありません",
+		CLINotFile:                     "%s はファイルではありません",
+		CLIPathCheck:                   "%s を確認できません: %v",
 	},
 	EN: {
 		AppTitle:                       "Dogubako",
@@ -1012,6 +1027,13 @@ var catalogs = map[Lang]map[Key]string{
 		DesktopWriteFile:               "Could not write the file: %v",
 		DesktopRemoveFile:              "Could not remove the file: %v",
 		DesktopBadPath:                 "The AppImage path cannot be written to a desktop entry",
+		CLIArgDirectory:                "directory",
+		CLIArgFile:                     "file",
+		CLINoMTP:                       "mtp is not available on this system",
+		CLINeedPath:                    "Specify a path",
+		CLINotDirectory:                "%s is not a directory",
+		CLINotFile:                     "%s is not a file",
+		CLIPathCheck:                   "Could not check %s: %v",
 	},
 }
 

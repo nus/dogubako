@@ -16,7 +16,12 @@ import (
 )
 
 func main() {
-	if code, handled := appimage.Dispatch(os.Args[1:], os.Stdout, os.Stderr); handled {
+	args := os.Args[1:]
+	if code, handled := appimage.Dispatch(args, os.Stdout, os.Stderr); handled {
+		os.Exit(code)
+	}
+	launch, code, openWindow := app.ParseLaunch(args, os.Stdout, os.Stderr)
+	if !openWindow {
 		os.Exit(code)
 	}
 	if img, err := appicon.RGBA(); err == nil {
@@ -27,7 +32,9 @@ func main() {
 		WindowSize:    image.Pt(1100, 760),
 		WindowMinSize: image.Pt(800, 560),
 	}
-	if err := guigui.RunWithCustomFunc(&app.Root{}, op, app.RunGame); err != nil {
+	root := &app.Root{}
+	root.ApplyLaunch(launch)
+	if err := guigui.RunWithCustomFunc(root, op, app.RunGame); err != nil {
 		fmt.Fprintln(os.Stderr, err)
 		os.Exit(1)
 	}

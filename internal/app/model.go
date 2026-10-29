@@ -312,6 +312,7 @@ func (m *ImageModel) Processed() (image.Image, error) {
 func (m *ImageModel) LoadPath(path string) error {
 	f, err := os.Open(path)
 	if err != nil {
+		m.SetStatus(i18n.StatusLoadFailed, err)
 		return err
 	}
 	defer f.Close()
