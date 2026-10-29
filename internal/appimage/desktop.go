@@ -41,8 +41,8 @@ func Usage(lang i18n.Lang) string {
 // Dispatch runs --install-desktop or --uninstall-desktop.
 //
 // handled is false when neither flag is present, including when args is
-// empty. The caller then opens the window, and other arguments are left for
-// a future tool-subcommand parser. The AppImage runtime removes
+// empty. The caller then parses tool subcommands and may open the window.
+// The AppImage runtime removes
 // --appimage-extract-and-run before dogubako sees argv, leaving APPIMAGE and
 // APPDIR set, so that launch is handled here as a plain install or uninstall.
 //

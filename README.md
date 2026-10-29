@@ -220,11 +220,22 @@ FUSE を使わない起動と一緒でも同じです。
 ./dist/Dogubako-0.1.0-linux-amd64.AppImage --appimage-extract-and-run --install-desktop
 ```
 
-開発用の単体バイナリは `make build` で作れます。
+開発用の単体バイナリは `make build` で作れます。引数なしでは、前回開いていたツールを表示します。サブコマンドはそのツールを選んで開きます。AppImage も同じ引数を受けます。
 
 ```sh
 ./dist/dogubako
+./dist/dogubako git ~/src/dogubako
+./dist/dogubako git
+./dist/dogubako image photo.png
+./dist/dogubako screenshot
+./dist/dogubako android
+./dist/dogubako android-shot
+./dist/dogubako stopwatch
+./dist/dogubako mtp
+./dist/dogubako --help
 ```
+
+`git` にディレクトリを渡すと、フォルダを開いたときと同じ手順でそのリポジトリを開きます。作業ツリーの中のディレクトリは、リポジトリのルートになります。ディレクトリを省くと、覚えていたタブのまま Git を開きます。`image` にファイルを渡すと、その画像を読み込みます。相対パスは、起動したときの作業ディレクトリから探します。存在するパスは、`git` ならディレクトリ、`image` ならファイルであることを確認します。種類が違うときは終了コード 1 で終わり、ウィンドウは開きません。`mtp` は macOS だけです。Ubuntu ではウィンドウを開かず、終了コード 1 で終わります。`-h`、`--help`、`help` は使い方を表示して終了し、ウィンドウは開きません。知らないサブコマンドや余分な引数は、使い方を標準エラーに出して終了コード 1 で終わります。
 
 単体バイナリをアプリケーションメニューに出す場合は、バイナリを `PATH` の通る場所へ置き、デスクトップエントリをコピーします。
 
@@ -245,7 +256,7 @@ make test
 
 ## ディレクトリ
 
-- `cmd/dogubako` — エントリポイント
+- `cmd/dogubako` — エントリポイント。引数でツールを開く
 - `internal/cjkembed` — Linux は Noto Sans CJK を埋め込み、macOS はヒラギノ角ゴシックを `/System/Library/Fonts` から開く
 - `internal/app` — シェル（サイドメニューとメインパネル）、画像ツール、画面キャプチャ、Android、MTP ファイル（macOS）、ストップウォッチ、Git
 - `internal/gitcli` — git コマンドでログ・グラフ・コミット操作を行う
