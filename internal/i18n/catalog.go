@@ -170,6 +170,7 @@ const (
 	GitSubmodules       Key = "git.submodules"
 	GitWorktrees        Key = "git.worktrees"
 	GitFilter           Key = "git.filter"
+	GitSearch           Key = "git.search"
 	GitAuthor           Key = "git.author"
 	GitRefs             Key = "git.refs"
 	GitSHA              Key = "git.sha"
@@ -526,6 +527,7 @@ var catalogs = map[Lang]map[Key]string{
 		GitSubmodules:                  "サブモジュール",
 		GitWorktrees:                   "別のワークツリー",
 		GitFilter:                      "フィルタ",
+		GitSearch:                      "検索",
 		GitAuthor:                      "作者",
 		GitRefs:                        "参照",
 		GitSHA:                         "SHA",
@@ -865,6 +867,7 @@ var catalogs = map[Lang]map[Key]string{
 		GitSubmodules:                  "Submodules",
 		GitWorktrees:                   "Other Worktrees",
 		GitFilter:                      "Filter",
+		GitSearch:                      "Search",
 		GitAuthor:                      "Author",
 		GitRefs:                        "Refs",
 		GitSHA:                         "SHA",

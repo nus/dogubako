@@ -72,6 +72,23 @@ type GitTool struct {
 	// recentFilterOn remembers that the filter is already showing, so a rebuild
 	// does not take focus again.
 	recentFilterOn bool
+	// histQuery searches loaded commits. It is not saved.
+	// Switching tabs or opening another repository clears it.
+	// History and Changes on the same tab keep it.
+	// The field stays hidden until Ctrl+F or Command+F, and Esc hides it again.
+	histQuery       string
+	histQueryTab    int
+	histQueryPath   string
+	histQuerySet    bool
+	histJump        string
+	histMatches     []string
+	histMatchQuery  string
+	histMatchRev    uint64
+	histMatchReady  bool
+	histSearchOpen  bool
+	histSearchFocus bool
+	histSearch      gitHistSearch
+	showHistSearch  bool
 
 	commitList  basicwidget.List[string]
 	commitRows  guigui.WidgetSlice[*gitCommitRow]
@@ -221,6 +238,8 @@ func (t *GitTool) WriteStateKey(context *guigui.Context, w *guigui.StateKeyWrite
 	w.WriteString(m.Selected())
 	w.WriteString(t.refFilter)
 	w.WriteString(t.recentQuery)
+	w.WriteString(t.histQuery)
+	w.WriteBool(t.histSearchOpen)
 	w.WriteBool(m.Busy())
 	w.WriteBool(m.HistoryLoading())
 	w.WriteBool(m.HasMoreHistory())
@@ -245,6 +264,7 @@ func (t *GitTool) Build(context *guigui.Context, adder *guigui.ChildAdder) error
 	model.EnsureLoaded()
 	model.ensure()
 	t.noteRecentSession(model.tabs[model.active])
+	t.syncHistQuery(model)
 	busy := model.Busy()
 	has := model.HasRepo()
 	onMenu := func(ref gitcli.Ref) { t.openBranchMenu(lang, model, ref) }
@@ -279,10 +299,15 @@ func (t *GitTool) Build(context *guigui.Context, adder *guigui.ChildAdder) error
 	}
 	t.noteRecentFilter(false)
 
+	t.showHistSearch = has && !t.commitView && t.histSearchOpen
 	if !t.commitView {
 		adder.AddWidget(&t.fetchBtn)
 		adder.AddWidget(&t.pullBtn)
 		adder.AddWidget(&t.pushBtn)
+		if t.showHistSearch {
+			t.histSearch.owner = t
+			adder.AddWidget(&t.histSearch)
+		}
 	}
 	adder.AddWidget(&t.status)
 	adder.AddWidget(&t.consoleToggle)
@@ -369,6 +394,7 @@ func (t *GitTool) Build(context *guigui.Context, adder *guigui.ChildAdder) error
 	})
 
 	snap := model.Snapshot()
+	t.syncHistMatches(snap.Graph, model.GraphRev())
 	enableNet := model.CanPushPull()
 	t.fetchBtn.SetText(i18n.T(lang, i18n.GitFetch))
 	t.fetchBtn.OnDown(func(context *guigui.Context) { model.DoFetch() })
@@ -486,6 +512,13 @@ func (t *GitTool) Build(context *guigui.Context, adder *guigui.ChildAdder) error
 		if sel := model.Selected(); sel != "" && sel != t.commitSel {
 			t.commitList.SelectItemByValue(sel)
 			t.commitSel = sel
+		}
+		if t.histJump != "" {
+			hash := t.histJump
+			t.histJump = ""
+			if idx := t.commitList.IndexByValue(hash); idx >= 0 {
+				t.commitList.EnsureItemVisibleByIndex(idx)
+			}
 		}
 		if reveal := model.TakeReveal(); reveal != "" {
 			if idx := t.commitList.IndexByValue(reveal); idx >= 0 {
@@ -828,7 +861,8 @@ func (t *GitTool) syncCommitRows(lang i18n.Lang, model *GitModel, snap gitcli.Sn
 	if lanes < 1 {
 		lanes = 1
 	}
-	if t.commitReady && t.commitRev == model.GraphRev() && t.commitPath == model.Path() && t.commitLang == lang && t.commitOpen == t.openHash {
+	sameRows := t.commitReady && t.commitRev == model.GraphRev() && t.commitPath == model.Path() && t.commitLang == lang
+	if sameRows && t.commitOpen == t.openHash {
 		t.graphLanes = lanes
 		if t.openHash != "" && t.commitOpenAt >= 0 && t.commitOpenAt < len(rows) {
 			t.syncExpand(lang, model, rows[t.commitOpenAt], lanes, snap.Detached)
@@ -885,6 +919,76 @@ func (t *GitTool) syncCommitRows(lang i18n.Lang, model *GitModel, snap gitcli.Sn
 	t.commitLang = lang
 	t.commitOpen = t.openHash
 	return true
+}
+
+// syncHistQuery forgets the history search when the tab or its repository changes.
+func (t *GitTool) syncHistQuery(model *GitModel) {
+	if model == nil {
+		return
+	}
+	tab := model.ActiveTab()
+	path := model.Path()
+	if t.histQuerySet && t.histQueryTab == tab && t.histQueryPath == path {
+		return
+	}
+	t.histQuerySet = true
+	t.histQueryTab = tab
+	t.histQueryPath = path
+	t.histJump = ""
+	t.histSearchOpen = false
+	t.histSearchFocus = false
+	if t.histQuery == "" {
+		return
+	}
+	t.histQuery = ""
+	t.histSearch.input.ForceSetValue("")
+}
+
+// openHistSearch shows the history search and focuses its field.
+// The recent-repository screen, Changes, and an open menu leave it hidden.
+func (t *GitTool) openHistSearch() bool {
+	if t.emptyHome || t.sshPick || t.commitView || t.menuOpen() {
+		return false
+	}
+	t.histSearchOpen = true
+	t.histSearchFocus = true
+	guigui.RequestRebuild()
+	return true
+}
+
+// closeHistSearch hides the history search. The query stays for the next time it opens.
+func (t *GitTool) closeHistSearch(context *guigui.Context) bool {
+	if !t.showHistSearch || t.menuOpen() {
+		return false
+	}
+	t.histSearchOpen = false
+	t.histSearchFocus = false
+	if context != nil {
+		context.SetFocused(&t.histSearch.input, false)
+	}
+	guigui.RequestRebuild()
+	return true
+}
+
+// setHistQuery stores the history search. Changing the text does not move the selection.
+func (t *GitTool) setHistQuery(text string) {
+	if t.histQuery == text {
+		return
+	}
+	t.histQuery = text
+	guigui.RequestRebuild()
+}
+
+// syncHistMatches caches the loaded commits that match the current search.
+func (t *GitTool) syncHistMatches(rows []gitcli.GraphRow, rev uint64) {
+	q := strings.TrimSpace(t.histQuery)
+	if t.histMatchReady && t.histMatchQuery == q && t.histMatchRev == rev {
+		return
+	}
+	t.histMatches = historyMatchHashes(rows, t.histQuery)
+	t.histMatchQuery = q
+	t.histMatchRev = rev
+	t.histMatchReady = true
 }
 
 // syncExpand refreshes the open commit's detail when its inputs changed.
@@ -952,6 +1056,11 @@ func (t *GitTool) layoutHistoryColumn(u int) {
 	t.rightItems = slices.Delete(t.rightItems, 0, len(t.rightItems))
 	t.rightItems = append(t.rightItems,
 		guigui.LinearLayoutItem{Size: guigui.FixedSize(u), Layout: &t.netRow},
+	)
+	if t.showHistSearch {
+		t.rightItems = append(t.rightItems, guigui.LinearLayoutItem{Widget: &t.histSearch})
+	}
+	t.rightItems = append(t.rightItems,
 		guigui.LinearLayoutItem{Widget: &t.histStack, Size: guigui.FlexibleSize(1)},
 	)
 	t.layoutStatusRow(u)
@@ -1053,6 +1162,13 @@ func (t *GitTool) histSpinBounds(u int) image.Rectangle {
 
 func (t *GitTool) Tick(context *guigui.Context, widgetBounds *guigui.WidgetBounds) error {
 	t.focusRecentFilterIfNeeded(context)
+	if t.histSearchFocus {
+		t.histSearchFocus = false
+		if t.showHistSearch {
+			t.histSearch.input.SelectAll()
+			context.SetFocused(&t.histSearch.input, true)
+		}
+	}
 	if v, ok := context.Env(t, EnvKeyModel); ok {
 		t.maybeLoadMoreHistory(v.(*Model).Git())
 	}
