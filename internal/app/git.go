@@ -35,6 +35,7 @@ type GitTool struct {
 	fetchBtn   basicwidget.Button
 	pullBtn    basicwidget.Button
 	pushBtn    basicwidget.Button
+	headBtn    gitHeadButton
 	commitBtn  basicwidget.Button
 	amendBtn   basicwidget.Button
 	commitView bool
@@ -89,6 +90,17 @@ type GitTool struct {
 	histSearchFocus bool
 	histSearch      gitHistSearch
 	showHistSearch  bool
+	// headJump is the checked-out commit History should select and scroll
+	// into view. Empty means no jump is waiting. A tab or repository change
+	// drops it. headJumpAsked is the history page already requested for it,
+	// so a failed page does not start again on its own.
+	headJump      string
+	headJumpTab   int
+	headJumpPath  string
+	headJumpAsked int
+	// keepOpenDetail skips the commit-list selection callback while the
+	// jump moves the highlight. The open detail panel stays as it is.
+	keepOpenDetail bool
 
 	commitList  basicwidget.List[string]
 	commitRows  guigui.WidgetSlice[*gitCommitRow]
@@ -240,6 +252,7 @@ func (t *GitTool) WriteStateKey(context *guigui.Context, w *guigui.StateKeyWrite
 	w.WriteString(t.recentQuery)
 	w.WriteString(t.histQuery)
 	w.WriteBool(t.histSearchOpen)
+	w.WriteString(t.headJump)
 	w.WriteBool(m.Busy())
 	w.WriteBool(m.HistoryLoading())
 	w.WriteBool(m.HasMoreHistory())
@@ -265,6 +278,7 @@ func (t *GitTool) Build(context *guigui.Context, adder *guigui.ChildAdder) error
 	model.ensure()
 	t.noteRecentSession(model.tabs[model.active])
 	t.syncHistQuery(model)
+	t.noteHeadJump(model)
 	busy := model.Busy()
 	has := model.HasRepo()
 	onMenu := func(ref gitcli.Ref) { t.openBranchMenu(lang, model, ref) }
@@ -304,6 +318,10 @@ func (t *GitTool) Build(context *guigui.Context, adder *guigui.ChildAdder) error
 		adder.AddWidget(&t.fetchBtn)
 		adder.AddWidget(&t.pullBtn)
 		adder.AddWidget(&t.pushBtn)
+		t.headBtn.set(context, lang, t.canJumpHead(model), func(*guigui.Context) {
+			t.startHeadJump(model)
+		})
+		adder.AddWidget(&t.headBtn)
 		if t.showHistSearch {
 			t.histSearch.owner = t
 			adder.AddWidget(&t.histSearch)
@@ -499,6 +517,7 @@ func (t *GitTool) Build(context *guigui.Context, adder *guigui.ChildAdder) error
 		}
 		t.histStack.showDiff = false
 		adder.AddWidget(&t.histStack)
+		t.syncHeadJump(model, nil)
 	} else if !t.commitView {
 		rebuilt := t.syncCommitRows(lang, model, snap, onMenu)
 		t.commitList.SetStyle(basicwidget.ListStyleNormal)
@@ -509,10 +528,15 @@ func (t *GitTool) Build(context *guigui.Context, adder *guigui.ChildAdder) error
 			t.commitSel = ""
 		}
 		t.histStack.header.SetLang(lang)
+		scroll := t.syncHeadJump(model, &t.commitList)
+		if scroll != "" {
+			t.keepOpenDetail = true
+		}
 		if sel := model.Selected(); sel != "" && sel != t.commitSel {
 			t.commitList.SelectItemByValue(sel)
 			t.commitSel = sel
 		}
+		t.keepOpenDetail = false
 		if t.histJump != "" {
 			hash := t.histJump
 			t.histJump = ""
@@ -533,6 +557,11 @@ func (t *GitTool) Build(context *guigui.Context, adder *guigui.ChildAdder) error
 				}
 			}
 		}
+		if scroll != "" {
+			if idx := t.commitList.IndexByValue(scroll); idx >= 0 {
+				t.commitList.EnsureItemVisibleByIndex(idx)
+			}
+		}
 		context.SetClipChildren(&t.commitList, true)
 		t.histStack.tool = t
 		t.histStack.graph = &t.commitList
@@ -544,6 +573,9 @@ func (t *GitTool) Build(context *guigui.Context, adder *guigui.ChildAdder) error
 		t.commitList.OnItemSelected(func(context *guigui.Context, index int) {
 			item, ok := t.commitList.ItemByIndex(index)
 			if !ok || item.Value == "" {
+				return
+			}
+			if t.keepOpenDetail {
 				return
 			}
 			model.SelectCommit(item.Value)
@@ -1050,6 +1082,7 @@ func (t *GitTool) layoutHistoryColumn(u int) {
 		guigui.LinearLayoutItem{Widget: &t.pullBtn},
 		guigui.LinearLayoutItem{Widget: &t.pushBtn},
 		guigui.LinearLayoutItem{Size: guigui.FlexibleSize(1)},
+		guigui.LinearLayoutItem{Widget: &t.headBtn, Size: guigui.FixedSize(u)},
 	)
 	t.netRow = guigui.LinearLayout{Direction: guigui.LayoutDirectionHorizontal, Items: t.netItems, Gap: u / 4}
 
