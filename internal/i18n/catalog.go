@@ -163,6 +163,7 @@ const (
 	GitNoCommits        Key = "git.no_commits"
 	GitConsoleShow      Key = "git.console_show"
 	GitConsoleHide      Key = "git.console_hide"
+	GitJumpHead         Key = "git.jump_head"
 	GitDetached         Key = "git.detached"
 	GitUncommitted      Key = "git.uncommitted"
 	GitAheadBehind      Key = "git.ahead_behind"
@@ -520,6 +521,7 @@ var catalogs = map[Lang]map[Key]string{
 		GitNoCommits:                   "表示するコミットがありません。",
 		GitConsoleShow:                 "コンソールを開く",
 		GitConsoleHide:                 "コンソールを閉じる",
+		GitJumpHead:                    "チェックアウト中のコミットへ",
 		GitDetached:                    "detached HEAD",
 		GitUncommitted:                 "未コミットの変更",
 		GitAheadBehind:                 "ahead %d / behind %d",
@@ -860,6 +862,7 @@ var catalogs = map[Lang]map[Key]string{
 		GitNoCommits:                   "No commits to show.",
 		GitConsoleShow:                 "Show console",
 		GitConsoleHide:                 "Hide console",
+		GitJumpHead:                    "Jump to the checked-out commit",
 		GitDetached:                    "detached HEAD",
 		GitUncommitted:                 "Uncommitted changes",
 		GitAheadBehind:                 "ahead %d / behind %d",
