@@ -256,6 +256,11 @@ func (r *Root) HandleButtonInput(context *guigui.Context, widgetBounds *guigui.W
 		r.model.ToggleSidebar()
 		return guigui.HandleInputByWidget(r)
 	}
+	if r.model.Mode() == ToolGit && inpututil.IsKeyJustPressed(ebiten.KeyEscape) && !shortcutModifierPressed(context) && !ebiten.IsKeyPressed(ebiten.KeyShift) && !ebiten.IsKeyPressed(ebiten.KeyAlt) && !ebiten.IsKeyPressed(ebiten.KeyControl) {
+		if r.gitTool.closeHistSearch(context) {
+			return guigui.HandleInputByWidget(r)
+		}
+	}
 	if r.model.Mode() == ToolStopwatch && !shortcutModifierPressed(context) {
 		switch {
 		case inpututil.IsKeyJustPressed(ebiten.KeySpace):
@@ -300,6 +305,9 @@ func (r *Root) HandleButtonInput(context *guigui.Context, widgetBounds *guigui.W
 			return guigui.HandleInputByWidget(r)
 		}
 	case ToolGit:
+		if inpututil.IsKeyJustPressed(ebiten.KeyF) && r.gitTool.openHistSearch() {
+			return guigui.HandleInputByWidget(r)
+		}
 		return guigui.HandleInputResult{}
 	case ToolMTP:
 		return guigui.HandleInputResult{}
