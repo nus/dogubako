@@ -127,17 +127,21 @@ type GitTool struct {
 	openHash       string
 	openShown      string
 	openFromSelect bool
-	building       bool
-	expand         gitCommitExpand
-	histFile       string
-	histFor        string
-	histFrac       float64
-	histDragging   bool
-	histBounds     image.Rectangle
-	histGraph      image.Rectangle
-	histStack      gitHistStack
-	histSpin       gitSpin
-	showHistSpin   bool
+	// hitCommit is the commit row that received the left click.
+	// A rectangle behind the console icon or its balloon does not count.
+	hitCommit     string
+	hitCommitMenu string
+	building      bool
+	expand        gitCommitExpand
+	histFile      string
+	histFor       string
+	histFrac      float64
+	histDragging  bool
+	histBounds    image.Rectangle
+	histGraph     image.Rectangle
+	histStack     gitHistStack
+	histSpin      gitSpin
+	showHistSpin  bool
 	// historyEndOn means End already asked for the next history page.
 	// The pager waits until the user scrolls away or asks again.
 	historyEndOn   bool
@@ -207,11 +211,14 @@ type GitTool struct {
 	msgInput    guigui.WidgetWithSize[*basicwidget.TextInput]
 	status      basicwidget.Text
 	// consoleOpen lasts for this launch. The next launch starts closed.
-	consoleOpen   bool
-	consoleToggle gitConsoleToggle
-	console       gitConsole
-	statusItems   []guigui.LinearLayoutItem
-	statusRow     guigui.LinearLayout
+	consoleOpen bool
+	// consolePressed is set when the status icon handles the click.
+	// The balloon above that icon does not receive the click itself.
+	consolePressed bool
+	consoleToggle  gitConsoleToggle
+	console        gitConsole
+	statusItems    []guigui.LinearLayoutItem
+	statusRow      guigui.LinearLayout
 
 	branchMenu gitBranchMenu
 	commitMenu gitCommitMenu
@@ -617,6 +624,7 @@ func (t *GitTool) Build(context *guigui.Context, adder *guigui.ChildAdder) error
 	t.status.SetEllipsisString("…")
 	t.status.SetWrapMode(basicwidget.WrapModeNone)
 	t.consoleToggle.set(context, lang, t.consoleOpen, func(*guigui.Context) {
+		t.consolePressed = true
 		t.consoleOpen = !t.consoleOpen
 		guigui.RequestRebuild()
 	})
@@ -1062,6 +1070,22 @@ func (t *GitTool) syncHistFile() {
 	t.histFor = t.openHash
 }
 
+// commitOpenFromClick is a left click on a commit row that was actually hit.
+// onControl means the console icon or its balloon is under the cursor, so the
+// row behind it stays as it is. fromSelect means the list already opened the
+// commit and started loading it. The bool reports that the caller should load
+// the returned commit; a cursor-only open never does, and the detail would
+// stay on the loading text.
+func commitOpenFromClick(openHash, hit string, onControl, fromSelect bool) (string, bool) {
+	if onControl || fromSelect || hit == "" || hit == gitcli.Uncommitted {
+		return openHash, false
+	}
+	if hit == openHash {
+		return "", false
+	}
+	return hit, true
+}
+
 // commitOpenAfterSelect is the commit whose detail stays open after selecting hash.
 // Arrow keys keep the panel open only when it was already open, and leave it
 // closed otherwise. A click opens the commit. The uncommitted row has no panel.
@@ -1207,6 +1231,13 @@ func (t *GitTool) Tick(context *guigui.Context, widgetBounds *guigui.WidgetBound
 	}
 	openedBySelect := t.openFromSelect
 	t.openFromSelect = false
+	consolePressed := t.consolePressed
+	t.consolePressed = false
+	hitCommit := t.hitCommit
+	t.hitCommit = ""
+	t.hitCommitMenu = ""
+	tipClick := t.consoleToggle.tipBody.clicked
+	t.consoleToggle.tipBody.clicked = false
 	if t.sideDragging && !ebiten.IsMouseButtonPressed(ebiten.MouseButtonLeft) {
 		t.sideDragging = false
 		t.setSideDragPassthrough(context, false)
@@ -1244,12 +1275,19 @@ func (t *GitTool) Tick(context *guigui.Context, widgetBounds *guigui.WidgetBound
 		t.openRecentAtCursor(model)
 		return nil
 	}
-	if !t.commitView && !openedBySelect && !t.histDragging && !t.graphDragging && t.metaDrag == 0 && !t.cursorOnCommitSplit() {
-		if hash, ok := t.commitAtCursor(); ok {
-			if hash == t.openHash {
-				t.openHash = ""
-			} else {
-				t.openHash = hash
+	cursor := image.Pt(ebiten.CursorPosition())
+	onConsole := consolePressed || tipClick || t.consoleToggle.blocksCommit(cursor)
+	if tipClick && !consolePressed {
+		// The balloon does not toggle the console on its own.
+		t.consoleOpen = !t.consoleOpen
+		guigui.RequestRebuild()
+	}
+	if !t.commitView && !t.histDragging && !t.graphDragging && t.metaDrag == 0 && !t.cursorOnCommitSplit() {
+		next, load := commitOpenFromClick(t.openHash, hitCommit, onConsole, openedBySelect)
+		if next != t.openHash {
+			t.openHash = next
+			if load {
+				model.SelectCommit(next)
 			}
 			guigui.RequestRebuild()
 		}
@@ -1671,7 +1709,7 @@ func (t *GitTool) HandlePointingInput(context *guigui.Context, widgetBounds *gui
 		if t.cursorOnCommitSplit() {
 			return guigui.HandleInputByWidget(t)
 		}
-		if hash, ok := t.commitAtCursor(); ok {
+		if hash := t.hitCommitMenu; hash != "" && !t.consoleToggle.blocksCommit(image.Pt(ebiten.CursorPosition())) {
 			t.openCommitMenu(appModel.Lang(), model, hash)
 			return guigui.HandleInputByWidget(t)
 		}
@@ -1687,6 +1725,9 @@ func cursorInGraphItem(cursor image.Point, graph, item image.Rectangle) bool {
 
 func (t *GitTool) commitAtCursor() (string, bool) {
 	c := image.Pt(ebiten.CursorPosition())
+	if t.consoleToggle.blocksCommit(c) {
+		return "", false
+	}
 	for i := 0; i < t.commitList.ItemCount(); i++ {
 		if !cursorInGraphItem(c, t.histGraph, t.commitList.ItemBounds(i)) {
 			continue
