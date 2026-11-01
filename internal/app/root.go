@@ -308,6 +308,16 @@ func (r *Root) HandleButtonInput(context *guigui.Context, widgetBounds *guigui.W
 		if inpututil.IsKeyJustPressed(ebiten.KeyF) && r.gitTool.openHistSearch() {
 			return guigui.HandleInputByWidget(r)
 		}
+		// W closes the displayed repository tab, the same tab the × closes.
+		// A text field that uses the chord handles it first: Emacs Ctrl+W cuts.
+		// Shift, Alt, and an open menu or dialog leave the tab in place.
+		// IsKeyJustPressed keeps a held key to a single tab.
+		if inpututil.IsKeyJustPressed(ebiten.KeyW) && !shiftDown() && !ebiten.IsKeyPressed(ebiten.KeyAlt) && !r.gitTool.menuOpen() {
+			git := r.model.Git()
+			git.EnsureLoaded()
+			git.CloseTab(git.ActiveTab())
+			return guigui.HandleInputByWidget(r)
+		}
 		return guigui.HandleInputResult{}
 	case ToolMTP:
 		return guigui.HandleInputResult{}
