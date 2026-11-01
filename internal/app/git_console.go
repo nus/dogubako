@@ -7,6 +7,7 @@ import (
 	"sync"
 
 	"github.com/hajimehoshi/ebiten/v2"
+	"github.com/hajimehoshi/ebiten/v2/inpututil"
 	"github.com/hajimehoshi/ebiten/v2/vector"
 
 	"github.com/guigui-gui/guigui"
@@ -294,8 +295,10 @@ func consoleAtBottom(offsetY float64, viewH, contentH int) bool {
 type gitConsoleToggle struct {
 	guigui.DefaultWidget
 
-	button basicwidget.Button
-	tip    basicwidget.TooltipArea
+	button  basicwidget.Button
+	tip     basicwidget.TooltipArea
+	tipBody gitConsoleTipBody
+	bounds  image.Rectangle
 }
 
 func (t *gitConsoleToggle) set(context *guigui.Context, lang i18n.Lang, open bool, onDown func(*guigui.Context)) {
@@ -306,7 +309,8 @@ func (t *gitConsoleToggle) set(context *guigui.Context, lang i18n.Lang, open boo
 	if open {
 		key = i18n.GitConsoleHide
 	}
-	t.tip.SetText(i18n.T(lang, key))
+	t.tipBody.value = i18n.T(lang, key)
+	t.tip.SetContent(&t.tipBody)
 }
 
 func (t *gitConsoleToggle) Build(context *guigui.Context, adder *guigui.ChildAdder) error {
@@ -318,8 +322,100 @@ func (t *gitConsoleToggle) Build(context *guigui.Context, adder *guigui.ChildAdd
 
 func (t *gitConsoleToggle) Layout(context *guigui.Context, widgetBounds *guigui.WidgetBounds, layouter *guigui.ChildLayouter) {
 	bounds := widgetBounds.Bounds()
+	t.bounds = bounds
+	// The balloon is laid out later, and only while it is open. A closed
+	// balloon must not keep last frame's rectangle over a commit row.
+	t.tipBody.shown = false
 	layouter.LayoutWidget(&t.button, bounds)
 	layouter.LayoutWidget(&t.tip, bounds)
+}
+
+// blocksCommit reports that cursor is on the console icon or its balloon.
+// The history hit test uses row rectangles, so a control drawn in front of a
+// commit would otherwise open that commit too.
+func (t *gitConsoleToggle) blocksCommit(cursor image.Point) bool {
+	return consoleControlAt(cursor, t.bounds, t.tipBody.bounds, t.tipBody.shown)
+}
+
+// consoleControlAt reports a click on the console icon or its open balloon.
+// tipShown is false once the balloon closes, even if tip still holds the
+// rectangle from the last time it was open.
+func consoleControlAt(cursor image.Point, button, tip image.Rectangle, tipShown bool) bool {
+	if !button.Empty() && cursor.In(button) {
+		return true
+	}
+	return tipShown && !tip.Empty() && cursor.In(tip)
+}
+
+// consoleClickKeepsCommit is a left click on the console icon or its balloon.
+// The open commit stays as it is. handled means the icon already toggled the
+// console, so the click is not applied a second time.
+func consoleClickKeepsCommit(openHash string, consoleOpen, handled bool) (string, bool) {
+	if !handled {
+		consoleOpen = !consoleOpen
+	}
+	return openHash, consoleOpen
+}
+
+// gitConsoleTipBody is the balloon text. Its bounds are the balloon itself.
+// The balloon does not take clicks, so the history click test has to consult
+// this rectangle.
+type gitConsoleTipBody struct {
+	guigui.DefaultWidget
+
+	text  basicwidget.Text
+	value string
+
+	bounds  image.Rectangle
+	shown   bool
+	clicked bool
+}
+
+func (b *gitConsoleTipBody) syncText() {
+	b.text.SetMultiline(true)
+	b.text.SetValue(b.value)
+}
+
+func (b *gitConsoleTipBody) HandlePointingInput(context *guigui.Context, widgetBounds *guigui.WidgetBounds) guigui.HandleInputResult {
+	if !widgetBounds.IsHitAtCursor() || !inpututil.IsMouseButtonJustPressed(ebiten.MouseButtonLeft) {
+		return guigui.HandleInputResult{}
+	}
+	b.clicked = true
+	return guigui.AbortHandlingInputByWidget(b)
+}
+
+func (b *gitConsoleTipBody) Build(context *guigui.Context, adder *guigui.ChildAdder) error {
+	b.syncText()
+	adder.AddWidget(&b.text)
+	return nil
+}
+
+func (b *gitConsoleTipBody) Layout(context *guigui.Context, widgetBounds *guigui.WidgetBounds, layouter *guigui.ChildLayouter) {
+	b.shown = true
+	b.bounds = widgetBounds.Bounds()
+	b.syncText()
+	layouter.LayoutWidget(&b.text, insetPadding(b.bounds, basicwidget.TooltipTextPadding(context)))
+}
+
+func (b *gitConsoleTipBody) Measure(context *guigui.Context, constraints guigui.Constraints) image.Point {
+	b.syncText()
+	size := b.text.Measure(context, constraints)
+	pad := basicwidget.TooltipTextPadding(context)
+	return image.Pt(size.X+pad.Start+pad.End, size.Y+pad.Top+pad.Bottom)
+}
+
+func insetPadding(r image.Rectangle, pad guigui.Padding) image.Rectangle {
+	r.Min.X += pad.Start
+	r.Min.Y += pad.Top
+	r.Max.X -= pad.End
+	r.Max.Y -= pad.Bottom
+	if r.Max.X < r.Min.X {
+		r.Max.X = r.Min.X
+	}
+	if r.Max.Y < r.Min.Y {
+		r.Max.Y = r.Min.Y
+	}
+	return r
 }
 
 // gitConsole is the transcript under the status line.

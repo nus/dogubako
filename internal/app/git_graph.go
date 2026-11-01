@@ -1144,6 +1144,7 @@ type gitCommitRow struct {
 	author      basicwidget.Text
 	hash        basicwidget.Text
 	date        basicwidget.Text
+	commit      string
 	uncommitted bool
 
 	layoutItems []guigui.LinearLayoutItem
@@ -1151,6 +1152,7 @@ type gitCommitRow struct {
 }
 
 func (r *gitCommitRow) Set(row gitcli.GraphRow, lanes int, head, expandAbove, expandBelow bool, lang i18n.Lang, onSwitch func(gitcli.Ref), onMenu func(gitcli.Ref)) {
+	r.commit = row.Commit.Hash
 	r.uncommitted = row.Commit.Hash == gitcli.Uncommitted
 	r.graph.Set(row, lanes, head, expandAbove, expandBelow)
 	r.badges.Set(row.Commit.Decorations, row.Commit.Hash, onSwitch, onMenu)
@@ -1187,6 +1189,24 @@ func (r *gitCommitRow) Build(context *guigui.Context, adder *guigui.ChildAdder) 
 	}
 	r.date.SetHorizontalAlign(basicwidget.HorizontalAlignEnd)
 	return nil
+}
+
+func (r *gitCommitRow) HandlePointingInput(context *guigui.Context, widgetBounds *guigui.WidgetBounds) guigui.HandleInputResult {
+	if r.tool == nil || r.uncommitted || r.commit == "" || r.commit == gitcli.Uncommitted {
+		return guigui.HandleInputResult{}
+	}
+	// A control drawn in front of the row, such as the console balloon, is not a hit.
+	// The history click test must not open that row from the cursor position alone.
+	if !widgetBounds.IsHitAtCursor() {
+		return guigui.HandleInputResult{}
+	}
+	switch {
+	case inpututil.IsMouseButtonJustPressed(ebiten.MouseButtonLeft):
+		r.tool.hitCommit = r.commit
+	case inpututil.IsMouseButtonJustPressed(ebiten.MouseButtonRight):
+		r.tool.hitCommitMenu = r.commit
+	}
+	return guigui.HandleInputResult{}
 }
 
 func (r *gitCommitRow) HandleButtonInput(context *guigui.Context, widgetBounds *guigui.WidgetBounds) guigui.HandleInputResult {

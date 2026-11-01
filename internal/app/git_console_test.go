@@ -142,6 +142,56 @@ func TestConsoleScrollFollow(t *testing.T) {
 	}
 }
 
+func TestConsoleControlAt(t *testing.T) {
+	button := image.Rect(360, 480, 384, 498)
+	tip := image.Rect(300, 450, 420, 472)
+	if !consoleControlAt(image.Pt(370, 488), button, tip, true) {
+		t.Fatal("the console icon is not a commit click")
+	}
+	if !consoleControlAt(image.Pt(340, 460), button, tip, true) {
+		t.Fatal("the close-console balloon is not a commit click")
+	}
+	if consoleControlAt(image.Pt(340, 460), button, tip, false) {
+		t.Fatal("a closed balloon must not keep covering the commit")
+	}
+	if consoleControlAt(image.Pt(20, 200), button, tip, true) {
+		t.Fatal("a commit away from the console control stays clickable")
+	}
+}
+
+func TestCommitOpenFromClick(t *testing.T) {
+	if open, load := commitOpenFromClick("keep", "behind", true, false); open != "keep" || load {
+		t.Fatalf("console control open=%q load=%v", open, load)
+	}
+	if open, load := commitOpenFromClick("", "behind", false, false); open != "behind" || !load {
+		t.Fatalf("row click open=%q load=%v", open, load)
+	}
+	if open, load := commitOpenFromClick("behind", "behind", false, false); open != "" || load {
+		t.Fatalf("second click open=%q load=%v", open, load)
+	}
+	if open, load := commitOpenFromClick("keep", "behind", false, true); open != "keep" || load {
+		t.Fatalf("list already opened open=%q load=%v", open, load)
+	}
+	if open, load := commitOpenFromClick("keep", "", false, false); open != "keep" || load {
+		t.Fatalf("balloon only open=%q load=%v", open, load)
+	}
+}
+
+func TestConsoleClickKeepsCommit(t *testing.T) {
+	open, console := consoleClickKeepsCommit("abc", false, true)
+	if open != "abc" || console {
+		t.Fatalf("icon click open=%q console=%v", open, console)
+	}
+	open, console = consoleClickKeepsCommit("abc", true, false)
+	if open != "abc" || console {
+		t.Fatalf("balloon click open=%q console=%v", open, console)
+	}
+	open, console = consoleClickKeepsCommit("", false, false)
+	if open != "" || !console {
+		t.Fatalf("show balloon open=%q console=%v", open, console)
+	}
+}
+
 func TestGitViewBottoms(t *testing.T) {
 	rest := image.Rect(0, 10, 400, 510)
 	list, right, console := gitViewBottoms(rest, 24, false)
