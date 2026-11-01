@@ -264,6 +264,17 @@ func TestInlineUnequalSplit(t *testing.T) {
 	assertNoWord(t, left, len(split.leftBody), light)
 }
 
+func TestEmojiDiffStagesOriginalBytes(t *testing.T) {
+	diff := "" +
+		"diff --git a/a.txt b/a.txt\n" +
+		"--- a/a.txt\n" +
+		"+++ b/a.txt\n" +
+		"@@ -1 +1 @@\n" +
+		"+ship 🚀\n"
+	v := openSyntax(diff, false, false, false, false, "", "")
+	assertWholePatch(t, v, diff, "ship 🚀", "+ship 🚀\n", false)
+}
+
 func TestInlineStageUnchanged(t *testing.T) {
 	diff := "" +
 		"diff --git a/a.txt b/a.txt\n" +
