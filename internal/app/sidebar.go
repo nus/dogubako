@@ -2,7 +2,10 @@ package app
 
 import (
 	"image"
+	"image/color"
 	"slices"
+
+	"github.com/hajimehoshi/ebiten/v2"
 
 	"github.com/guigui-gui/guigui"
 	"github.com/guigui-gui/guigui/basicwidget"
@@ -57,10 +60,23 @@ type sidebarContent struct {
 	list   basicwidget.List[ToolID]
 	lang   basicwidget.SegmentedControl[i18n.Lang]
 
+	rows      guigui.WidgetSlice[*sidebarToolRow]
+	listItems []basicwidget.ListItem[ToolID]
+
 	collapsed   bool
 	size        image.Point
 	layoutItems []guigui.LinearLayoutItem
 	headerItems []guigui.LinearLayoutItem
+}
+
+// sidebarItemPadding cancels the list's corner inset while the rail is
+// collapsed. That inset would shrink each icon below the one-unit rail.
+// The outer sidebar width stays sidebarWidth.
+func sidebarItemPadding(collapsed bool, inset int) guigui.Padding {
+	if !collapsed || inset <= 0 {
+		return guigui.Padding{}
+	}
+	return guigui.Padding{Start: -inset, End: -inset}
 }
 
 // sidebarToggle is the fold / open button, with a tooltip over the same bounds.
@@ -113,7 +129,32 @@ func (s *sidebarContent) Build(context *guigui.Context, adder *guigui.ChildAdder
 	s.toggle.configure(mark, i18n.T(lang, tipKey, ShortcutLabel(context, "B")), func(*guigui.Context) {
 		model.ToggleSidebar()
 	})
+
+	pad := sidebarItemPadding(s.collapsed, basicwidget.RoundedCornerRadius(context))
+	s.rows.SetLen(len(Tools))
+	s.listItems = slices.Delete(s.listItems, 0, len(s.listItems))
+	for i, tool := range Tools {
+		row := s.rows.At(i)
+		row.Set(tool.ID, tool.Title(lang), s.collapsed)
+		s.listItems = append(s.listItems, basicwidget.ListItem[ToolID]{
+			Content: row,
+			Value:   tool.ID,
+			Padding: pad,
+		})
+	}
+	s.list.SetStyle(basicwidget.ListStyleSidebar)
+	s.list.SetItems(s.listItems)
+	s.list.SelectItemByValue(model.Mode())
+	s.list.SetItemHeight(basicwidget.UnitSize(context))
+	s.list.OnItemSelected(func(context *guigui.Context, index int) {
+		item, ok := s.list.ItemByIndex(index)
+		if !ok {
+			return
+		}
+		model.SetMode(item.Value)
+	})
 	if s.collapsed {
+		adder.AddWidget(&s.list)
 		return nil
 	}
 
@@ -125,25 +166,6 @@ func (s *sidebarContent) Build(context *guigui.Context, adder *guigui.ChildAdder
 	setBoldText(&s.title, true)
 	s.title.SetHorizontalAlign(basicwidget.HorizontalAlignCenter)
 	s.title.SetVerticalAlign(basicwidget.VerticalAlignMiddle)
-
-	items := make([]basicwidget.ListItem[ToolID], 0, len(Tools))
-	for _, tool := range Tools {
-		items = append(items, basicwidget.ListItem[ToolID]{
-			Text:  tool.Title(lang),
-			Value: tool.ID,
-		})
-	}
-	s.list.SetStyle(basicwidget.ListStyleSidebar)
-	s.list.SetItems(items)
-	s.list.SelectItemByValue(model.Mode())
-	s.list.SetItemHeight(basicwidget.UnitSize(context))
-	s.list.OnItemSelected(func(context *guigui.Context, index int) {
-		item, ok := s.list.ItemByIndex(index)
-		if !ok {
-			return
-		}
-		model.SetMode(item.Value)
-	})
 
 	s.lang.SetItems([]basicwidget.SegmentedControlItem[i18n.Lang]{
 		{Text: "日本語", Value: i18n.JA},
@@ -170,6 +192,7 @@ func (s *sidebarContent) layout(context *guigui.Context) guigui.LinearLayout {
 	if s.collapsed {
 		s.layoutItems = append(s.layoutItems,
 			guigui.LinearLayoutItem{Widget: &s.toggle, Size: guigui.FixedSize(u)},
+			guigui.LinearLayoutItem{Widget: &s.list, Size: guigui.FlexibleSize(1)},
 		)
 		return guigui.LinearLayout{
 			Direction: guigui.LayoutDirectionVertical,
@@ -209,4 +232,129 @@ func (s *sidebarContent) Layout(context *guigui.Context, widgetBounds *guigui.Wi
 
 func (s *sidebarContent) Measure(context *guigui.Context, constraints guigui.Constraints) image.Point {
 	return s.size
+}
+
+// sidebarToolRow is one tool in the sidebar list. Expanded rows show an icon
+// and the function name. Collapsed rows show the icon only, and hovering it
+// shows that same name.
+type sidebarToolRow struct {
+	guigui.DefaultWidget
+
+	label basicwidget.Text
+	tip   sidebarTip
+
+	id       ToolID
+	title    string
+	iconOnly bool
+}
+
+func (r *sidebarToolRow) Set(id ToolID, title string, iconOnly bool) {
+	r.id = id
+	r.title = title
+	r.iconOnly = iconOnly
+}
+
+// tooltipText is the hover label. Expanded rows already show the name.
+func (r *sidebarToolRow) tooltipText() string {
+	if !r.iconOnly {
+		return ""
+	}
+	return r.title
+}
+
+func (r *sidebarToolRow) WriteStateKey(context *guigui.Context, w *guigui.StateKeyWriter) {
+	w.WriteString(string(r.id))
+	w.WriteString(r.title)
+	w.WriteBool(r.iconOnly)
+}
+
+func (r *sidebarToolRow) Build(context *guigui.Context, adder *guigui.ChildAdder) error {
+	if r.iconOnly {
+		adder.AddWidget(&r.tip)
+		r.tip.SetText(r.title)
+		return nil
+	}
+	r.tip.Close()
+	adder.AddWidget(&r.label)
+	r.label.SetValue(r.title)
+	r.label.SetHorizontalAlign(basicwidget.HorizontalAlignStart)
+	r.label.SetVerticalAlign(basicwidget.VerticalAlignMiddle)
+	return nil
+}
+
+func (r *sidebarToolRow) Layout(context *guigui.Context, widgetBounds *guigui.WidgetBounds, layouter *guigui.ChildLayouter) {
+	bounds := widgetBounds.Bounds()
+	if r.iconOnly {
+		layouter.LayoutWidget(&r.tip, bounds)
+		return
+	}
+	fg, bold := sidebarItemInk(context, r)
+	var style basicwidget.TextStyle
+	style.SetBold(bold)
+	if fg != nil {
+		style.SetColor(fg)
+	}
+	r.label.SetBaseStyle(&style)
+	side := bounds.Dy()
+	if side > bounds.Dx() {
+		side = bounds.Dx()
+	}
+	gap := basicwidget.UnitSize(context) / 6
+	if gap < 2 {
+		gap = 2
+	}
+	text := bounds
+	text.Min.X += side + gap
+	if text.Min.X > text.Max.X {
+		text.Min.X = text.Max.X
+	}
+	layouter.LayoutWidget(&r.label, text)
+}
+
+func (r *sidebarToolRow) Draw(context *guigui.Context, widgetBounds *guigui.WidgetBounds, dst *ebiten.Image) {
+	bounds := widgetBounds.Bounds()
+	if bounds.Empty() {
+		return
+	}
+	fg, _ := sidebarItemInk(context, r)
+	box := bounds
+	if !r.iconOnly {
+		side := bounds.Dy()
+		if side > bounds.Dx() {
+			side = bounds.Dx()
+		}
+		box = image.Rect(bounds.Min.X, bounds.Min.Y, bounds.Min.X+side, bounds.Min.Y+side)
+	}
+	drawToolGlyph(dst, box, r.id, fg)
+}
+
+func (r *sidebarToolRow) Measure(context *guigui.Context, constraints guigui.Constraints) image.Point {
+	u := basicwidget.UnitSize(context)
+	s := image.Pt(u, u)
+	if w, ok := constraints.FixedWidth(); ok {
+		s.X = w
+	}
+	if h, ok := constraints.FixedHeight(); ok {
+		s.Y = h
+	}
+	return s
+}
+
+func sidebarItemInk(context *guigui.Context, w guigui.Widget) (color.Color, bool) {
+	fg := color.Color(color.NRGBA{R: 0xc8, G: 0xc8, B: 0xc8, A: 0xff})
+	bold := false
+	v, ok := context.Env(w, basicwidget.EnvKeyListItemColorType)
+	if !ok {
+		return fg, bold
+	}
+	ct, ok := v.(basicwidget.ListItemColorType)
+	if !ok {
+		return fg, bold
+	}
+	if c := ct.TextColor(context); c != nil {
+		fg = c
+	}
+	bold = ct == basicwidget.ListItemColorTypeHighlighted ||
+		ct == basicwidget.ListItemColorTypeSelectedInUnfocusedList
+	return fg, bold
 }
