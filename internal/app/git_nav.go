@@ -311,11 +311,16 @@ func drawHistoryGlyph(dst *ebiten.Image, bounds image.Rectangle) {
 }
 
 func drawBranchGlyph(dst *ebiten.Image, bounds image.Rectangle) {
+	drawBranchMark(dst, bounds, color.NRGBA{R: 0x2f, G: 0x9e, B: 0x6b, A: 0xff}, 1.25)
+}
+
+// drawBranchMark is the git-side branch shape. col and stroke let the tool
+// sidebar use the same geometry in the item's text color.
+func drawBranchMark(dst *ebiten.Image, bounds image.Rectangle, col color.Color, stroke float32) {
 	r := iconInner(bounds)
 	if r.Dx() < 4 || r.Dy() < 4 {
 		return
 	}
-	col := color.NRGBA{R: 0x2f, G: 0x9e, B: 0x6b, A: 0xff}
 	w := float32(r.Dx())
 	h := float32(r.Dy())
 	x := float32(r.Min.X)
@@ -334,7 +339,7 @@ func drawBranchGlyph(dst *ebiten.Image, bounds image.Rectangle) {
 	p.LineTo(lx, ty)
 	p.MoveTo(lx, my)
 	p.QuadTo(lx, ty, rx, ty)
-	strokeGitPath(dst, &p, 1.25, col)
+	strokeGitPath(dst, &p, stroke, col)
 	vector.FillCircle(dst, lx, by, rad, col, true)
 	vector.FillCircle(dst, lx, ty, rad, col, true)
 	vector.FillCircle(dst, rx, ty, rad, col, true)

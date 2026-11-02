@@ -1,10 +1,16 @@
 package app
 
 import (
+	"image"
 	"os"
 	"path/filepath"
+	"runtime"
 	"strings"
 	"testing"
+
+	"github.com/guigui-gui/guigui"
+
+	"github.com/nus/dogubako/internal/i18n"
 )
 
 func TestSidebarWidth(t *testing.T) {
@@ -67,6 +73,91 @@ func TestSidebarCollapsedPersists(t *testing.T) {
 	if third.SidebarCollapsed() {
 		t.Fatal("reloaded model should stay expanded")
 	}
+}
+
+func TestSidebarItemPaddingFitsCollapsedRail(t *testing.T) {
+	if got := sidebarItemPadding(false, 6); got != (guigui.Padding{}) {
+		t.Fatalf("expanded padding = %+v", got)
+	}
+	if got := sidebarItemPadding(true, 0); got != (guigui.Padding{}) {
+		t.Fatalf("zero inset = %+v", got)
+	}
+	got := sidebarItemPadding(true, 6)
+	if got.Start != -6 || got.End != -6 || got.Top != 0 || got.Bottom != 0 {
+		t.Fatalf("collapsed padding = %+v", got)
+	}
+}
+
+func TestSidebarTooltipUsesCurrentTitle(t *testing.T) {
+	if runtime.GOOS == "darwin" {
+		if !sidebarHasTool(ToolMTP) {
+			t.Fatal("macOS sidebar should include MTP")
+		}
+	} else if sidebarHasTool(ToolMTP) {
+		t.Fatal("Ubuntu sidebar should omit MTP")
+	}
+	for _, lang := range []i18n.Lang{i18n.JA, i18n.EN} {
+		for _, tool := range Tools {
+			title := tool.Title(lang)
+			var row sidebarToolRow
+			row.Set(tool.ID, title, false)
+			if row.tooltipText() != "" {
+				t.Fatalf("expanded %s tip = %q", tool.ID, row.tooltipText())
+			}
+			row.Set(tool.ID, title, true)
+			if row.tooltipText() != title {
+				t.Fatalf("collapsed %s tip = %q, want %q", tool.ID, row.tooltipText(), title)
+			}
+		}
+	}
+}
+
+func TestSidebarTipBoundsSitToTheRight(t *testing.T) {
+	icon := image.Rect(8, 40, 32, 64)
+	size := image.Pt(80, 20)
+	app := image.Rect(0, 0, 400, 300)
+	got := sidebarTipBounds(icon, size, app, 4)
+	if got.Min.X != icon.Max.X+4 || got.Max.X != got.Min.X+size.X {
+		t.Fatalf("horizontal = %v", got)
+	}
+	if got.Min.Y != 42 || got.Dy() != size.Y {
+		t.Fatalf("vertical = %v", got)
+	}
+
+	tall := sidebarTipBounds(image.Rect(8, 0, 32, 24), image.Pt(40, 40), app, 4)
+	if tall.Min.Y != 0 {
+		t.Fatalf("top clamp = %d", tall.Min.Y)
+	}
+	if tall.Min.X != 36 {
+		t.Fatalf("still to the right, x = %d", tall.Min.X)
+	}
+}
+
+func TestSidebarTipOpensOnHover(t *testing.T) {
+	if open, changed := sidebarTipTransition(false, false); open || changed {
+		t.Fatalf("idle open=%v changed=%v", open, changed)
+	}
+	open, changed := sidebarTipTransition(true, false)
+	if !open || !changed {
+		t.Fatalf("enter open=%v changed=%v", open, changed)
+	}
+	open, changed = sidebarTipTransition(true, true)
+	if !open || changed {
+		t.Fatalf("stay open=%v changed=%v", open, changed)
+	}
+	open, changed = sidebarTipTransition(false, true)
+	if open || !changed {
+		t.Fatalf("leave open=%v changed=%v", open, changed)
+	}
+}
+
+func sidebarHasTool(id ToolID) bool {
+	for _, tool := range Tools {
+		if tool.ID == id {
+			return true
+		}
+	}
+	return false
 }
 
 func TestSidebarCollapsedIgnoresUnknown(t *testing.T) {
