@@ -254,28 +254,115 @@ func gitConsoleHeight(u int) int {
 
 // gitViewBottoms is where the columns stop and, when open, where the console sits.
 // Closed, the list still reaches the bottom of the git view and the right column
-// keeps its margin. Open, both columns end on the console's top edge.
-func gitViewBottoms(rest image.Rectangle, u int, consoleOpen bool) (listBottom, rightBottom int, console image.Rectangle) {
+// keeps its margin. Open, a horizontal boundary sits on the console's top edge
+// and both columns end on that boundary, shorter by the boundary's height.
+// frac is the dragged console share of the space beside the boundary.
+// Zero keeps the fixed height, including the shrink when the window is short.
+func gitViewBottoms(rest image.Rectangle, u int, consoleOpen bool, frac float64) (listBottom, rightBottom int, split, console image.Rectangle) {
 	listBottom = rest.Max.Y
 	rightBottom = rest.Max.Y - u/2
 	if rightBottom < rest.Min.Y {
 		rightBottom = rest.Min.Y
 	}
 	if !consoleOpen || rest.Dy() <= 0 {
-		return listBottom, rightBottom, image.Rectangle{}
+		return listBottom, rightBottom, image.Rectangle{}, image.Rectangle{}
 	}
+	splitH := gitWorkSplitWidth(u)
+	var h int
+	if frac > 0 {
+		h = gitConsoleDragHeight(rest.Dy(), splitH, frac, gitConsoleMinHeight(u), gitHistMinPane(u))
+	} else {
+		h = gitConsoleFixedHeight(rest.Dy(), u)
+	}
+	if splitH > rest.Dy() {
+		splitH = rest.Dy()
+	}
+	if room := rest.Dy() - splitH; h > room {
+		h = room
+	}
+	if h < 0 {
+		h = 0
+	}
+	consoleTop := rest.Max.Y - h
+	splitTop := consoleTop - splitH
+	return splitTop, splitTop,
+		image.Rect(rest.Min.X, splitTop, rest.Max.X, consoleTop),
+		image.Rect(rest.Min.X, consoleTop, rest.Max.X, rest.Max.Y)
+}
+
+// gitConsoleFixedHeight is the console body before its top edge is dragged.
+// A short window keeps the smaller of two thirds and the whole remainder.
+func gitConsoleFixedHeight(total, u int) int {
 	h := gitConsoleHeight(u)
-	if h > rest.Dy() {
-		h = rest.Dy()
+	if total < 1 {
+		return 0
 	}
-	if maxH := rest.Dy() * 2 / 3; maxH > 0 && h > maxH {
+	if h > total {
+		h = total
+	}
+	if maxH := total * 2 / 3; maxH > 0 && h > maxH {
 		h = maxH
 	}
 	if h < 1 {
 		h = 1
 	}
-	top := rest.Max.Y - h
-	return top, top, image.Rect(rest.Min.X, top, rest.Max.X, rest.Max.Y)
+	return h
+}
+
+// gitConsoleMinHeight is one monospace line plus the console's padding.
+func gitConsoleMinHeight(u int) int {
+	if u < 1 {
+		u = 1
+	}
+	line := u * 3 / 4
+	if line < 1 {
+		line = 1
+	}
+	pad := u / 4
+	return line + pad*2
+}
+
+// gitConsoleDragHeight is the console body after the top edge has been dragged.
+// frac is the console's share of the space beside the boundary.
+// The body stays between one line and the height that leaves the upper panes,
+// and it may pass the fixed view's two-thirds cap.
+func gitConsoleDragHeight(total, splitH int, frac float64, minConsole, minUpper int) int {
+	if frac <= 0 {
+		frac = 0.01
+	}
+	return gitWorkFilesWidth(total, splitH, frac, minConsole, minUpper)
+}
+
+// gitConsoleFracFromY is the console share for a pointer at y.
+// Moving up grows the console. The share stays inside the min and max.
+func gitConsoleFracFromY(rest image.Rectangle, y, u int) float64 {
+	splitH := gitWorkSplitWidth(u)
+	consoleH := rest.Max.Y - y - splitH/2
+	return gitConsoleFrac(rest.Dy(), splitH, consoleH, gitConsoleMinHeight(u), gitHistMinPane(u))
+}
+
+// gitConsoleFrac clamps a console height to the share beside the boundary.
+func gitConsoleFrac(total, splitH, consoleH, minConsole, minUpper int) float64 {
+	avail := total - splitH
+	if avail <= 0 {
+		return 0.01
+	}
+	frac := float64(consoleH) / float64(avail)
+	minFrac := float64(minConsole) / float64(avail)
+	maxFrac := float64(avail-minUpper) / float64(avail)
+	if maxFrac < minFrac {
+		maxFrac = minFrac
+	}
+	if frac < minFrac {
+		frac = minFrac
+	}
+	if frac > maxFrac {
+		frac = maxFrac
+	}
+	if frac <= 0 {
+		frac = 0.01
+	}
+	return frac
 }
 
 // consoleBottomOffset is the panel offset that shows the end of the transcript.
@@ -461,7 +548,7 @@ func (c *gitConsole) Build(context *guigui.Context, adder *guigui.ChildAdder) er
 	c.body.pad = basicwidget.UnitSize(context) / 4
 	c.panel.SetContent(&c.body)
 	c.panel.SetAutoBorder(false)
-	c.panel.SetBorders(basicwidget.PanelBorders{Top: true})
+	c.panel.SetBorders(basicwidget.PanelBorders{})
 	c.panel.SetBackgroundStyle(basicwidget.PanelBackgroundStyleSecondary)
 	c.panel.SetContentConstraints(basicwidget.PanelContentConstraintsFixedWidth)
 	c.panel.OnScroll(func(ctx *guigui.Context, x, y float64) {
@@ -588,4 +675,121 @@ func gitConsoleIcon(mode ebiten.ColorMode, size int) *ebiten.Image {
 	vector.StrokeLine(img, s*0.48, s*0.62, s*0.70, s*0.62, sw, col, true)
 	gitConsoleIcons[key] = img
 	return img
+}
+
+// gitConsoleSplit is the draggable horizontal boundary on the console's top edge.
+type gitConsoleSplit struct {
+	guigui.DefaultWidget
+
+	tool *GitTool
+}
+
+func (s *gitConsoleSplit) HandlePointingInput(context *guigui.Context, widgetBounds *guigui.WidgetBounds) guigui.HandleInputResult {
+	if s.tool == nil {
+		return guigui.HandleInputResult{}
+	}
+	hit := widgetBounds.IsHitAtCursor()
+	if s.tool.consoleDragging || hit && inpututil.IsMouseButtonJustPressed(ebiten.MouseButtonLeft) {
+		if result := s.tool.dragConsoleSplit(context); result.IsHandled() {
+			return result
+		}
+	}
+	if hit && (inpututil.IsMouseButtonJustPressed(ebiten.MouseButtonLeft) ||
+		inpututil.IsMouseButtonJustPressed(ebiten.MouseButtonRight) ||
+		inpututil.IsMouseButtonJustPressed(ebiten.MouseButtonMiddle)) {
+		return guigui.AbortHandlingInputByWidget(s)
+	}
+	return guigui.HandleInputResult{}
+}
+
+func (s *gitConsoleSplit) CursorShape(context *guigui.Context, widgetBounds *guigui.WidgetBounds) (ebiten.CursorShapeType, bool) {
+	if s.tool == nil {
+		return 0, false
+	}
+	if s.tool.sideDragging || s.tool.graphDragging || s.tool.metaDrag != 0 || s.tool.histDragging {
+		return 0, false
+	}
+	if s.tool.consoleDragging || widgetBounds.IsHitAtCursor() {
+		return ebiten.CursorShapeNSResize, true
+	}
+	return 0, false
+}
+
+func (s *gitConsoleSplit) Draw(context *guigui.Context, widgetBounds *guigui.WidgetBounds, dst *ebiten.Image) {
+	b := widgetBounds.Bounds()
+	if b.Empty() {
+		return
+	}
+	y := b.Min.Y + b.Dy()/2
+	fillRect(dst, image.Rect(b.Min.X, y, b.Max.X, y+1), gitHistSplitColor(context.ColorMode()))
+}
+
+func (t *GitTool) setConsoleFracFromCursor(y, u int) {
+	if t.consoleArea.Dy() <= 0 {
+		return
+	}
+	t.consoleFrac = gitConsoleFracFromY(t.consoleArea, y, u)
+}
+
+func (t *GitTool) dragConsoleSplit(context *guigui.Context) guigui.HandleInputResult {
+	u := basicwidget.UnitSize(context)
+	if !t.consoleDragging {
+		if t.sideDragging || t.graphDragging || t.metaDrag != 0 || t.histDragging {
+			return guigui.HandleInputResult{}
+		}
+		if !inpututil.IsMouseButtonJustPressed(ebiten.MouseButtonLeft) {
+			return guigui.HandleInputResult{}
+		}
+		t.consoleDragging = true
+	}
+	t.setConsoleFracFromCursor(image.Pt(ebiten.CursorPosition()).Y, u)
+	t.setConsoleDragPassthrough(context, true)
+	if !ebiten.IsMouseButtonPressed(ebiten.MouseButtonLeft) {
+		t.consoleDragging = false
+		t.setConsoleDragPassthrough(context, false)
+	}
+	guigui.RequestRebuild()
+	return guigui.HandleInputByWidget(t)
+}
+
+func (t *GitTool) setConsoleDragPassthrough(context *guigui.Context, pass bool) {
+	for _, w := range []guigui.Widget{
+		&t.tabBar,
+		&t.sidePane,
+		&t.sideSplit,
+		&t.fetchBtn,
+		&t.pullBtn,
+		&t.pushBtn,
+		&t.headBtn,
+		&t.histSearch,
+		&t.status,
+		&t.consoleToggle,
+		&t.console,
+		&t.workPanes,
+		&t.workTree,
+		&t.msgInput,
+		&t.stageBtn,
+		&t.unstageBtn,
+		&t.commitBtn,
+		&t.amendBtn,
+		&t.expand,
+		&t.commitList,
+		&t.graphEmpty,
+		&t.histStack,
+		&t.branchMenu,
+		&t.commitMenu,
+		&t.tagMenu,
+		&t.pushDialog,
+		&t.selMenu,
+		&t.changeMenu,
+		&t.confirm,
+		&t.rename,
+	} {
+		context.SetPassthrough(w, pass)
+	}
+}
+
+func (t *GitTool) cursorOnConsoleSplit() bool {
+	c := image.Pt(ebiten.CursorPosition())
+	return !t.consoleSplitBounds.Empty() && c.In(t.consoleSplitBounds)
 }

@@ -212,6 +212,14 @@ type GitTool struct {
 	status      basicwidget.Text
 	// consoleOpen lasts for this launch. The next launch starts closed.
 	consoleOpen bool
+	// consoleFrac is the console's share of the space beside its top boundary.
+	// Zero keeps the fixed height. It lasts for this launch and is not saved.
+	consoleFrac     float64
+	consoleDragging bool
+	consoleArea     image.Rectangle
+	// consoleSplitBounds is the drag boundary. Empty when the console is closed.
+	consoleSplitBounds image.Rectangle
+	consoleSplit       gitConsoleSplit
 	// consolePressed is set when the status icon handles the click.
 	// The balloon above that icon does not receive the click itself.
 	consolePressed bool
@@ -305,6 +313,10 @@ func (t *GitTool) Build(context *guigui.Context, adder *guigui.ChildAdder) error
 		t.metaDrag = 0
 		t.setGraphDragPassthrough(context, false)
 	}
+	if t.consoleDragging && !ebiten.IsMouseButtonPressed(ebiten.MouseButtonLeft) {
+		t.consoleDragging = false
+		t.setConsoleDragPassthrough(context, false)
+	}
 	t.tabBar.Sync(lang, model)
 	adder.AddWidget(&t.tabBar)
 	t.emptyHome = model.Path() == ""
@@ -338,6 +350,8 @@ func (t *GitTool) Build(context *guigui.Context, adder *guigui.ChildAdder) error
 	adder.AddWidget(&t.consoleToggle)
 	if t.consoleOpen {
 		adder.AddWidget(&t.console)
+		t.consoleSplit.tool = t
+		adder.AddWidget(&t.consoleSplit)
 	}
 	t.sidePane.setOwner(t)
 	adder.AddWidget(&t.sidePane)
@@ -777,6 +791,7 @@ func (t *GitTool) Layout(context *guigui.Context, widgetBounds *guigui.WidgetBou
 	t.authorSplitBounds = image.Rectangle{}
 	t.hashSplitBounds = image.Rectangle{}
 	t.dateSplitBounds = image.Rectangle{}
+	t.consoleSplitBounds = image.Rectangle{}
 	u := basicwidget.UnitSize(context)
 	bounds := widgetBounds.Bounds()
 	barH := gitTabBarHeight(u)
@@ -800,9 +815,14 @@ func (t *GitTool) Layout(context *guigui.Context, widgetBounds *guigui.WidgetBou
 		t.layoutHistoryColumn(u)
 	}
 
-	listBottom, rightBottom, consoleR := gitViewBottoms(rest, u, t.consoleOpen)
+	t.consoleArea = rest
+	listBottom, rightBottom, consoleSplitR, consoleR := gitViewBottoms(rest, u, t.consoleOpen, t.consoleFrac)
+	t.consoleSplitBounds = consoleSplitR
 	if !consoleR.Empty() {
 		layouter.LayoutWidget(&t.console, consoleR)
+	}
+	if !consoleSplitR.Empty() {
+		layouter.LayoutWidget(&t.consoleSplit, consoleSplitR)
 	}
 	inner := image.Rect(rest.Min.X+u/2, rest.Min.Y+u/4, rest.Max.X-u/2, rightBottom)
 	if inner.Max.X < inner.Min.X {
@@ -819,7 +839,7 @@ func (t *GitTool) Layout(context *guigui.Context, widgetBounds *guigui.WidgetBou
 	}
 	sideW := gitSideWidth(inner.Dx(), splitW, pref, 6*u, 16*u)
 	// The filter field sits on the bottom edge. The right column keeps its margin
-	// until the console opens, and then both columns stop on the console.
+	// until the console opens, and then both columns stop on the console boundary.
 	sideR := image.Rect(inner.Min.X, inner.Min.Y, inner.Min.X+sideW, listBottom)
 	splitR := image.Rect(sideR.Max.X, inner.Min.Y, sideR.Max.X+splitW, listBottom)
 	rightR := image.Rect(splitR.Max.X, inner.Min.Y, inner.Max.X, inner.Max.Y)
@@ -1248,6 +1268,11 @@ func (t *GitTool) Tick(context *guigui.Context, widgetBounds *guigui.WidgetBound
 		t.setHistDragPassthrough(context, false)
 		guigui.RequestRebuild()
 	}
+	if t.consoleDragging && !ebiten.IsMouseButtonPressed(ebiten.MouseButtonLeft) {
+		t.consoleDragging = false
+		t.setConsoleDragPassthrough(context, false)
+		guigui.RequestRebuild()
+	}
 	if t.graphDragging && !ebiten.IsMouseButtonPressed(ebiten.MouseButtonLeft) {
 		t.stopGraphDrag(context)
 		guigui.RequestRebuild()
@@ -1282,7 +1307,7 @@ func (t *GitTool) Tick(context *guigui.Context, widgetBounds *guigui.WidgetBound
 		t.consoleOpen = !t.consoleOpen
 		guigui.RequestRebuild()
 	}
-	if !t.commitView && !t.histDragging && !t.graphDragging && t.metaDrag == 0 && !t.cursorOnCommitSplit() {
+	if !t.commitView && !t.histDragging && !t.graphDragging && t.metaDrag == 0 && !t.consoleDragging && !t.cursorOnCommitSplit() && !t.cursorOnConsoleSplit() {
 		next, load := commitOpenFromClick(t.openHash, hitCommit, onConsole, openedBySelect)
 		if next != t.openHash {
 			t.openHash = next
@@ -1367,7 +1392,7 @@ func (t *GitTool) CursorShape(context *guigui.Context, widgetBounds *guigui.Widg
 	if t.sideDragging || t.graphDragging || t.metaDrag != 0 {
 		return ebiten.CursorShapeEWResize, true
 	}
-	if t.histDragging {
+	if t.histDragging || t.consoleDragging {
 		return ebiten.CursorShapeNSResize, true
 	}
 	return 0, false
@@ -1678,6 +1703,9 @@ func (t *GitTool) HandlePointingInput(context *guigui.Context, widgetBounds *gui
 	if t.histDragging {
 		return t.dragHistSplit(context)
 	}
+	if t.consoleDragging {
+		return t.dragConsoleSplit(context)
+	}
 	if !inpututil.IsMouseButtonJustPressed(ebiten.MouseButtonRight) {
 		return guigui.HandleInputResult{}
 	}
@@ -1700,13 +1728,16 @@ func (t *GitTool) HandlePointingInput(context *guigui.Context, widgetBounds *gui
 		return guigui.HandleInputByWidget(t)
 	}
 	if t.commitView {
+		if t.cursorOnConsoleSplit() {
+			return guigui.HandleInputByWidget(t)
+		}
 		if path, staged, ok := t.changeAtCursor(); ok {
 			t.openChangeMenu(appModel.Lang(), model, path, staged)
 			return guigui.HandleInputByWidget(t)
 		}
 	}
 	if !t.commitView {
-		if t.cursorOnCommitSplit() {
+		if t.cursorOnCommitSplit() || t.cursorOnConsoleSplit() {
 			return guigui.HandleInputByWidget(t)
 		}
 		if hash := t.hitCommitMenu; hash != "" && !t.consoleToggle.blocksCommit(image.Pt(ebiten.CursorPosition())) {
