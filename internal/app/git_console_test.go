@@ -194,19 +194,109 @@ func TestConsoleClickKeepsCommit(t *testing.T) {
 
 func TestGitViewBottoms(t *testing.T) {
 	rest := image.Rect(0, 10, 400, 510)
-	list, right, console := gitViewBottoms(rest, 24, false)
-	if list != 510 || right != 510-12 || !console.Empty() {
-		t.Fatalf("closed = %d %d %v", list, right, console)
+	list, right, split, console := gitViewBottoms(rest, 24, false, 0.8)
+	if list != 510 || right != 510-12 || !split.Empty() || !console.Empty() {
+		t.Fatalf("closed = %d %d %v %v", list, right, split, console)
 	}
-	list, right, console = gitViewBottoms(rest, 24, true)
+	list, right, split, console = gitViewBottoms(rest, 24, true, 0)
 	if console.Min.X != 0 || console.Max.X != 400 || console.Max.Y != 510 {
 		t.Fatalf("console = %v", console)
 	}
 	if console.Dy() != gitConsoleHeight(24) {
 		t.Fatalf("height = %d", console.Dy())
 	}
-	if list != console.Min.Y || right != console.Min.Y {
-		t.Fatalf("columns = %d %d, console top %d", list, right, console.Min.Y)
+	if split.Dy() != gitWorkSplitWidth(24) || split.Max.Y != console.Min.Y || split.Min.X != console.Min.X || split.Max.X != console.Max.X {
+		t.Fatalf("boundary = %v, console top %d", split, console.Min.Y)
+	}
+	if list != split.Min.Y || right != split.Min.Y {
+		t.Fatalf("columns = %d %d, boundary top %d", list, right, split.Min.Y)
+	}
+	if list != console.Min.Y-split.Dy() {
+		t.Fatalf("columns should be shorter by the boundary, list %d console %d", list, console.Min.Y)
+	}
+}
+
+func TestGitConsoleFixedHeight(t *testing.T) {
+	if gitConsoleFixedHeight(500, 24) != gitConsoleHeight(24) {
+		t.Fatal("a tall window keeps about five lines")
+	}
+	rest := image.Rect(0, 0, 200, 120)
+	_, _, split, console := gitViewBottoms(rest, 24, true, 0)
+	if console.Dy() != 120*2/3 {
+		t.Fatalf("short window = %d", console.Dy())
+	}
+	if split.Dy() != gitWorkSplitWidth(24) || split.Max.Y != console.Min.Y {
+		t.Fatalf("short boundary = %v", split)
+	}
+	_, _, _, tight := gitViewBottoms(image.Rect(0, 0, 100, 40), 24, true, 0)
+	if tight.Dy() != 40*2/3 || tight.Dy() >= gitConsoleMinHeight(24) {
+		t.Fatalf("fixed short height = %d", tight.Dy())
+	}
+}
+
+func TestGitConsoleDragHeight(t *testing.T) {
+	const u = 24
+	split := gitWorkSplitWidth(u)
+	minConsole := gitConsoleMinHeight(u)
+	minUpper := gitHistMinPane(u)
+	if minConsole != u*3/4+2*(u/4) {
+		t.Fatalf("one line = %d", minConsole)
+	}
+	avail := 600 - split
+	if got := gitConsoleDragHeight(600, split, 0.5, minConsole, minUpper); got != int(float64(avail)*0.5) {
+		t.Fatalf("half = %d", got)
+	}
+	grown := 900 - split
+	if got := gitConsoleDragHeight(900, split, 0.5, minConsole, minUpper); got != int(float64(grown)*0.5) {
+		t.Fatalf("resized half = %d", got)
+	}
+	if got := gitConsoleDragHeight(600, split, 0.01, minConsole, minUpper); got != minConsole {
+		t.Fatalf("min = %d", got)
+	}
+	if got := gitConsoleDragHeight(600, split, 0.99, minConsole, minUpper); got != 600-split-minUpper {
+		t.Fatalf("max = %d", got)
+	}
+	if got := gitConsoleDragHeight(600, split, 0.8, minConsole, minUpper); got <= 600*2/3 {
+		t.Fatalf("dragged %d should pass two thirds", got)
+	}
+}
+
+func TestGitConsoleDragFollowsPointer(t *testing.T) {
+	rest := image.Rect(0, 100, 500, 700)
+	_, _, split, console := gitViewBottoms(rest, 24, true, 0)
+	line := split.Min.Y + split.Dy()/2
+	up := gitConsoleFracFromY(rest, line-80, 24)
+	_, _, _, grown := gitViewBottoms(rest, 24, true, up)
+	if grown.Dy() <= console.Dy() {
+		t.Fatalf("up = %d, was %d", grown.Dy(), console.Dy())
+	}
+	down := gitConsoleFracFromY(rest, line+40, 24)
+	_, _, _, shrunk := gitViewBottoms(rest, 24, true, down)
+	if shrunk.Dy() >= console.Dy() {
+		t.Fatalf("down = %d, was %d", shrunk.Dy(), console.Dy())
+	}
+	if shrunk.Dy() < gitConsoleMinHeight(24) {
+		t.Fatalf("shrunk below one line: %d", shrunk.Dy())
+	}
+	top := gitConsoleFracFromY(rest, rest.Min.Y, 24)
+	_, _, _, wide := gitViewBottoms(rest, 24, true, top)
+	if wide.Dy() <= rest.Dy()*2/3 {
+		t.Fatalf("tall drag = %d", wide.Dy())
+	}
+	// The same share is what history and the commit screen both lay out.
+	small := image.Rect(0, 0, 400, 360)
+	_, _, _, kept := gitViewBottoms(small, 24, true, top)
+	if kept.Dy() <= small.Dy()*2/3 {
+		t.Fatalf("shrunk window = %d, two thirds %d", kept.Dy(), small.Dy()*2/3)
+	}
+	upper := small.Dy() - gitWorkSplitWidth(24) - kept.Dy()
+	if upper < gitHistMinPane(24) {
+		t.Fatalf("upper pane = %d", upper)
+	}
+	var tool GitTool
+	_, _, freshSplit, fresh := gitViewBottoms(rest, 24, true, tool.consoleFrac)
+	if fresh.Dy() != gitConsoleHeight(24) || freshSplit.Empty() {
+		t.Fatalf("new launch = %v %v", fresh, freshSplit)
 	}
 }
 
