@@ -141,6 +141,158 @@ func TestOpenSnapshotCommitAmend(t *testing.T) {
 	}
 }
 
+func TestDetailMergeFirstParent(t *testing.T) {
+	dir := initRepo(t)
+	writeCommit(t, dir, "a.txt", "base")
+	root := strings.TrimSpace(gitAt(t, dir, "rev-parse", "HEAD"))
+	writeCommit(t, dir, "b.txt", "second")
+	single := strings.TrimSpace(gitAt(t, dir, "rev-parse", "HEAD"))
+
+	gitAt(t, dir, "checkout", "-b", "feature")
+	writeCommit(t, dir, "c.txt", "from-feature")
+	gitAt(t, dir, "checkout", "main")
+	gitAt(t, dir, "merge", "--no-ff", "feature", "-m", "merge feature")
+	clean := strings.TrimSpace(gitAt(t, dir, "rev-parse", "HEAD"))
+
+	gitAt(t, dir, "checkout", "-b", "left")
+	if err := os.WriteFile(filepath.Join(dir, "conflict.txt"), []byte("left\n"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(filepath.Join(dir, "extra.txt"), []byte("extra\n"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	gitAt(t, dir, "add", "conflict.txt", "extra.txt")
+	gitAt(t, dir, "commit", "-m", "left")
+	gitAt(t, dir, "checkout", "main")
+	if err := os.WriteFile(filepath.Join(dir, "conflict.txt"), []byte("right\n"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	gitAt(t, dir, "add", "conflict.txt")
+	gitAt(t, dir, "commit", "-m", "right")
+	cmd := exec.Command("git", "merge", "--no-ff", "left", "-m", "conflict merge")
+	cmd.Dir = dir
+	cmd.Env = append(os.Environ(),
+		"GIT_AUTHOR_NAME=Test",
+		"GIT_AUTHOR_EMAIL=test@example.com",
+		"GIT_COMMITTER_NAME=Test",
+		"GIT_COMMITTER_EMAIL=test@example.com",
+		"GIT_CONFIG_GLOBAL=/dev/null",
+		"GIT_CONFIG_SYSTEM=/dev/null",
+	)
+	if out, err := cmd.CombinedOutput(); err == nil {
+		t.Fatalf("expected a merge conflict\n%s", out)
+	}
+	if err := os.WriteFile(filepath.Join(dir, "conflict.txt"), []byte("left\nright\nresolved\n"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	gitAt(t, dir, "add", "conflict.txt")
+	gitAt(t, dir, "commit", "--no-edit")
+	resolved := strings.TrimSpace(gitAt(t, dir, "rev-parse", "HEAD"))
+
+	gitAt(t, dir, "checkout", "-b", "side")
+	writeCommit(t, dir, "d.txt", "side-only")
+	gitAt(t, dir, "checkout", "main")
+	gitAt(t, dir, "merge", "-s", "ours", "--no-ff", "side", "-m", "ours merge")
+	ours := strings.TrimSpace(gitAt(t, dir, "rev-parse", "HEAD"))
+
+	ctx, cancel := context.WithTimeout(context.Background(), 20*time.Second)
+	defer cancel()
+	repo, err := Open(ctx, dir)
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	rootDetail, err := repo.Detail(ctx, root)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(rootDetail.Parents) != 0 || !statusHas(rootDetail.Files, "A", "a.txt") || !strings.Contains(rootDetail.Diff, "+base") {
+		t.Fatalf("root files=%#v diff=%q", rootDetail.Files, rootDetail.Diff)
+	}
+	if got := gitAt(t, dir, "show", "--no-notes", "--no-color", "--format=", "--patch", root); rootDetail.Diff != got {
+		t.Fatalf("root diff changed:\n%s", rootDetail.Diff)
+	}
+
+	singleDetail, err := repo.Detail(ctx, single)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(singleDetail.Parents) != 1 || !statusHas(singleDetail.Files, "A", "b.txt") || !strings.Contains(singleDetail.Diff, "+second") {
+		t.Fatalf("single files=%#v diff=%q", singleDetail.Files, singleDetail.Diff)
+	}
+	if got := gitAt(t, dir, "show", "--no-notes", "--no-color", "--format=", "--patch", single); singleDetail.Diff != got {
+		t.Fatalf("single-parent diff changed:\n%s", singleDetail.Diff)
+	}
+	if got := gitAt(t, dir, "diff-tree", "--no-commit-id", "--name-status", "-r", "--root", single); strings.Join(singleDetail.Files, "\n") != strings.TrimSpace(got) {
+		t.Fatalf("single-parent files = %#v, git = %q", singleDetail.Files, got)
+	}
+
+	cleanDetail, err := repo.Detail(ctx, clean)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(cleanDetail.Parents) != 2 || !statusHas(cleanDetail.Files, "A", "c.txt") {
+		t.Fatalf("clean merge files=%#v parents=%d", cleanDetail.Files, len(cleanDetail.Parents))
+	}
+	if !strings.Contains(cleanDetail.Diff, "c.txt") || !strings.Contains(cleanDetail.Diff, "+from-feature") || strings.Contains(cleanDetail.Diff, "diff --cc") {
+		t.Fatalf("clean merge diff = %q", cleanDetail.Diff)
+	}
+	combined := gitAt(t, dir, "show", "--no-notes", "--no-color", "--format=", "--patch", clean)
+	if strings.TrimSpace(combined) != "" {
+		t.Fatalf("expected an empty combined diff, got %q", combined)
+	}
+	whole, err := repo.ShowFileWhole(ctx, clean, "c.txt")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if !strings.Contains(whole, "+from-feature") || strings.Contains(whole, "diff --cc") {
+		t.Fatalf("whole file = %q", whole)
+	}
+
+	resolvedDetail, err := repo.Detail(ctx, resolved)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if !statusHas(resolvedDetail.Files, "M", "conflict.txt") || !statusHas(resolvedDetail.Files, "A", "extra.txt") {
+		t.Fatalf("resolved files = %#v", resolvedDetail.Files)
+	}
+	if strings.Count(strings.Join(resolvedDetail.Files, "\n"), "conflict.txt") != 1 {
+		t.Fatalf("resolved files listed a parent twice: %#v", resolvedDetail.Files)
+	}
+	if !strings.Contains(resolvedDetail.Diff, "extra.txt") || !strings.Contains(resolvedDetail.Diff, "+resolved") || !strings.Contains(resolvedDetail.Diff, "+left") {
+		t.Fatalf("resolved diff = %q", resolvedDetail.Diff)
+	}
+	resolvedCombined := gitAt(t, dir, "show", "--no-notes", "--no-color", "--format=", "--patch", resolved)
+	if strings.Contains(resolvedCombined, "extra.txt") {
+		t.Fatalf("combined diff should omit the clean incoming file:\n%s", resolvedCombined)
+	}
+	extraWhole, err := repo.ShowFileWhole(ctx, resolved, "extra.txt")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if !strings.Contains(extraWhole, "+extra") {
+		t.Fatalf("resolved whole file = %q", extraWhole)
+	}
+
+	oursDetail, err := repo.Detail(ctx, ours)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(oursDetail.Parents) < 2 || len(oursDetail.Files) != 0 || strings.TrimSpace(oursDetail.Diff) != "" {
+		t.Fatalf("ours files=%#v diff=%q", oursDetail.Files, oursDetail.Diff)
+	}
+}
+
+func statusHas(files []string, status, name string) bool {
+	want := status + "\t" + name
+	for _, f := range files {
+		if f == want {
+			return true
+		}
+	}
+	return false
+}
+
 func TestCreateTag(t *testing.T) {
 	dir := initRepo(t)
 	writeCommit(t, dir, "a.txt", "first")
