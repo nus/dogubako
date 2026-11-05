@@ -118,7 +118,8 @@ type Snapshot struct {
 	RemoteBranches []Ref
 	Tags           []Ref
 	Submodules     []Submodule
-	// Worktrees are linked working trees other than this one.
+	// Worktrees lists every working tree. Main marks the main tree.
+	// Current marks the tree this snapshot was read from.
 	Worktrees []Worktree
 	Status    Status
 	RefDigest string
@@ -170,7 +171,7 @@ func (r *Repo) Snapshot(ctx context.Context, opts SnapshotOpts) (Snapshot, error
 	if err != nil {
 		return s, err
 	}
-	s.Worktrees, err = r.otherWorktrees(ctx)
+	s.Worktrees, err = r.worktrees(ctx)
 	if err != nil {
 		return s, err
 	}
@@ -247,7 +248,7 @@ func (r *Repo) State(ctx context.Context) (State, error) {
 	if err != nil {
 		return State{}, err
 	}
-	trees, err := r.otherWorktrees(ctx)
+	trees, err := r.worktrees(ctx)
 	if err != nil {
 		return State{}, err
 	}
@@ -369,8 +370,8 @@ func (r *Repo) submodules(ctx context.Context) ([]Submodule, error) {
 	return parseGitlinks(out), nil
 }
 
-// otherWorktrees lists linked working trees except this one.
-func (r *Repo) otherWorktrees(ctx context.Context) ([]Worktree, error) {
+// worktrees lists every working tree and marks the one at r.Dir.
+func (r *Repo) worktrees(ctx context.Context) ([]Worktree, error) {
 	if err := ctx.Err(); err != nil {
 		return nil, err
 	}
@@ -378,25 +379,50 @@ func (r *Repo) otherWorktrees(ctx context.Context) ([]Worktree, error) {
 	if err != nil {
 		return nil, err
 	}
-	return filterCurrentWorktree(parseWorktrees(out), r.Dir, r.IsRemote()), nil
+	trees := parseWorktrees(out)
+	if err := r.fillBareHeads(ctx, trees); err != nil {
+		return nil, err
+	}
+	return markCurrentWorktree(trees, r.Dir, r.IsRemote()), nil
 }
 
-// filterCurrentWorktree drops the working tree at current.
-func filterCurrentWorktree(trees []Worktree, current string, remote bool) []Worktree {
+// fillBareHeads records the commit of a bare main tree.
+// `git worktree list` prints no HEAD for a bare repository.
+func (r *Repo) fillBareHeads(ctx context.Context, trees []Worktree) error {
+	for i := range trees {
+		if !trees[i].Bare || trees[i].Head != "" || trees[i].Path == "" {
+			continue
+		}
+		if err := ctx.Err(); err != nil {
+			return err
+		}
+		loc := r.loc()
+		loc.Dir = trees[i].Path
+		out, err := gitOutput(ctx, loc, "rev-parse", "--verify", "--quiet", "HEAD")
+		if err != nil {
+			if ctx.Err() != nil {
+				return ctx.Err()
+			}
+			continue
+		}
+		head := strings.TrimSpace(out)
+		if head == "" {
+			continue
+		}
+		trees[i].Head = head
+	}
+	return nil
+}
+
+// markCurrentWorktree sets Current on the working tree at current.
+func markCurrentWorktree(trees []Worktree, current string, remote bool) []Worktree {
 	if len(trees) == 0 {
 		return nil
 	}
-	out := make([]Worktree, 0, len(trees)-1)
-	for _, wt := range trees {
-		if sameWorktree(wt.Path, current, remote) {
-			continue
-		}
-		out = append(out, wt)
+	for i := range trees {
+		trees[i].Current = sameWorktree(trees[i].Path, current, remote)
 	}
-	if len(out) == 0 {
-		return nil
-	}
-	return out
+	return trees
 }
 
 func sameWorktree(a, b string, remote bool) bool {

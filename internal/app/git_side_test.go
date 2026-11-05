@@ -5,6 +5,7 @@ import (
 	"testing"
 
 	"github.com/guigui-gui/guigui/basicwidget"
+	"github.com/hajimehoshi/ebiten/v2/text/v2"
 
 	"github.com/nus/dogubako/internal/gitcli"
 )
@@ -154,4 +155,57 @@ func TestWorktreeTitle(t *testing.T) {
 	if got := worktreeTitle(gitcli.Worktree{Path: "/repo/hotfix", Head: "abcdef123456", Detached: true}); got != "hotfix (abcdef1)" {
 		t.Fatalf("detached = %q", got)
 	}
+	if got := worktreeTitle(gitcli.Worktree{Path: "/repo/bare.git", Head: "abcdef123456", Bare: true}); got != "bare.git (abcdef1)" {
+		t.Fatalf("bare = %q", got)
+	}
+}
+
+func TestWorktreeTree(t *testing.T) {
+	main := gitcli.Worktree{Path: "/repo", Branch: "main", Main: true, Current: true}
+	feature := gitcli.Worktree{Path: "/repo/feature", Branch: "feature"}
+	fix := gitcli.Worktree{Path: "/repo/fix", Head: "abcdef123456", Detached: true}
+	bare := gitcli.Worktree{Path: "/repo/bare.git", Head: "abcdef1234567890", Main: true, Bare: true}
+
+	if got := worktreeRows(nil); len(got) != 0 {
+		t.Fatalf("empty = %+v", got)
+	}
+	if got := worktreeRows([]gitcli.Worktree{main}); len(got) != 0 {
+		t.Fatalf("alone = %+v", got)
+	}
+
+	got := worktreeRows([]gitcli.Worktree{main, feature, fix})
+	if len(got) != 3 {
+		t.Fatalf("len = %d", len(got))
+	}
+	if got[0].Text != "main" || got[0].IndentLevel != 0 || !worktreeRowBold(got[0]) || !got[0].Checked || got[0].Value != "worktree:/repo" {
+		t.Fatalf("root = %+v bold=%v", got[0], worktreeRowBold(got[0]))
+	}
+	if got[1].Text != "feature" || got[1].IndentLevel != 1 || worktreeRowBold(got[1]) || got[1].Checked {
+		t.Fatalf("feature = %+v bold=%v", got[1], worktreeRowBold(got[1]))
+	}
+	if got[2].Text != "fix (abcdef1)" || got[2].IndentLevel != 1 || worktreeRowBold(got[2]) {
+		t.Fatalf("fix = %+v bold=%v", got[2], worktreeRowBold(got[2]))
+	}
+
+	linked := gitcli.Worktree{Path: "/repo/feature", Branch: "feature", Current: true}
+	got = worktreeRows([]gitcli.Worktree{linked, gitcli.Worktree{Path: "/repo", Branch: "main", Main: true}, fix})
+	if got[0].Text != "main" || got[0].IndentLevel != 0 || worktreeRowBold(got[0]) {
+		t.Fatalf("reordered root = %+v bold=%v", got[0], worktreeRowBold(got[0]))
+	}
+	if got[1].Text != "feature" || got[1].IndentLevel != 1 || !worktreeRowBold(got[1]) || !got[1].Checked {
+		t.Fatalf("current child = %+v bold=%v", got[1], worktreeRowBold(got[1]))
+	}
+
+	got = worktreeRows([]gitcli.Worktree{bare, feature})
+	if got[0].Text != "bare.git (abcdef1)" || got[0].IndentLevel != 0 || worktreeRowBold(got[0]) {
+		t.Fatalf("bare root = %+v bold=%v", got[0], worktreeRowBold(got[0]))
+	}
+	if got[1].IndentLevel != 1 || got[1].Text != "feature" {
+		t.Fatalf("under bare = %+v", got[1])
+	}
+}
+
+func worktreeRowBold(item basicwidget.ListItem[string]) bool {
+	weight, ok := item.TextStyle.Style.Weight()
+	return ok && weight >= text.WeightBold
 }

@@ -69,12 +69,17 @@ type Submodule struct {
 	Hash string
 }
 
-// Worktree is a linked working tree other than the one a snapshot was read from.
+// Worktree is one entry from `git worktree list`.
+// Main marks the first entry, the main working tree. Current marks the tree
+// a snapshot was read from. Bare marks a repository with no checkout.
 type Worktree struct {
 	Path     string
-	Branch   string // short name; empty when detached
+	Branch   string // short name; empty when detached or bare
 	Head     string
 	Detached bool
+	Bare     bool
+	Main     bool
+	Current  bool
 }
 
 // parseWorktrees reads `git worktree list --porcelain`.
@@ -82,6 +87,7 @@ type Worktree struct {
 func parseWorktrees(out string) []Worktree {
 	var trees []Worktree
 	var cur *Worktree
+	first := true
 	flush := func() {
 		if cur == nil || cur.Path == "" {
 			cur = nil
@@ -98,7 +104,8 @@ func parseWorktrees(out string) []Worktree {
 		switch key {
 		case "worktree":
 			flush()
-			cur = &Worktree{Path: val}
+			cur = &Worktree{Path: val, Main: first}
+			first = false
 		case "HEAD":
 			if cur != nil {
 				cur.Head = val
@@ -111,13 +118,17 @@ func parseWorktrees(out string) []Worktree {
 			if cur != nil {
 				cur.Detached = true
 			}
+		case "bare":
+			if cur != nil {
+				cur.Bare = true
+			}
 		}
 	}
 	flush()
 	return trees
 }
 
-// WorktreeKey is a stable digest of linked worktrees for polling.
+// WorktreeKey is a stable digest of working trees for polling.
 func WorktreeKey(trees []Worktree) string {
 	var b strings.Builder
 	for _, wt := range trees {
@@ -128,6 +139,15 @@ func WorktreeKey(trees []Worktree) string {
 		b.WriteString(wt.Head)
 		if wt.Detached {
 			b.WriteString("\x00d")
+		}
+		if wt.Bare {
+			b.WriteString("\x00b")
+		}
+		if wt.Main {
+			b.WriteString("\x00m")
+		}
+		if wt.Current {
+			b.WriteString("\x00c")
 		}
 		b.WriteByte('\n')
 	}

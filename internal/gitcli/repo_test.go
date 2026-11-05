@@ -1766,11 +1766,12 @@ func TestSnapshotListsOtherWorktrees(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	if len(snap.Worktrees) != 1 || snap.Worktrees[0].Branch != "feature" {
+	rootWT, featureWT := worktreeByBranch(snap.Worktrees, "main"), worktreeByBranch(snap.Worktrees, "feature")
+	if rootWT == nil || !rootWT.Main || !rootWT.Current || featureWT == nil || featureWT.Main || featureWT.Current {
 		t.Fatalf("worktrees = %+v", snap.Worktrees)
 	}
-	if !sameWorktree(snap.Worktrees[0].Path, other, false) {
-		t.Fatalf("path = %q want %q", snap.Worktrees[0].Path, other)
+	if !sameWorktree(rootWT.Path, dir, false) || !sameWorktree(featureWT.Path, other, false) {
+		t.Fatalf("paths = %+v", snap.Worktrees)
 	}
 	st, err := repo.State(ctx)
 	if err != nil {
@@ -1788,8 +1789,70 @@ func TestSnapshotListsOtherWorktrees(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	if len(fromOther.Worktrees) != 1 || fromOther.Worktrees[0].Branch != "main" {
+	rootWT, featureWT = worktreeByBranch(fromOther.Worktrees, "main"), worktreeByBranch(fromOther.Worktrees, "feature")
+	if rootWT == nil || !rootWT.Main || rootWT.Current || featureWT == nil || featureWT.Main || !featureWT.Current {
 		t.Fatalf("from feature = %+v", fromOther.Worktrees)
+	}
+	if !sameWorktree(rootWT.Path, dir, false) || !sameWorktree(featureWT.Path, other, false) {
+		t.Fatalf("from feature paths = %+v", fromOther.Worktrees)
+	}
+}
+
+func worktreeByBranch(trees []Worktree, branch string) *Worktree {
+	for i := range trees {
+		if trees[i].Branch == branch {
+			return &trees[i]
+		}
+	}
+	return nil
+}
+
+func TestSnapshotBareParentWorktree(t *testing.T) {
+	requireGit(t)
+	root := t.TempDir()
+	bare := filepath.Join(root, "bare.git")
+	gitAt(t, root, "init", "--bare", "-b", "main", bare)
+	seed := filepath.Join(root, "seed")
+	gitAt(t, root, "clone", bare, seed)
+	gitAt(t, seed, "config", "user.name", "Test")
+	gitAt(t, seed, "config", "user.email", "test@example.com")
+	gitAt(t, seed, "config", "commit.gpgsign", "false")
+	gitAt(t, seed, "commit", "--allow-empty", "-m", "init")
+	gitAt(t, seed, "push", "origin", "main")
+	feature := filepath.Join(root, "feature")
+	gitAt(t, bare, "worktree", "add", "-b", "feature", feature, "main")
+
+	ctx, cancel := context.WithTimeout(context.Background(), 15*time.Second)
+	defer cancel()
+	repo, err := Open(ctx, feature)
+	if err != nil {
+		t.Fatal(err)
+	}
+	snap, err := repo.Snapshot(ctx, SnapshotOpts{})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(snap.Worktrees) != 2 {
+		t.Fatalf("worktrees = %+v", snap.Worktrees)
+	}
+	var parent, current *Worktree
+	for i := range snap.Worktrees {
+		wt := &snap.Worktrees[i]
+		if wt.Main {
+			parent = wt
+		}
+		if wt.Current {
+			current = wt
+		}
+	}
+	if parent == nil || !parent.Bare || parent.Current || parent.Branch != "" || len(parent.Head) < 7 {
+		t.Fatalf("bare parent = %+v", parent)
+	}
+	if current == nil || current.Main || current.Branch != "feature" {
+		t.Fatalf("current = %+v", current)
+	}
+	if !sameWorktree(parent.Path, bare, false) || !sameWorktree(current.Path, feature, false) {
+		t.Fatalf("paths = %+v", snap.Worktrees)
 	}
 }
 
