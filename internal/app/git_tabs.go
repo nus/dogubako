@@ -178,6 +178,38 @@ func (m *GitModel) SelectTab(index int) {
 	guigui.RequestRebuild()
 }
 
+// SelectNeighbor shows the tab step places away in tab order.
+// A positive step moves right and a negative step moves left. Either end wraps
+// to the other end. The order of tabs does not change. One tab, or a zero step,
+// stays on the displayed tab. The shown tab is the one a click would show,
+// including the tab restored on the next launch.
+func (m *GitModel) SelectNeighbor(step int) {
+	m.ensure()
+	n := len(m.tabs)
+	if n <= 1 || step == 0 {
+		return
+	}
+	step %= n
+	if step < 0 {
+		step += n
+	}
+	m.SelectTab((m.active + step) % n)
+}
+
+// gitTabStep is the neighbor a Ctrl+Tab chord selects.
+// Control alone steps right. Control and Shift step left.
+// The chord does not step when Tab is not firing, Control is up, or Alt or
+// Command is down. Command stays out so macOS Command+Tab remains the app switcher.
+func gitTabStep(tab, control, shift, alt, command bool) (step int, ok bool) {
+	if !tab || !control || alt || command {
+		return 0, false
+	}
+	if shift {
+		return -1, true
+	}
+	return 1, true
+}
+
 func (m *GitModel) NewTab() {
 	m.ensure()
 	for i, s := range m.tabs {

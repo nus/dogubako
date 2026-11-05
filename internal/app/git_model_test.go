@@ -520,6 +520,90 @@ func TestGitTabsKeepRepos(t *testing.T) {
 	}
 }
 
+func TestGitTabStep(t *testing.T) {
+	right, ok := gitTabStep(true, true, false, false, false)
+	if !ok || right != 1 {
+		t.Fatalf("ctrl+tab = %d ok=%v", right, ok)
+	}
+	left, ok := gitTabStep(true, true, true, false, false)
+	if !ok || left != -1 {
+		t.Fatalf("ctrl+shift+tab = %d ok=%v", left, ok)
+	}
+	for _, c := range []struct {
+		name                     string
+		tab, control, shift, alt bool
+		command                  bool
+	}{
+		{name: "tab alone", tab: true},
+		{name: "shift+tab", tab: true, shift: true},
+		{name: "alt", tab: true, control: true, alt: true},
+		{name: "shift+alt", tab: true, control: true, shift: true, alt: true},
+		{name: "command", tab: true, control: true, command: true},
+		{name: "shift+command", tab: true, control: true, shift: true, command: true},
+		{name: "control held", control: true},
+		{name: "command alone", tab: true, command: true},
+	} {
+		if step, ok := gitTabStep(c.tab, c.control, c.shift, c.alt, c.command); ok {
+			t.Fatalf("%s stepped %d", c.name, step)
+		}
+	}
+}
+
+func TestSelectNeighborWrapsInTabOrder(t *testing.T) {
+	cfg := t.TempDir()
+	restore := overrideSidebarConfigDir(func() (string, error) { return cfg, nil })
+	t.Cleanup(restore)
+
+	var m GitModel
+	m.tabs = []*gitSession{
+		{path: "/repo-a"},
+		{path: "/repo-b"},
+		{path: "/repo-c"},
+	}
+	m.active = 2
+	m.SelectNeighbor(1)
+	if m.ActiveTab() != 0 || m.Path() != "/repo-a" {
+		t.Fatalf("right wrap active=%d path=%q", m.ActiveTab(), m.Path())
+	}
+	m.SelectNeighbor(1)
+	if m.ActiveTab() != 1 || m.Path() != "/repo-b" {
+		t.Fatalf("right active=%d path=%q", m.ActiveTab(), m.Path())
+	}
+	m.SelectNeighbor(-1)
+	if m.ActiveTab() != 0 || m.Path() != "/repo-a" {
+		t.Fatalf("left active=%d path=%q", m.ActiveTab(), m.Path())
+	}
+	m.SelectNeighbor(-1)
+	if m.ActiveTab() != 2 || m.Path() != "/repo-c" {
+		t.Fatalf("left wrap active=%d path=%q", m.ActiveTab(), m.Path())
+	}
+	m.SelectNeighbor(0)
+	if m.ActiveTab() != 2 || m.TabCount() != 3 {
+		t.Fatalf("zero step active=%d count=%d", m.ActiveTab(), m.TabCount())
+	}
+	if m.tabs[0].path != "/repo-a" || m.tabs[1].path != "/repo-b" || m.tabs[2].path != "/repo-c" {
+		t.Fatalf("order = %q %q %q", m.tabs[0].path, m.tabs[1].path, m.tabs[2].path)
+	}
+	paths, active, _ := loadGitTabs()
+	if active != 2 || len(paths) != 3 || paths[0] != "/repo-a" || paths[1] != "/repo-b" || paths[2] != "/repo-c" {
+		t.Fatalf("saved paths=%q active=%d", paths, active)
+	}
+
+	m.tabs[0].pendingLoad = make(chan gitLoadResult)
+	m.SelectNeighbor(1)
+	if m.ActiveTab() != 0 || m.Path() != "/repo-a" || !m.Busy() {
+		t.Fatalf("busy active=%d path=%q busy=%v", m.ActiveTab(), m.Path(), m.Busy())
+	}
+
+	var one GitModel
+	one.tabs = []*gitSession{{path: "/only"}}
+	one.SelectNeighbor(1)
+	one.SelectNeighbor(-1)
+	if one.ActiveTab() != 0 || one.TabCount() != 1 || one.Path() != "/only" {
+		t.Fatalf("single active=%d count=%d path=%q", one.ActiveTab(), one.TabCount(), one.Path())
+	}
+}
+
 func TestNewTabReusesIdleEmpty(t *testing.T) {
 	cfg := t.TempDir()
 	restore := overrideSidebarConfigDir(func() (string, error) { return cfg, nil })

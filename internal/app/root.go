@@ -261,6 +261,27 @@ func (r *Root) HandleButtonInput(context *guigui.Context, widgetBounds *guigui.W
 			return guigui.HandleInputByWidget(r)
 		}
 	}
+	// Ctrl+Tab shows the tab to the right, and Ctrl+Shift+Tab the tab to the left.
+	// Both platforms use Control, so macOS Command+Tab stays the app switcher.
+	// Alt, or Command together with Control, leaves the tab in place. A text
+	// field does not take this chord. A held Tab repeats in the same direction.
+	// An open menu or dialog leaves the tabs in place. The neighbor is the one
+	// in tab order, the same tab a click would show.
+	if r.model.Mode() == ToolGit && !r.gitTool.menuOpen() {
+		step, ok := gitTabStep(
+			graphKeyRepeating(ebiten.KeyTab),
+			ebiten.IsKeyPressed(ebiten.KeyControl),
+			shiftDown(),
+			ebiten.IsKeyPressed(ebiten.KeyAlt),
+			ebiten.IsKeyPressed(ebiten.KeyMeta),
+		)
+		if ok {
+			git := r.model.Git()
+			git.EnsureLoaded()
+			git.SelectNeighbor(step)
+			return guigui.HandleInputByWidget(r)
+		}
+	}
 	if r.model.Mode() == ToolStopwatch && !shortcutModifierPressed(context) {
 		switch {
 		case inpututil.IsKeyJustPressed(ebiten.KeySpace):
