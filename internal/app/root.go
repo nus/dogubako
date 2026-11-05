@@ -308,6 +308,17 @@ func (r *Root) HandleButtonInput(context *guigui.Context, widgetBounds *guigui.W
 		if inpututil.IsKeyJustPressed(ebiten.KeyF) && r.gitTool.openHistSearch() {
 			return guigui.HandleInputByWidget(r)
 		}
+		// T opens a tab the same way ＋ does: show an idle empty tab, or add
+		// one at the end. A text field does not take this chord. macOS
+		// transpose is Control+T, and the Emacs theme leaves Ctrl+T unbound.
+		// Shift, Alt, and an open menu or dialog leave the tabs in place.
+		// IsKeyJustPressed keeps a held key to a single tab.
+		if inpututil.IsKeyJustPressed(ebiten.KeyT) && !shiftDown() && !ebiten.IsKeyPressed(ebiten.KeyAlt) && !r.gitTool.menuOpen() {
+			git := r.model.Git()
+			git.EnsureLoaded()
+			git.NewTab()
+			return guigui.HandleInputByWidget(r)
+		}
 		// W closes the displayed repository tab, the same tab the × closes.
 		// A text field that uses the chord handles it first: Emacs Ctrl+W cuts.
 		// Shift, Alt, and an open menu or dialog leave the tab in place.

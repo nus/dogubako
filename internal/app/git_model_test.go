@@ -520,6 +520,45 @@ func TestGitTabsKeepRepos(t *testing.T) {
 	}
 }
 
+func TestNewTabReusesIdleEmpty(t *testing.T) {
+	cfg := t.TempDir()
+	restore := overrideSidebarConfigDir(func() (string, error) { return cfg, nil })
+	t.Cleanup(restore)
+
+	var m GitModel
+	m.ensure()
+	m.tabs[0].path = "/repo-a"
+	m.NewTab()
+	if m.TabCount() != 2 || m.ActiveTab() != 1 || m.Path() != "" {
+		t.Fatalf("append count=%d active=%d path=%q", m.TabCount(), m.ActiveTab(), m.Path())
+	}
+	paths, active, _ := loadGitTabs()
+	if len(paths) != 2 || active != 1 || paths[0] != "/repo-a" || paths[1] != "" {
+		t.Fatalf("saved paths=%q active=%d", paths, active)
+	}
+
+	m.SelectTab(0)
+	m.NewTab()
+	if m.TabCount() != 2 || m.ActiveTab() != 1 || m.Path() != "" {
+		t.Fatalf("reuse count=%d active=%d path=%q", m.TabCount(), m.ActiveTab(), m.Path())
+	}
+	m.NewTab()
+	if m.TabCount() != 2 || m.ActiveTab() != 1 {
+		t.Fatalf("stay count=%d active=%d", m.TabCount(), m.ActiveTab())
+	}
+
+	m.tabs[1].pendingLoad = make(chan gitLoadResult)
+	m.SelectTab(0)
+	m.NewTab()
+	if m.TabCount() != 3 || m.ActiveTab() != 2 || m.Path() != "" {
+		t.Fatalf("busy count=%d active=%d path=%q", m.TabCount(), m.ActiveTab(), m.Path())
+	}
+	paths, active, _ = loadGitTabs()
+	if len(paths) != 3 || active != 2 || paths[2] != "" {
+		t.Fatalf("busy saved paths=%q active=%d", paths, active)
+	}
+}
+
 func TestGitRecentRepos(t *testing.T) {
 	requireGitBin(t)
 	dirA := initRepo(t, "a")
