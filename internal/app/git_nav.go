@@ -7,6 +7,7 @@ import (
 
 	"github.com/hajimehoshi/ebiten/v2"
 	"github.com/hajimehoshi/ebiten/v2/inpututil"
+	"github.com/hajimehoshi/ebiten/v2/text/v2"
 	"github.com/hajimehoshi/ebiten/v2/vector"
 
 	"github.com/guigui-gui/guigui"
@@ -103,6 +104,7 @@ type gitNavRow struct {
 	folder    bool
 	collapsed bool
 	selected  bool
+	current   bool
 	bounds    image.Rectangle
 
 	onPress  func()
@@ -115,10 +117,12 @@ func (r *gitNavRow) Set(item basicwidget.ListItem[string], selected bool, onPres
 	r.folder = item.Unselectable
 	r.collapsed = item.Collapsed
 	r.selected = selected
+	r.current = item.Checked
 	r.onPress = onPress
 	r.onExpand = onExpand
 	r.style = item.TextStyle.Style
-	r.style.SetBold(r.folder)
+	weight, ok := r.style.Weight()
+	r.style.SetBold(r.folder || (ok && weight >= text.WeightBold))
 	r.label.SetValue(item.Text)
 	r.label.SetBaseStyle(&r.style)
 	r.label.SetVerticalAlign(basicwidget.VerticalAlignMiddle)
@@ -172,8 +176,10 @@ func (r *gitNavRow) Draw(context *guigui.Context, widgetBounds *guigui.WidgetBou
 		drawBranchGlyph(dst, box)
 	case gitNavIconTag:
 		drawTagGlyph(dst, box, clr)
-	case gitNavIconSubmodule, gitNavIconWorktree:
-		drawSubmoduleGlyph(dst, box)
+	case gitNavIconSubmodule:
+		drawSubmoduleGlyph(dst, box, false)
+	case gitNavIconWorktree:
+		drawSubmoduleGlyph(dst, box, r.current)
 	}
 }
 
@@ -379,12 +385,22 @@ func drawTagGlyph(dst *ebiten.Image, bounds image.Rectangle, fg color.Color) {
 	vector.FillCircle(dst, body+w*0.16, mid, hole, fg, true)
 }
 
-func drawSubmoduleGlyph(dst *ebiten.Image, bounds image.Rectangle) {
+// submoduleGlyphColor is the worktree and submodule mark.
+// The open worktree inverts it so that row stays the same shape.
+func submoduleGlyphColor(inverted bool) color.NRGBA {
+	col := color.NRGBA{R: 0x6d, G: 0x5e, B: 0xc7, A: 0xff}
+	if !inverted {
+		return col
+	}
+	return color.NRGBA{R: 0xff - col.R, G: 0xff - col.G, B: 0xff - col.B, A: col.A}
+}
+
+func drawSubmoduleGlyph(dst *ebiten.Image, bounds image.Rectangle, inverted bool) {
 	r := iconInner(bounds)
 	if r.Dx() < 4 || r.Dy() < 4 {
 		return
 	}
-	col := color.NRGBA{R: 0x6d, G: 0x5e, B: 0xc7, A: 0xff}
+	col := submoduleGlyphColor(inverted)
 	w := float32(r.Dx())
 	h := float32(r.Dy())
 	x := float32(r.Min.X)

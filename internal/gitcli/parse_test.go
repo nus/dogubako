@@ -444,21 +444,38 @@ func TestParseWorktrees(t *testing.T) {
 	if len(got) != 3 {
 		t.Fatalf("len = %d", len(got))
 	}
-	if got[0].Path != "/repo" || got[0].Branch != "main" || got[0].Detached {
+	if got[0].Path != "/repo" || got[0].Branch != "main" || got[0].Detached || !got[0].Main {
 		t.Fatalf("main = %+v", got[0])
 	}
-	if got[1].Path != "/repo-feature" || !got[1].Detached || got[1].Branch != "" || got[1].Head != "1234567890" {
+	if got[1].Path != "/repo-feature" || !got[1].Detached || got[1].Branch != "" || got[1].Head != "1234567890" || got[1].Main {
 		t.Fatalf("detached = %+v", got[1])
 	}
-	others := filterCurrentWorktree(got, "/repo", true)
-	if len(others) != 2 || others[0].Path != "/repo-feature" || others[1].Branch != "fix" {
-		t.Fatalf("others = %+v", others)
+	if got[2].Main {
+		t.Fatalf("fix = %+v", got[2])
 	}
-	if WorktreeKey(others) == WorktreeKey(got) {
-		t.Fatal("digest should change when the current tree is omitted")
+	marked := markCurrentWorktree(append([]Worktree(nil), got...), "/repo", true)
+	if len(marked) != 3 || !marked[0].Current || !marked[0].Main || marked[1].Current || marked[2].Current {
+		t.Fatalf("from main = %+v", marked)
 	}
-	if len(filterCurrentWorktree(got, "/missing", false)) != 3 {
-		t.Fatal("unknown current should keep every tree")
+	fromFeature := markCurrentWorktree(append([]Worktree(nil), got...), "/repo-feature", true)
+	if len(fromFeature) != 3 || fromFeature[0].Current || !fromFeature[0].Main || !fromFeature[1].Current || fromFeature[1].Branch != "" {
+		t.Fatalf("from feature = %+v", fromFeature)
+	}
+	if WorktreeKey(marked) == WorktreeKey(got) {
+		t.Fatal("digest should change when the open tree is marked")
+	}
+	missing := markCurrentWorktree(append([]Worktree(nil), got...), "/missing", true)
+	if len(missing) != 3 || missing[0].Current || missing[1].Current || missing[2].Current {
+		t.Fatal("unknown current should keep every tree unmarked")
+	}
+
+	bareOut := "worktree /bare.git\nbare\n\nworktree /feature\nHEAD abcdef123456\nbranch refs/heads/feature\n"
+	bare := parseWorktrees(bareOut)
+	if len(bare) != 2 || !bare[0].Main || !bare[0].Bare || bare[0].Head != "" || bare[0].Branch != "" {
+		t.Fatalf("bare = %+v", bare)
+	}
+	if bare[1].Main || bare[1].Bare || bare[1].Branch != "feature" {
+		t.Fatalf("linked = %+v", bare[1])
 	}
 }
 

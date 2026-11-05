@@ -42,6 +42,17 @@ func TestGitNavLeadAlignsLeafWithFolder(t *testing.T) {
 	}
 }
 
+func TestSubmoduleGlyphColorInverts(t *testing.T) {
+	plain := submoduleGlyphColor(false)
+	inv := submoduleGlyphColor(true)
+	if inv.R != 0xff-plain.R || inv.G != 0xff-plain.G || inv.B != 0xff-plain.B || inv.A != plain.A {
+		t.Fatalf("inverted = %#v plain = %#v", inv, plain)
+	}
+	if inv == plain {
+		t.Fatal("inverted color matches the plain color")
+	}
+}
+
 func TestGitWorkspaceLeadLeavesRoom(t *testing.T) {
 	iconX, iconSize, textX := gitWorkspaceLead(24)
 	if iconX != 0 || textX <= iconX+iconSize {

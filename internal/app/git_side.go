@@ -20,8 +20,8 @@ import (
 
 const gitSideDefaultUnits = 9
 
-// gitSidePane is the left column. The workspace, including other worktrees,
-// stays put. Branches, tags, remotes, and submodules scroll beneath it.
+// gitSidePane is the left column. The workspace and the worktree stay put.
+// Branches, tags, remotes, and submodules scroll beneath them.
 // A filter box stays fixed along the bottom.
 type gitSidePane struct {
 	guigui.DefaultWidget
@@ -223,8 +223,8 @@ func (t *GitTool) openWorktree(model *GitModel, dir string) {
 	model.Open(loc.Key())
 }
 
-// worktreeTitle is the sidebar label for a linked working tree.
-// A branch name identifies it. A detached tree shows its folder and a short hash.
+// worktreeTitle is the sidebar label for a working tree.
+// A branch name identifies it. Without one, the row shows its folder and a short hash.
 func worktreeTitle(wt gitcli.Worktree) string {
 	if wt.Branch != "" {
 		return wt.Branch
@@ -244,6 +244,76 @@ func worktreeTitle(wt gitcli.Worktree) string {
 		return short
 	}
 	return name + " (" + short + ")"
+}
+
+// worktreeTree places the main working tree first and the linked trees after it.
+// A repository with one tree has nothing to nest, so the sidebar omits the section.
+func worktreeTree(trees []gitcli.Worktree) []gitcli.Worktree {
+	if len(trees) < 2 {
+		return nil
+	}
+	var root *gitcli.Worktree
+	rest := make([]gitcli.Worktree, 0, len(trees)-1)
+	for i := range trees {
+		if trees[i].Main && root == nil {
+			wt := trees[i]
+			root = &wt
+			continue
+		}
+		rest = append(rest, trees[i])
+	}
+	if root == nil {
+		return append([]gitcli.Worktree(nil), trees...)
+	}
+	out := make([]gitcli.Worktree, 0, len(trees))
+	out = append(out, *root)
+	return append(out, rest...)
+}
+
+// worktreeRows is the sidebar tree. The main tree is the root. Linked trees
+// are indented under it. The open tree is bold, and its icon color is inverted.
+func worktreeRows(trees []gitcli.Worktree) []basicwidget.ListItem[string] {
+	ordered := worktreeTree(trees)
+	if len(ordered) == 0 {
+		return nil
+	}
+	items := make([]basicwidget.ListItem[string], len(ordered))
+	for i, wt := range ordered {
+		items[i] = worktreeItem(wt)
+	}
+	return items
+}
+
+func worktreeItem(wt gitcli.Worktree) basicwidget.ListItem[string] {
+	item := basicwidget.ListItem[string]{
+		Text:  worktreeTitle(wt),
+		Value: "worktree:" + wt.Path,
+	}
+	if !wt.Main {
+		item.IndentLevel = 1
+	}
+	if wt.Current {
+		item.TextStyle.Style.SetBold(true)
+		item.Checked = true
+	}
+	return item
+}
+
+func setGitSideHeading(label *basicwidget.Text, text string) {
+	setBoldText(label, true)
+	label.SetValue(text)
+	label.SetVerticalAlign(basicwidget.VerticalAlignMiddle)
+	label.SetWrapMode(basicwidget.WrapModeNone)
+	label.SetSelectable(false)
+}
+
+func bindWorktreeRow(row *gitNavRow, wt gitcli.Worktree, enabled bool, open func(string)) {
+	dir := wt.Path
+	var press func()
+	if enabled && open != nil && !wt.Current {
+		press = func() { open(dir) }
+	}
+	row.Set(worktreeItem(wt), false, press, nil)
 }
 
 // gitSideFilter is the text box fixed to the bottom of the left column.
@@ -443,7 +513,8 @@ func (c *gitFilterClear) CursorShape(context *guigui.Context, widgetBounds *guig
 }
 
 // gitSideFixed is the part of the left column that does not scroll:
-// the repository path, the workspace, and any other worktrees.
+// the repository path, the workspace, and the worktree when this repository
+// has more than one.
 type gitSideFixed struct {
 	guigui.DefaultWidget
 
@@ -476,28 +547,20 @@ func (f *gitSideFixed) Build(context *guigui.Context, adder *guigui.ChildAdder) 
 		enabled = model.HasRepo() && !model.Busy()
 		trees = model.Snapshot().Worktrees
 	}
-	f.workRows.SetLen(len(trees))
-	if len(trees) == 0 {
+	ordered := worktreeTree(trees)
+	f.workRows.SetLen(len(ordered))
+	if len(ordered) == 0 {
 		return nil
 	}
-	setBoldText(&f.workLabel, true)
-	f.workLabel.SetValue(i18n.T(lang, i18n.GitWorktrees))
-	f.workLabel.SetVerticalAlign(basicwidget.VerticalAlignMiddle)
-	f.workLabel.SetWrapMode(basicwidget.WrapModeNone)
-	f.workLabel.SetSelectable(false)
+	setGitSideHeading(&f.workLabel, i18n.T(lang, i18n.GitWorktrees))
 	adder.AddWidget(&f.workLabel)
-	for i, wt := range trees {
+	var open func(string)
+	if enabled {
+		open = func(dir string) { t.openWorktree(model, dir) }
+	}
+	for i, wt := range ordered {
 		row := f.workRows.At(i)
-		dir := wt.Path
-		item := basicwidget.ListItem[string]{
-			Text:  worktreeTitle(wt),
-			Value: "worktree:" + dir,
-		}
-		var press func()
-		if enabled {
-			press = func() { t.openWorktree(model, dir) }
-		}
-		row.Set(item, false, press, nil)
+		bindWorktreeRow(row, wt, enabled, open)
 		adder.AddWidget(row)
 	}
 	return nil
