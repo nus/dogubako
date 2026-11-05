@@ -437,7 +437,9 @@ func (r *Repo) status(ctx context.Context) (Status, error) {
 	return st, nil
 }
 
-// Detail loads the full message and name-status for hash.
+// Detail loads the full message, changed paths, and patch for hash.
+// A merge is compared with its first parent. The default combined diff
+// omits every change that matches one parent, so a clean merge looks empty.
 func (r *Repo) Detail(ctx context.Context, hash string) (CommitDetail, error) {
 	if err := ctx.Err(); err != nil {
 		return CommitDetail{}, err
@@ -454,11 +456,11 @@ func (r *Repo) Detail(ctx context.Context, hash string) (CommitDetail, error) {
 	if err != nil {
 		return CommitDetail{}, err
 	}
-	files, err := r.output(ctx, "diff-tree", "--no-commit-id", "--name-status", "-r", "--root", detail.Hash)
+	files, err := r.output(ctx, nameStatusArgs(detail)...)
 	if err != nil {
 		return CommitDetail{}, err
 	}
-	diff, err := r.output(ctx, "show", "--no-notes", "--no-color", "--format=", "--patch", detail.Hash)
+	diff, err := r.output(ctx, showPatchArgs(detail.Hash)...)
 	if err != nil {
 		return CommitDetail{}, err
 	}
@@ -473,6 +475,28 @@ func (r *Repo) Detail(ctx context.Context, hash string) (CommitDetail, error) {
 	detail.Files = parseNameStatus(files)
 	detail.Diff = diff
 	return detail, nil
+}
+
+// nameStatusArgs lists paths changed by the commit.
+// diff-tree prints nothing for a merge unless it is given a parent tree.
+// -m would list every parent, so a merge is compared with the first parent only.
+// Other commits keep --root, which makes the root commit a creation diff.
+func nameStatusArgs(detail CommitDetail) []string {
+	args := []string{"diff-tree", "--no-commit-id", "--name-status", "-r"}
+	if len(detail.Parents) > 1 {
+		return append(args, detail.Parents[0], detail.Hash)
+	}
+	return append(args, "--root", detail.Hash)
+}
+
+// showPatchArgs is the patch against the first parent.
+// -m --first-parent does not change a one-parent commit or a root commit.
+// Without it, git show uses a combined diff for a merge.
+func showPatchArgs(hash string, extra ...string) []string {
+	args := []string{"show", "--no-notes", "--no-color", "--format=", "--patch", "-m", "--first-parent"}
+	args = append(args, extra...)
+	args = append(args, hash)
+	return args
 }
 
 // Commit creates a commit. amend rewrites HEAD.
@@ -755,7 +779,9 @@ func (r *Repo) ShowFileWhole(ctx context.Context, hash, path string) (string, er
 	if hash == "" || path == "" {
 		return "", nil
 	}
-	return r.diffOutput(ctx, "show", "--no-notes", "--no-color", "--format=", "--patch", fmt.Sprintf("-U%d", wholeFileContext), hash, "--", path)
+	args := showPatchArgs(hash, fmt.Sprintf("-U%d", wholeFileContext))
+	args = append(args, "--", path)
+	return r.diffOutput(ctx, args...)
 }
 
 func (r *Repo) diffWork(ctx context.Context, path string, staged bool, unified int) (string, error) {
