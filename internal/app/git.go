@@ -39,6 +39,16 @@ type GitTool struct {
 	commitBtn  basicwidget.Button
 	amendBtn   basicwidget.Button
 	commitView bool
+	// faceSess is the repository the widgets are showing.
+	// faceGraph is a commit-list scroll waiting to be applied once history is on screen.
+	faceSess    *gitSession
+	faceGraph   basicwidget.ListScrollPosition
+	faceGraphOn bool
+	fileHold    gitFileHold
+	workHold    gitDiffPlace
+	histHold    gitDiffPlace
+	sideX       float64
+	sideY       float64
 
 	workspaceLabel basicwidget.Text
 	workspaceList  basicwidget.List[string]
@@ -294,6 +304,7 @@ func (t *GitTool) Build(context *guigui.Context, adder *guigui.ChildAdder) error
 	model.EnsureLoaded()
 	model.ensure()
 	t.noteRecentSession(model.tabs[model.active])
+	t.adoptFace(model)
 	t.syncHistQuery(model)
 	t.noteHeadJump(model)
 	busy := model.Busy()
@@ -585,6 +596,10 @@ func (t *GitTool) Build(context *guigui.Context, adder *guigui.ChildAdder) error
 				t.commitList.EnsureItemVisibleByIndex(idx)
 			}
 		}
+		if t.faceGraphOn && !model.HistoryLoading() {
+			t.commitList.ForceSetScrollPosition(t.faceGraph)
+			t.faceGraphOn = false
+		}
 		context.SetClipChildren(&t.commitList, true)
 		t.histStack.tool = t
 		t.histStack.graph = &t.commitList
@@ -659,6 +674,11 @@ func (t *GitTool) Build(context *guigui.Context, adder *guigui.ChildAdder) error
 }
 
 func (t *GitTool) setChangeList(context *guigui.Context, lang i18n.Lang, model *GitModel, entries []gitcli.StatusEntry, enabled bool) {
+	if t.fileHold.on {
+		t.diffStaged = t.fileHold.diffStaged
+		t.workPanes.unstaged.sel = append([]string(nil), t.fileHold.unstaged...)
+		t.workPanes.staged.sel = append([]string(nil), t.fileHold.staged...)
+	}
 	var unstagedEntries, stagedEntries []gitcli.StatusEntry
 	for _, e := range entries {
 		if e.Unstaged() {
@@ -677,6 +697,9 @@ func (t *GitTool) setChangeList(context *guigui.Context, lang i18n.Lang, model *
 	}
 	t.workPanes.unstaged.setFiles(context, unstagedEntries, false, enabled, !t.diffStaged || len(stagedEntries) == 0, func() { t.diffStaged = false }, onCheck)
 	t.workPanes.staged.setFiles(context, stagedEntries, true, enabled, t.diffStaged || len(unstagedEntries) == 0, func() { t.diffStaged = true }, onCheck)
+	if t.fileHold.on && model.HasRepo() && !model.Busy() {
+		t.fileHold.on = false
+	}
 
 	stagePaths := append([]string(nil), t.workPanes.unstaged.sel...)
 	unstagePaths := append([]string(nil), t.workPanes.staged.sel...)
@@ -1798,6 +1821,10 @@ func (t *GitTool) setHistDiff(lang i18n.Lang, model *GitModel) {
 	}
 	shown := t.openHash + "\x00" + t.histFile
 	t.histStack.diff.Set(body, empty, shown, t.histFile)
+	if t.histHold.set {
+		t.histStack.diff.holdPlace(t.histHold)
+		t.histHold.set = false
+	}
 	t.histStack.diff.SetSplit(lang, t.diffSplit, t.setDiffSplit)
 	t.histStack.diff.SetWrap(lang, t.diffWrap, t.setDiffWrap)
 	full, enabled := t.wholeFileDiff(model, body, t.histFile, false, true)

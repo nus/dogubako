@@ -325,9 +325,10 @@ type gitDiffSide struct {
 
 	// scrollX and scrollY move the code. Both are zero or negative.
 	// Numbers and markers follow scrollY and stay at the left.
-	scrollX   float64
-	scrollY   float64
-	onScrollY func(float64)
+	scrollX      float64
+	scrollY      float64
+	onScrollY    func(float64)
+	onUserScroll func()
 
 	// viewW/viewH is the code viewport. contentW/contentH is the code's size,
 	// which is wider or taller than the viewport when there is something to scroll.
@@ -431,6 +432,9 @@ func (s *gitDiffSide) addScroll(dx, dy float64) bool {
 	s.scrollY = ny
 	if yChanged && s.onScrollY != nil {
 		s.onScrollY(ny)
+	}
+	if s.onUserScroll != nil {
+		s.onUserScroll()
 	}
 	guigui.RequestRebuild()
 	return true

@@ -76,12 +76,16 @@ type gitDiffView struct {
 	useMenu               bool
 	menuRanges            [][2]int
 	leftY, rightY         float64
+	// keep is a scroll to put back after the diff text is replaced.
+	keep gitDiffPlace
 }
 
 func (v *gitDiffView) Set(text string, dark, split, wrap, whole bool, full string) {
 	v.dark = dark
 	v.wrap = wrap
+	keep := v.keep
 	if text == v.text && split == v.split && whole == v.whole && full == v.full {
+		v.applyKeep(keep)
 		return
 	}
 	prevSplit := v.split
@@ -91,6 +95,7 @@ func (v *gitDiffView) Set(text string, dark, split, wrap, whole bool, full strin
 	v.full = full
 	shown, sources := displayDiff(text, whole, full)
 	if shown == v.shown && split == prevSplit {
+		v.applyKeep(keep)
 		return
 	}
 	v.shown = shown
@@ -114,6 +119,7 @@ func (v *gitDiffView) Set(text string, dark, split, wrap, whole bool, full strin
 		}
 	}
 	v.ResetScroll()
+	v.applyKeep(keep)
 }
 
 func (v *gitDiffView) ResetScroll() {
@@ -206,6 +212,10 @@ func (v *gitDiffView) syncFromRight(y float64) {
 }
 
 func (v *gitDiffView) Build(context *guigui.Context, adder *guigui.ChildAdder) error {
+	drop := func() { v.keep.set = false }
+	v.compact.onUserScroll = drop
+	v.left.onUserScroll = drop
+	v.right.onUserScroll = drop
 	if v.split {
 		v.left.onScrollY = v.syncFromLeft
 		v.right.onScrollY = v.syncFromRight

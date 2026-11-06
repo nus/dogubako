@@ -1258,12 +1258,19 @@ func TestOpenHereReusesTab(t *testing.T) {
 	}
 	m.Open(dir)
 	waitGit(t, &m)
+	if m.TabCount() != 1 || canonicalPath(m.Path()) != canonicalPath(dir) {
+		t.Fatalf("same parent tabs=%d path=%s", m.TabCount(), m.Path())
+	}
+	unrelated := initRepo(t, "other")
+	m.Open(unrelated)
+	waitGit(t, &m)
 	if m.TabCount() != 2 {
 		t.Fatalf("tabs = %d", m.TabCount())
 	}
-	m.OpenHere(other)
+	m.SelectTab(0)
+	m.OpenHere(unrelated)
 	waitGit(t, &m)
-	if m.TabCount() != 2 || canonicalPath(m.Path()) != canonicalPath(other) {
+	if m.TabCount() != 2 || canonicalPath(m.Path()) != canonicalPath(unrelated) {
 		t.Fatalf("switch tabs=%d path=%s active=%d", m.TabCount(), m.Path(), m.ActiveTab())
 	}
 }
@@ -1305,7 +1312,7 @@ func TestCloseWorktree(t *testing.T) {
 	if _, err := os.Stat(other); err != nil {
 		t.Fatalf("dirty worktree = %v", err)
 	}
-	if m.TabCount() != 2 || canonicalPath(m.Path()) != canonicalPath(other) {
+	if m.TabCount() != 1 || canonicalPath(m.Path()) != canonicalPath(other) {
 		t.Fatalf("after failure tabs=%d path=%s", m.TabCount(), m.Path())
 	}
 	if !strings.Contains(m.StatusText(i18n.EN), "Could not close worktree") {

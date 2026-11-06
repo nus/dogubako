@@ -26,6 +26,7 @@ const gitSideDefaultUnits = 9
 type gitSidePane struct {
 	guigui.DefaultWidget
 
+	owner  *GitTool
 	fixed  gitSideFixed
 	panel  basicwidget.Panel
 	body   gitSideBody
@@ -33,6 +34,7 @@ type gitSidePane struct {
 }
 
 func (p *gitSidePane) setOwner(t *GitTool) {
+	p.owner = t
 	p.fixed.owner = t
 	p.body.owner = t
 	p.filter.owner = t
@@ -51,6 +53,12 @@ func (p *gitSidePane) Build(context *guigui.Context, adder *guigui.ChildAdder) e
 	p.panel.SetBorders(basicwidget.PanelBorders{})
 	p.panel.SetContentConstraints(basicwidget.PanelContentConstraintsFixedWidth)
 	p.panel.SetContent(&p.body)
+	p.panel.OnScroll(func(_ *guigui.Context, x, y float64) {
+		if p.owner != nil {
+			p.owner.sideX = x
+			p.owner.sideY = y
+		}
+	})
 	return nil
 }
 
@@ -213,12 +221,13 @@ func (t *GitTool) setSideDragPassthrough(context *guigui.Context, pass bool) {
 }
 
 // openWorktree shows dir in the current tab.
-// A tab that already has that directory is selected. A new tab is not added.
+// A tab that already shows it is selected. Coming back restores that worktree's screen.
 func (t *GitTool) openWorktree(model *GitModel, dir string) {
 	if model == nil || strings.TrimSpace(dir) == "" {
 		return
 	}
-	model.OpenHere(worktreeKey(model.Path(), dir))
+	t.stashFace(model)
+	model.SwitchWorktree(worktreeKey(model.Path(), dir))
 }
 
 // worktreeTitle is the sidebar label for a working tree.

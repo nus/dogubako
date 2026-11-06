@@ -75,7 +75,8 @@ func (b *gitTabBar) Layout(context *guigui.Context, widgetBounds *guigui.WidgetB
 	inner.Min.Y += padTop
 	lead := u / 3
 	gap := u / 6
-	b.widths = b.tabWidths(context, inner.Dx()-lead-gap-u)
+	avail := inner.Dx() - lead - gap - u
+	b.widths = b.tabWidths(context, avail)
 	b.items = slices.Delete(b.items, 0, len(b.items))
 	if lead > 0 {
 		b.items = append(b.items, guigui.LinearLayoutItem{Size: guigui.FixedSize(lead)})
@@ -106,7 +107,10 @@ func (b *gitTabBar) tabWidths(context *guigui.Context, avail int) []int {
 		widths = append(widths, w)
 		total += w
 	}
-	if avail <= 0 || total <= avail {
+	if avail < 0 {
+		avail = 0
+	}
+	if total <= avail {
 		return widths
 	}
 	u := basicwidget.UnitSize(context)
@@ -127,8 +131,8 @@ func (b *gitTabBar) Measure(context *guigui.Context, constraints guigui.Constrai
 	return image.Pt(0, gitTabBarHeight(basicwidget.UnitSize(context)))
 }
 
-// gitTab is one repository tab. The active tab is the page color with rounded
-// top corners; inactive tabs are text on the strip.
+// gitTab is one repository tab. The active tab is the page color and meets
+// the page underneath.
 type gitTab struct {
 	guigui.DefaultWidget
 
@@ -386,8 +390,19 @@ func gitTabRadius(u int, b image.Rectangle) float32 {
 }
 
 func fillChromeTab(dst *ebiten.Image, b image.Rectangle, clr color.Color, topR, botR float32) {
-	if b.Dx() <= 1 || b.Dy() <= 1 {
+	p, ok := chromeTabPath(b, topR, botR)
+	if !ok {
 		return
+	}
+	op := &vector.DrawPathOptions{AntiAlias: true}
+	op.ColorScale.ScaleWithColor(clr)
+	vector.FillPath(dst, &p, nil, op)
+}
+
+func chromeTabPath(b image.Rectangle, topR, botR float32) (vector.Path, bool) {
+	var p vector.Path
+	if b.Dx() <= 1 || b.Dy() <= 1 {
+		return p, false
 	}
 	w := float32(b.Dx())
 	h := float32(b.Dy())
@@ -412,7 +427,6 @@ func fillChromeTab(dst *ebiten.Image, b image.Rectangle, clr color.Color, topR, 
 	y0 := float32(b.Min.Y)
 	x1 := float32(b.Max.X)
 	y1 := float32(b.Max.Y)
-	var p vector.Path
 	p.MoveTo(x0+botR, y1)
 	p.LineTo(x1-botR, y1)
 	if botR > 0 {
@@ -431,9 +445,7 @@ func fillChromeTab(dst *ebiten.Image, b image.Rectangle, clr color.Color, topR, 
 		p.ArcTo(x0, y1, x0+botR, y1, botR)
 	}
 	p.Close()
-	op := &vector.DrawPathOptions{AntiAlias: true}
-	op.ColorScale.ScaleWithColor(clr)
-	vector.FillPath(dst, &p, nil, op)
+	return p, true
 }
 
 func fillRect(dst *ebiten.Image, r image.Rectangle, clr color.Color) {
