@@ -571,6 +571,384 @@ func (c *gitPushDialogContent) Layout(context *guigui.Context, widgetBounds *gui
 	}).LayoutWidgets(context, widgetBounds.Bounds(), layouter)
 }
 
+// worktreeCloseDisabled reports that a working tree cannot be removed.
+// The main tree is one of these, and a bare parent is the main tree.
+func worktreeCloseDisabled(wt gitcli.Worktree) bool {
+	return wt.Main || wt.Bare || wt.Path == ""
+}
+
+// worktreeMenuItems is only Close. Force delete is not a menu item.
+// Close is disabled for the main working tree.
+func worktreeMenuItems(label string, disabled bool) []basicwidget.PopupMenuItem[string] {
+	return []basicwidget.PopupMenuItem[string]{
+		{Text: label, Value: "close", Disabled: disabled},
+	}
+}
+
+// gitWorktreeMenu is the context menu opened by right-clicking a worktree row.
+type gitWorktreeMenu struct {
+	guigui.DefaultWidget
+
+	menu basicwidget.PopupMenu[string]
+
+	pos      image.Point
+	label    string
+	disabled bool
+	onClose  func()
+}
+
+func (m *gitWorktreeMenu) Open(disabled bool, at image.Point, label string, onClose func()) {
+	m.disabled = disabled
+	m.pos = at
+	m.label = label
+	m.onClose = onClose
+	m.menu.SetOpen(true)
+}
+
+func (m *gitWorktreeMenu) IsOpen() bool {
+	return m.menu.IsOpen()
+}
+
+func (m *gitWorktreeMenu) Build(context *guigui.Context, adder *guigui.ChildAdder) error {
+	m.menu.SetItems(worktreeMenuItems(m.label, m.disabled))
+	m.menu.OnItemSelected(func(context *guigui.Context, index int) {
+		item, ok := m.menu.ItemByIndex(index)
+		if !ok || item.Value != "close" || m.disabled || m.onClose == nil {
+			return
+		}
+		m.onClose()
+	})
+	if m.menu.IsOpen() {
+		adder.AddWidget(&m.menu)
+	}
+	return nil
+}
+
+func (m *gitWorktreeMenu) Layout(context *guigui.Context, widgetBounds *guigui.WidgetBounds, layouter *guigui.ChildLayouter) {
+	layouter.LayoutWidget(&m.menu, widgetBounds.Bounds())
+}
+
+func (m *gitWorktreeMenu) Measure(context *guigui.Context, constraints guigui.Constraints) image.Point {
+	return image.Point{}
+}
+
+func (m *gitWorktreeMenu) contentSize(context *guigui.Context) image.Point {
+	return m.menu.Measure(context, guigui.Constraints{})
+}
+
+// worktreeRemoveChoice is a dialog option: the action, then the remove
+// command's option in parentheses.
+func worktreeRemoveChoice(action, option string) string {
+	return action + " (" + option + ")"
+}
+
+// gitWorktreeDialog asks whether to remove a linked worktree, or force-remove it.
+// The choices are radio buttons. Close runs the selected one. Cancel runs nothing.
+type gitWorktreeDialog struct {
+	guigui.DefaultWidget
+
+	popup   basicwidget.Popup
+	content gitWorktreeDialogContent
+}
+
+func (d *gitWorktreeDialog) Ask(message, closeText, forceText, okText, cancelText string, onChoose func(force bool)) {
+	d.content.messageText = message
+	d.content.closeText = closeText
+	d.content.forceText = forceText
+	d.content.okText = okText
+	d.content.cancelText = cancelText
+	d.content.onChoose = onChoose
+	d.content.labelPress = 0
+	d.content.message.SetValue(message)
+	d.content.closeLbl.SetValue(closeText)
+	d.content.forceLbl.SetValue(forceText)
+	d.content.ok.SetText(okText)
+	d.content.cancel.SetText(cancelText)
+	d.content.group.SetValues([]bool{false, true})
+	d.content.group.SelectItemByValue(false)
+	d.popup.SetOpen(true)
+}
+
+func (d *gitWorktreeDialog) IsOpen() bool {
+	return d.popup.IsOpen()
+}
+
+func (d *gitWorktreeDialog) Build(context *guigui.Context, adder *guigui.ChildAdder) error {
+	d.content.popup = &d.popup
+	d.popup.SetContent(&d.content)
+	d.popup.SetModal(true)
+	d.popup.SetBackgroundDark(true)
+	d.popup.SetCloseByClickingOutside(true)
+	d.popup.SetAnimated(true)
+	if d.popup.IsOpen() {
+		adder.AddWidget(&d.popup)
+	}
+	return nil
+}
+
+func (d *gitWorktreeDialog) Layout(context *guigui.Context, widgetBounds *guigui.WidgetBounds, layouter *guigui.ChildLayouter) {
+	layouter.LayoutWidget(&d.popup, widgetBounds.Bounds())
+}
+
+func (d *gitWorktreeDialog) Measure(context *guigui.Context, constraints guigui.Constraints) image.Point {
+	return image.Point{}
+}
+
+func (d *gitWorktreeDialog) contentSize(context *guigui.Context) image.Point {
+	return d.content.Measure(context, guigui.Constraints{})
+}
+
+type gitWorktreeDialogContent struct {
+	guigui.DefaultWidget
+
+	popup *basicwidget.Popup
+
+	message  basicwidget.Text
+	group    basicwidget.RadioButtonGroup[bool]
+	closeLbl basicwidget.Text
+	forceLbl basicwidget.Text
+	ok       basicwidget.Button
+	cancel   basicwidget.Button
+
+	messageText string
+	closeText   string
+	forceText   string
+	okText      string
+	cancelText  string
+	onChoose    func(force bool)
+	// labelPress is 1 or 2 while the pointer is down on a choice label.
+	labelPress int
+	closeHit   image.Rectangle
+	forceHit   image.Rectangle
+
+	closeItems  []guigui.LinearLayoutItem
+	forceItems  []guigui.LinearLayoutItem
+	rowItems    []guigui.LinearLayoutItem
+	layoutItems []guigui.LinearLayoutItem
+}
+
+func (c *gitWorktreeDialogContent) submit() {
+	force, ok := c.group.SelectedValue()
+	if !ok {
+		force = false
+	}
+	on := c.onChoose
+	c.onChoose = nil
+	c.labelPress = 0
+	if c.popup != nil {
+		c.popup.SetOpen(false)
+	}
+	if on != nil {
+		on(force)
+	}
+}
+
+func (c *gitWorktreeDialogContent) close() {
+	c.onChoose = nil
+	c.labelPress = 0
+	if c.popup != nil {
+		c.popup.SetOpen(false)
+	}
+}
+
+func (c *gitWorktreeDialogContent) Build(context *guigui.Context, adder *guigui.ChildAdder) error {
+	c.group.SetValues([]bool{false, true})
+	if _, ok := c.group.SelectedValue(); !ok {
+		c.group.SelectItemByValue(false)
+	}
+	closeBtn := c.group.RadioButton(0)
+	forceBtn := c.group.RadioButton(1)
+
+	adder.AddWidget(&c.message)
+	adder.AddWidget(&c.group)
+	adder.AddWidget(closeBtn)
+	adder.AddWidget(&c.closeLbl)
+	adder.AddWidget(forceBtn)
+	adder.AddWidget(&c.forceLbl)
+	adder.AddWidget(&c.cancel)
+	adder.AddWidget(&c.ok)
+
+	c.message.SetValue(c.messageText)
+	c.message.SetMultiline(true)
+	c.message.SetWrapMode(basicwidget.WrapModeNormal)
+	c.message.SetHorizontalAlign(basicwidget.HorizontalAlignCenter)
+	c.message.SetVerticalAlign(basicwidget.VerticalAlignMiddle)
+
+	c.closeLbl.SetValue(c.closeText)
+	c.closeLbl.SetSelectable(false)
+	c.closeLbl.SetVerticalAlign(basicwidget.VerticalAlignMiddle)
+	c.forceLbl.SetValue(c.forceText)
+	c.forceLbl.SetSelectable(false)
+	c.forceLbl.SetVerticalAlign(basicwidget.VerticalAlignMiddle)
+
+	// Escape must reach this dialog even when focus is still on the history.
+	context.SetButtonInputReceptive(c, true)
+
+	c.ok.SetText(c.okText)
+	c.ok.SetType(basicwidget.ButtonTypePrimary)
+	c.ok.OnDown(func(context *guigui.Context) {
+		c.submit()
+	})
+	c.cancel.SetText(c.cancelText)
+	c.cancel.OnDown(func(context *guigui.Context) {
+		c.close()
+	})
+	return nil
+}
+
+func (c *gitWorktreeDialogContent) HandleButtonInput(context *guigui.Context, widgetBounds *guigui.WidgetBounds) guigui.HandleInputResult {
+	if c.popup == nil || !c.popup.IsOpen() {
+		return guigui.HandleInputResult{}
+	}
+	if inpututil.IsKeyJustPressed(ebiten.KeyEscape) {
+		c.close()
+		return guigui.HandleInputByWidget(c)
+	}
+	return guigui.HandleInputResult{}
+}
+
+func (c *gitWorktreeDialogContent) choiceRowHeight(context *guigui.Context) int {
+	h := c.group.RadioButton(0).Measure(context, guigui.Constraints{}).Y
+	if textH := c.closeLbl.Measure(context, guigui.Constraints{}).Y; textH > h {
+		h = textH
+	}
+	if textH := c.forceLbl.Measure(context, guigui.Constraints{}).Y; textH > h {
+		h = textH
+	}
+	return h
+}
+
+func (c *gitWorktreeDialogContent) Measure(context *guigui.Context, constraints guigui.Constraints) image.Point {
+	c.group.SetValues([]bool{false, true})
+	u := basicwidget.UnitSize(context)
+	w := 18 * u
+	radio := c.group.RadioButton(0).Measure(context, guigui.Constraints{}).X
+	gap := u / 4
+	for _, lbl := range []*basicwidget.Text{&c.closeLbl, &c.forceLbl} {
+		if need := radio + gap + lbl.Measure(context, guigui.Constraints{}).X + u; need > w {
+			w = need
+		}
+	}
+	cancelW := c.cancel.Measure(context, guigui.Constraints{}).X
+	okW := c.ok.Measure(context, guigui.Constraints{}).X
+	if need := cancelW + okW + gap + u; need > w {
+		w = need
+	}
+	msgH := c.message.Measure(context, guigui.FixedWidthConstraints(w-u)).Y
+	rowH := c.choiceRowHeight(context)
+	btnH := c.ok.Measure(context, guigui.Constraints{}).Y
+	if cancelH := c.cancel.Measure(context, guigui.Constraints{}).Y; cancelH > btnH {
+		btnH = cancelH
+	}
+	h := msgH + rowH + rowH + btnH + 3*(u/2) + u
+	return image.Pt(w, h)
+}
+
+func (c *gitWorktreeDialogContent) Layout(context *guigui.Context, widgetBounds *guigui.WidgetBounds, layouter *guigui.ChildLayouter) {
+	c.group.SetValues([]bool{false, true})
+	u := basicwidget.UnitSize(context)
+	bounds := widgetBounds.Bounds()
+	rowH := c.choiceRowHeight(context)
+	btnH := c.ok.Measure(context, guigui.Constraints{}).Y
+	if cancelH := c.cancel.Measure(context, guigui.Constraints{}).Y; cancelH > btnH {
+		btnH = cancelH
+	}
+	radio := c.group.RadioButton(0).Measure(context, guigui.Constraints{}).X
+	gap := u / 4
+	cancelW := c.cancel.Measure(context, guigui.Constraints{}).X
+	okW := c.ok.Measure(context, guigui.Constraints{}).X
+	c.closeHit = image.Rectangle{}
+	c.forceHit = image.Rectangle{}
+
+	choiceRow := func(items *[]guigui.LinearLayoutItem, radioBtn guigui.Widget, label *basicwidget.Text) guigui.LinearLayout {
+		*items = slices.Delete(*items, 0, len(*items))
+		*items = append(*items,
+			guigui.LinearLayoutItem{Widget: radioBtn, Size: guigui.FixedSize(radio)},
+			guigui.LinearLayoutItem{Widget: label, Size: guigui.FlexibleSize(1)},
+		)
+		return guigui.LinearLayout{
+			Direction: guigui.LayoutDirectionHorizontal,
+			Items:     *items,
+			Gap:       gap,
+		}
+	}
+	closeRow := choiceRow(&c.closeItems, c.group.RadioButton(0), &c.closeLbl)
+	forceRow := choiceRow(&c.forceItems, c.group.RadioButton(1), &c.forceLbl)
+
+	c.rowItems = slices.Delete(c.rowItems, 0, len(c.rowItems))
+	c.rowItems = append(c.rowItems,
+		guigui.LinearLayoutItem{Size: guigui.FlexibleSize(1)},
+		guigui.LinearLayoutItem{Widget: &c.cancel, Size: guigui.FixedSize(cancelW)},
+		guigui.LinearLayoutItem{Widget: &c.ok, Size: guigui.FixedSize(okW)},
+	)
+	buttons := guigui.LinearLayout{
+		Direction: guigui.LayoutDirectionHorizontal,
+		Items:     c.rowItems,
+		Gap:       gap,
+	}
+
+	c.layoutItems = slices.Delete(c.layoutItems, 0, len(c.layoutItems))
+	c.layoutItems = append(c.layoutItems,
+		guigui.LinearLayoutItem{Widget: &c.message, Size: guigui.FlexibleSize(1)},
+		guigui.LinearLayoutItem{Size: guigui.FixedSize(rowH), Layout: &closeRow},
+		guigui.LinearLayoutItem{Size: guigui.FixedSize(rowH), Layout: &forceRow},
+		guigui.LinearLayoutItem{Size: guigui.FixedSize(btnH), Layout: &buttons},
+	)
+	pad := u / 2
+	(guigui.LinearLayout{
+		Direction: guigui.LayoutDirectionVertical,
+		Items:     c.layoutItems,
+		Gap:       u / 2,
+		Padding:   guigui.Padding{Start: pad, Top: pad, End: pad, Bottom: pad},
+	}).LayoutWidgets(context, bounds, layouter)
+
+	// The label sits beside the radio. A click there selects that choice.
+	innerX := bounds.Min.X + pad + radio + gap
+	innerR := bounds.Max.X - pad
+	msgH := bounds.Dy() - pad*2 - rowH - rowH - btnH - 3*(u/2)
+	if msgH < 0 {
+		msgH = 0
+	}
+	y := bounds.Min.Y + pad + msgH + u/2
+	c.closeHit = image.Rect(innerX, y, innerR, y+rowH)
+	y += rowH + u/2
+	c.forceHit = image.Rect(innerX, y, innerR, y+rowH)
+}
+
+func (c *gitWorktreeDialogContent) HandlePointingInput(context *guigui.Context, widgetBounds *guigui.WidgetBounds) guigui.HandleInputResult {
+	cursor := image.Pt(ebiten.CursorPosition())
+	hit := 0
+	switch {
+	case cursor.In(c.closeHit):
+		hit = 1
+	case cursor.In(c.forceHit):
+		hit = 2
+	}
+	if inpututil.IsMouseButtonJustPressed(ebiten.MouseButtonLeft) && hit != 0 {
+		c.labelPress = hit
+		return guigui.HandleInputByWidget(c)
+	}
+	if c.labelPress != 0 && inpututil.IsMouseButtonJustReleased(ebiten.MouseButtonLeft) {
+		idx := c.labelPress - 1
+		pressed := c.labelPress
+		c.labelPress = 0
+		if hit == pressed {
+			c.group.SelectItemByIndex(idx)
+			guigui.RequestRedraw(c.group.RadioButton(idx))
+		}
+		return guigui.HandleInputByWidget(c)
+	}
+	return guigui.HandleInputResult{}
+}
+
+func (c *gitWorktreeDialogContent) CursorShape(context *guigui.Context, widgetBounds *guigui.WidgetBounds) (ebiten.CursorShapeType, bool) {
+	cursor := image.Pt(ebiten.CursorPosition())
+	if cursor.In(c.closeHit) || cursor.In(c.forceHit) {
+		return ebiten.CursorShapePointer, true
+	}
+	return 0, false
+}
+
 // gitConfirm asks before deleting a branch.
 type gitConfirm struct {
 	guigui.DefaultWidget

@@ -228,14 +228,16 @@ type GitTool struct {
 	statusItems    []guigui.LinearLayoutItem
 	statusRow      guigui.LinearLayout
 
-	branchMenu gitBranchMenu
-	commitMenu gitCommitMenu
-	tagMenu    gitTagMenu
-	pushDialog gitPushDialog
-	selMenu    gitSelectionMenu
-	changeMenu gitChangeMenu
-	confirm    gitConfirm
-	rename     gitRename
+	branchMenu     gitBranchMenu
+	commitMenu     gitCommitMenu
+	tagMenu        gitTagMenu
+	worktreeMenu   gitWorktreeMenu
+	pushDialog     gitPushDialog
+	worktreeDialog gitWorktreeDialog
+	selMenu        gitSelectionMenu
+	changeMenu     gitChangeMenu
+	confirm        gitConfirm
+	rename         gitRename
 
 	sidePane  gitSidePane
 	sideSplit gitSideSplit
@@ -646,7 +648,9 @@ func (t *GitTool) Build(context *guigui.Context, adder *guigui.ChildAdder) error
 	adder.AddWidget(&t.branchMenu)
 	adder.AddWidget(&t.commitMenu)
 	adder.AddWidget(&t.tagMenu)
+	adder.AddWidget(&t.worktreeMenu)
 	adder.AddWidget(&t.pushDialog)
+	adder.AddWidget(&t.worktreeDialog)
 	adder.AddWidget(&t.selMenu)
 	adder.AddWidget(&t.changeMenu)
 	adder.AddWidget(&t.confirm)
@@ -1201,6 +1205,11 @@ func (t *GitTool) layoutOverlays(context *guigui.Context, layouter *guigui.Child
 		p := t.tagMenu.pos
 		layouter.LayoutWidget(&t.tagMenu, image.Rectangle{Min: p, Max: p.Add(s)})
 	}
+	if t.worktreeMenu.IsOpen() {
+		s := t.worktreeMenu.contentSize(context)
+		p := t.worktreeMenu.pos
+		layouter.LayoutWidget(&t.worktreeMenu, image.Rectangle{Min: p, Max: p.Add(s)})
+	}
 	center := func(widget guigui.Widget, s image.Point) {
 		app := context.AppBounds()
 		p := image.Pt(app.Min.X+(app.Dx()-s.X)/2, app.Min.Y+(app.Dy()-s.Y)/2)
@@ -1211,6 +1220,9 @@ func (t *GitTool) layoutOverlays(context *guigui.Context, layouter *guigui.Child
 	}
 	if t.pushDialog.IsOpen() {
 		center(&t.pushDialog, t.pushDialog.contentSize(context))
+	}
+	if t.worktreeDialog.IsOpen() {
+		center(&t.worktreeDialog, t.worktreeDialog.contentSize(context))
 	}
 	if t.rename.IsOpen() {
 		center(&t.rename, t.rename.contentSize(context))
@@ -1715,6 +1727,10 @@ func (t *GitTool) HandlePointingInput(context *guigui.Context, widgetBounds *gui
 	}
 	appModel := v.(*Model)
 	model := appModel.Git()
+	if wt, ok := t.worktreeAtCursor(model); ok {
+		t.openWorktreeMenu(appModel.Lang(), model, wt)
+		return guigui.HandleInputByWidget(t)
+	}
 	if ref, ok := t.refAtRows(&t.sidePane.body.branchRows, model); ok {
 		t.openBranchMenu(appModel.Lang(), model, ref)
 		return guigui.HandleInputByWidget(t)
@@ -1835,7 +1851,7 @@ func (t *GitTool) setDiffWhole(on bool) {
 }
 
 func (t *GitTool) menuOpen() bool {
-	return t.rename.IsOpen() || t.confirm.IsOpen() || t.pushDialog.IsOpen() || t.tagMenu.IsOpen() || t.branchMenu.IsOpen() || t.commitMenu.IsOpen() || t.selMenu.IsOpen() || t.changeMenu.IsOpen()
+	return t.rename.IsOpen() || t.confirm.IsOpen() || t.pushDialog.IsOpen() || t.worktreeDialog.IsOpen() || t.tagMenu.IsOpen() || t.branchMenu.IsOpen() || t.worktreeMenu.IsOpen() || t.commitMenu.IsOpen() || t.selMenu.IsOpen() || t.changeMenu.IsOpen()
 }
 
 func (t *GitTool) openPushDialog(lang i18n.Lang, model *GitModel) {
@@ -1987,6 +2003,53 @@ func (t *GitTool) openCommitMenu(lang i18n.Lang, model *GitModel, hash string) {
 			)
 		},
 	)
+}
+
+func (t *GitTool) worktreeAtCursor(model *GitModel) (gitcli.Worktree, bool) {
+	c := image.Pt(ebiten.CursorPosition())
+	rows := &t.sidePane.fixed.workRows
+	for i := 0; i < rows.Len(); i++ {
+		row := rows.At(i)
+		if !c.In(row.bounds) {
+			continue
+		}
+		return worktreeByRowValue(model.Snapshot().Worktrees, row.value)
+	}
+	return gitcli.Worktree{}, false
+}
+
+func worktreeByRowValue(trees []gitcli.Worktree, value string) (gitcli.Worktree, bool) {
+	dir, ok := strings.CutPrefix(value, "worktree:")
+	if !ok || dir == "" {
+		return gitcli.Worktree{}, false
+	}
+	for _, wt := range trees {
+		if wt.Path == dir {
+			return wt, true
+		}
+	}
+	return gitcli.Worktree{}, false
+}
+
+func (t *GitTool) openWorktreeMenu(lang i18n.Lang, model *GitModel, wt gitcli.Worktree) {
+	if wt.Path == "" || !model.HasRepo() || model.Busy() {
+		return
+	}
+	disabled := worktreeCloseDisabled(wt)
+	label := worktreeTitle(wt)
+	t.worktreeMenu.Open(disabled, image.Pt(ebiten.CursorPosition()), i18n.T(lang, i18n.GitWorktreeClose), func() {
+		if disabled || worktreeCloseDisabled(wt) {
+			return
+		}
+		t.worktreeDialog.Ask(
+			i18n.T(lang, i18n.GitWorktreeCloseAsk, label),
+			worktreeRemoveChoice(i18n.T(lang, i18n.GitWorktreeClose), "remove"),
+			worktreeRemoveChoice(i18n.T(lang, i18n.GitWorktreeForce), "remove --force --force"),
+			i18n.T(lang, i18n.GitWorktreeClose),
+			i18n.T(lang, i18n.GitCancel),
+			func(force bool) { model.DoCloseWorktree(wt, force) },
+		)
+	})
 }
 
 func (t *GitTool) refAtRows(rows *guigui.WidgetSlice[*gitNavRow], model *GitModel) (gitcli.Ref, bool) {

@@ -170,6 +170,9 @@ const (
 	GitRemotes          Key = "git.remotes"
 	GitSubmodules       Key = "git.submodules"
 	GitWorktrees        Key = "git.worktrees"
+	GitWorktreeClose    Key = "git.worktree_close"
+	GitWorktreeForce    Key = "git.worktree_force"
+	GitWorktreeCloseAsk Key = "git.worktree_close_ask"
 	GitFilter           Key = "git.filter"
 	GitSearch           Key = "git.search"
 	GitAuthor           Key = "git.author"
@@ -284,57 +287,59 @@ const (
 	StatusMTPNoSelection           Key = "status.mtp_no_selection"
 	StatusMTPSelectOnline          Key = "status.mtp_select_online"
 
-	StatusGitLoading        Key = "status.git_loading"
-	StatusGitOpened         Key = "status.git_opened"
-	StatusGitOpenFailed     Key = "status.git_open_failed"
-	StatusGitSubmoduleInit  Key = "status.git_submodule_init"
-	StatusGitSubmoduleReady Key = "status.git_submodule_ready"
-	StatusGitSubmoduleErr   Key = "status.git_submodule_err"
-	StatusGitWorking        Key = "status.git_working"
-	StatusGitOpFailed       Key = "status.git_op_failed"
-	StatusGitCommitOk       Key = "status.git_commit_ok"
-	StatusGitCommitFailed   Key = "status.git_commit_failed"
-	StatusGitAmendOk        Key = "status.git_amend_ok"
-	StatusGitAmendFailed    Key = "status.git_amend_failed"
-	StatusGitStageOk        Key = "status.git_stage_ok"
-	StatusGitStageFailed    Key = "status.git_stage_failed"
-	StatusGitUnstageOk      Key = "status.git_unstage_ok"
-	StatusGitUnstageFailed  Key = "status.git_unstage_failed"
-	StatusGitDiscardOk      Key = "status.git_discard_ok"
-	StatusGitDiscardFailed  Key = "status.git_discard_failed"
-	StatusGitFetchOk        Key = "status.git_fetch_ok"
-	StatusGitFetchFailed    Key = "status.git_fetch_failed"
-	StatusGitPullOk         Key = "status.git_pull_ok"
-	StatusGitPullFailed     Key = "status.git_pull_failed"
-	StatusGitPushOk         Key = "status.git_push_ok"
-	StatusGitPushFailed     Key = "status.git_push_failed"
-	StatusGitCheckoutOk     Key = "status.git_checkout_ok"
-	StatusGitCheckoutFailed Key = "status.git_checkout_failed"
-	StatusGitCheckoutDirty  Key = "status.git_checkout_dirty"
-	StatusGitCheckoutPullOk Key = "status.git_checkout_pull_ok"
-	StatusGitRebaseOk       Key = "status.git_rebase_ok"
-	StatusGitRebaseAlready  Key = "status.git_rebase_already"
-	StatusGitRebaseFailed   Key = "status.git_rebase_failed"
-	StatusGitTagSwitchOk    Key = "status.git_tag_switch_ok"
-	StatusGitTagSwitchErr   Key = "status.git_tag_switch_err"
-	StatusGitDeleteOk       Key = "status.git_delete_ok"
-	StatusGitDeleteFailed   Key = "status.git_delete_failed"
-	StatusGitDeleteCurrent  Key = "status.git_delete_current"
-	StatusGitRenameOk       Key = "status.git_rename_ok"
-	StatusGitRenameFailed   Key = "status.git_rename_failed"
-	StatusGitBranchOk       Key = "status.git_branch_ok"
-	StatusGitBranchFailed   Key = "status.git_branch_failed"
-	StatusGitTagOk          Key = "status.git_tag_ok"
-	StatusGitTagFailed      Key = "status.git_tag_failed"
-	StatusGitTagPushFailed  Key = "status.git_tag_push_failed"
-	StatusGitTagDeleted     Key = "status.git_tag_deleted"
-	StatusGitTagDeleteErr   Key = "status.git_tag_delete_err"
-	StatusGitTagPushed      Key = "status.git_tag_pushed"
-	StatusGitTagPushErr     Key = "status.git_tag_push_err"
-	StatusGitTagRemoteOk    Key = "status.git_tag_remote_ok"
-	StatusGitTagRemoteErr   Key = "status.git_tag_remote_err"
-	StatusGitNeedMessage    Key = "status.git_need_message"
-	StatusGitNoChanges      Key = "status.git_no_changes"
+	StatusGitLoading          Key = "status.git_loading"
+	StatusGitOpened           Key = "status.git_opened"
+	StatusGitOpenFailed       Key = "status.git_open_failed"
+	StatusGitSubmoduleInit    Key = "status.git_submodule_init"
+	StatusGitSubmoduleReady   Key = "status.git_submodule_ready"
+	StatusGitSubmoduleErr     Key = "status.git_submodule_err"
+	StatusGitWorking          Key = "status.git_working"
+	StatusGitOpFailed         Key = "status.git_op_failed"
+	StatusGitCommitOk         Key = "status.git_commit_ok"
+	StatusGitCommitFailed     Key = "status.git_commit_failed"
+	StatusGitAmendOk          Key = "status.git_amend_ok"
+	StatusGitAmendFailed      Key = "status.git_amend_failed"
+	StatusGitStageOk          Key = "status.git_stage_ok"
+	StatusGitStageFailed      Key = "status.git_stage_failed"
+	StatusGitUnstageOk        Key = "status.git_unstage_ok"
+	StatusGitUnstageFailed    Key = "status.git_unstage_failed"
+	StatusGitDiscardOk        Key = "status.git_discard_ok"
+	StatusGitDiscardFailed    Key = "status.git_discard_failed"
+	StatusGitFetchOk          Key = "status.git_fetch_ok"
+	StatusGitFetchFailed      Key = "status.git_fetch_failed"
+	StatusGitPullOk           Key = "status.git_pull_ok"
+	StatusGitPullFailed       Key = "status.git_pull_failed"
+	StatusGitPushOk           Key = "status.git_push_ok"
+	StatusGitPushFailed       Key = "status.git_push_failed"
+	StatusGitCheckoutOk       Key = "status.git_checkout_ok"
+	StatusGitCheckoutFailed   Key = "status.git_checkout_failed"
+	StatusGitCheckoutDirty    Key = "status.git_checkout_dirty"
+	StatusGitCheckoutPullOk   Key = "status.git_checkout_pull_ok"
+	StatusGitRebaseOk         Key = "status.git_rebase_ok"
+	StatusGitRebaseAlready    Key = "status.git_rebase_already"
+	StatusGitRebaseFailed     Key = "status.git_rebase_failed"
+	StatusGitTagSwitchOk      Key = "status.git_tag_switch_ok"
+	StatusGitTagSwitchErr     Key = "status.git_tag_switch_err"
+	StatusGitDeleteOk         Key = "status.git_delete_ok"
+	StatusGitDeleteFailed     Key = "status.git_delete_failed"
+	StatusGitDeleteCurrent    Key = "status.git_delete_current"
+	StatusGitWorktreeClosed   Key = "status.git_worktree_closed"
+	StatusGitWorktreeCloseErr Key = "status.git_worktree_close_err"
+	StatusGitRenameOk         Key = "status.git_rename_ok"
+	StatusGitRenameFailed     Key = "status.git_rename_failed"
+	StatusGitBranchOk         Key = "status.git_branch_ok"
+	StatusGitBranchFailed     Key = "status.git_branch_failed"
+	StatusGitTagOk            Key = "status.git_tag_ok"
+	StatusGitTagFailed        Key = "status.git_tag_failed"
+	StatusGitTagPushFailed    Key = "status.git_tag_push_failed"
+	StatusGitTagDeleted       Key = "status.git_tag_deleted"
+	StatusGitTagDeleteErr     Key = "status.git_tag_delete_err"
+	StatusGitTagPushed        Key = "status.git_tag_pushed"
+	StatusGitTagPushErr       Key = "status.git_tag_push_err"
+	StatusGitTagRemoteOk      Key = "status.git_tag_remote_ok"
+	StatusGitTagRemoteErr     Key = "status.git_tag_remote_err"
+	StatusGitNeedMessage      Key = "status.git_need_message"
+	StatusGitNoChanges        Key = "status.git_no_changes"
 
 	DesktopUsageHeader     Key = "desktop.usage_header"
 	DesktopRemoved         Key = "desktop.removed"
@@ -528,6 +533,9 @@ var catalogs = map[Lang]map[Key]string{
 		GitRemotes:                     "リモート",
 		GitSubmodules:                  "サブモジュール",
 		GitWorktrees:                   "ワークツリー",
+		GitWorktreeClose:               "閉じる",
+		GitWorktreeForce:               "強制削除",
+		GitWorktreeCloseAsk:            "ワークツリー「%s」を閉じますか？",
 		GitFilter:                      "フィルタ",
 		GitSearch:                      "検索",
 		GitAuthor:                      "作者",
@@ -665,6 +673,8 @@ var catalogs = map[Lang]map[Key]string{
 		StatusGitDeleteOk:              "ブランチを削除しました",
 		StatusGitDeleteFailed:          "ブランチの削除に失敗しました: %v",
 		StatusGitDeleteCurrent:         "チェックアウト中のブランチは削除できません",
+		StatusGitWorktreeClosed:        "ワークツリーを閉じました",
+		StatusGitWorktreeCloseErr:      "ワークツリーを閉じられませんでした: %v",
 		StatusGitRenameOk:              "ブランチ名を変更しました",
 		StatusGitRenameFailed:          "ブランチ名の変更に失敗しました: %v",
 		StatusGitBranchOk:              "ブランチを作成しました",
@@ -869,6 +879,9 @@ var catalogs = map[Lang]map[Key]string{
 		GitRemotes:                     "Remotes",
 		GitSubmodules:                  "Submodules",
 		GitWorktrees:                   "Worktrees",
+		GitWorktreeClose:               "Close",
+		GitWorktreeForce:               "Force Delete",
+		GitWorktreeCloseAsk:            "Close worktree \"%s\"?",
 		GitFilter:                      "Filter",
 		GitSearch:                      "Search",
 		GitAuthor:                      "Author",
@@ -1006,6 +1019,8 @@ var catalogs = map[Lang]map[Key]string{
 		StatusGitDeleteOk:              "Deleted branch",
 		StatusGitDeleteFailed:          "Could not delete branch: %v",
 		StatusGitDeleteCurrent:         "Cannot delete the checked-out branch",
+		StatusGitWorktreeClosed:        "Closed worktree",
+		StatusGitWorktreeCloseErr:      "Could not close worktree: %v",
 		StatusGitRenameOk:              "Renamed branch",
 		StatusGitRenameFailed:          "Could not rename branch: %v",
 		StatusGitBranchOk:              "Created branch",

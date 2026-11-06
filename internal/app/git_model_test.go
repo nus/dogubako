@@ -1201,6 +1201,212 @@ func modelRebaseFeature(t *testing.T) (dir, onto string) {
 	return dir, onto
 }
 
+func TestPlanWorktreeTabs(t *testing.T) {
+	main, feature, other := "/main", "/feature", "/other"
+	check := func(name string, paths []string, active int, removed, parent string, parentOpen bool, want worktreeTabAction) {
+		t.Helper()
+		got := planWorktreeTabs(paths, active, removed, parent, parentOpen)
+		if got != want {
+			t.Fatalf("%s = %+v", name, got)
+		}
+	}
+	check("show parent tab", []string{main, feature}, 1, feature, main, true, worktreeTabAction{Close: 1, Reopen: -1, Select: 0})
+	check("parent already showing", []string{main, feature}, 0, feature, main, true, worktreeTabAction{Close: 1, Reopen: -1, Select: -1})
+	check("move the only tab", []string{feature}, 0, feature, main, true, worktreeTabAction{Close: -1, Reopen: 0, Select: -1})
+	check("leave the other tab", []string{main, feature, other}, 2, feature, main, true, worktreeTabAction{Close: 1, Reopen: -1, Select: -1})
+	check("bare last tab", []string{feature}, 0, feature, "/bare.git", false, worktreeTabAction{Close: 0, Blank: true, Reopen: -1, Select: -1})
+	check("bare with a neighbor", []string{other, feature}, 1, feature, "/bare.git", false, worktreeTabAction{Close: 1, Reopen: -1, Select: -1})
+	check("not open", []string{main}, 0, feature, main, true, worktreeTabAction{Close: -1, Reopen: -1, Select: -1})
+
+	hostA := "ssh:a::/feature"
+	hostB := "ssh:b::/feature"
+	parentA := "ssh:a::/main"
+	check("other host stays", []string{hostA, hostB}, 0, hostA, parentA, true, worktreeTabAction{Close: -1, Reopen: 0, Select: -1})
+	if got := planWorktreeTabs([]string{hostA, hostB}, 1, hostA, parentA, true); got.Reopen != 0 || got.Close != -1 {
+		t.Fatalf("viewing the other host = %+v", got)
+	}
+}
+
+func TestWorktreeKeyKeepsHost(t *testing.T) {
+	a := worktreeKey("ssh:host::/repo", "/repo/feature")
+	b := worktreeKey("ssh:other::/repo", "/repo/feature")
+	if a == b || !strings.Contains(a, "/repo/feature") || !strings.Contains(b, "/repo/feature") {
+		t.Fatalf("a=%s b=%s", a, b)
+	}
+	if got := worktreeKey("/repo", "/repo/feature"); got != canonicalPath("/repo/feature") {
+		t.Fatalf("local = %s", got)
+	}
+}
+
+func TestOpenHereReusesTab(t *testing.T) {
+	requireGitBin(t)
+	cfg := t.TempDir()
+	restore := overrideSidebarConfigDir(func() (string, error) { return cfg, nil })
+	t.Cleanup(restore)
+
+	dir := initRepo(t, "main")
+	other := filepath.Join(t.TempDir(), "feature")
+	gitRun(t, dir, "worktree", "add", "-b", "feature", other)
+
+	var m GitModel
+	m.Open(dir)
+	waitGit(t, &m)
+	m.OpenHere(other)
+	waitGit(t, &m)
+	if m.TabCount() != 1 || canonicalPath(m.Path()) != canonicalPath(other) {
+		t.Fatalf("tabs=%d path=%s", m.TabCount(), m.Path())
+	}
+	m.Open(dir)
+	waitGit(t, &m)
+	if m.TabCount() != 2 {
+		t.Fatalf("tabs = %d", m.TabCount())
+	}
+	m.OpenHere(other)
+	waitGit(t, &m)
+	if m.TabCount() != 2 || canonicalPath(m.Path()) != canonicalPath(other) {
+		t.Fatalf("switch tabs=%d path=%s active=%d", m.TabCount(), m.Path(), m.ActiveTab())
+	}
+}
+
+func TestCloseWorktree(t *testing.T) {
+	requireGitBin(t)
+	cfg := t.TempDir()
+	restore := overrideSidebarConfigDir(func() (string, error) { return cfg, nil })
+	t.Cleanup(restore)
+
+	dir := initRepo(t, "main")
+	other := filepath.Join(t.TempDir(), "feature")
+	gitRun(t, dir, "worktree", "add", "-b", "feature", other)
+	if err := os.WriteFile(filepath.Join(other, "dirty.txt"), []byte("x\n"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+
+	var m GitModel
+	m.Open(dir)
+	waitGit(t, &m)
+	m.Open(other)
+	waitGit(t, &m)
+	feature := worktreeNamed(m.Snapshot().Worktrees, "feature")
+	if feature.Path == "" || feature.Main {
+		t.Fatalf("feature = %+v", feature)
+	}
+	mainWT := worktreeNamed(m.Snapshot().Worktrees, "main")
+	m.DoCloseWorktree(mainWT, true)
+	waitGit(t, &m)
+	if _, err := os.Stat(dir); err != nil {
+		t.Fatal(err)
+	}
+	if strings.Contains(m.ConsoleText(), "worktree remove") {
+		t.Fatalf("main ran git: %q", m.ConsoleText())
+	}
+
+	m.DoCloseWorktree(feature, false)
+	waitGit(t, &m)
+	if _, err := os.Stat(other); err != nil {
+		t.Fatalf("dirty worktree = %v", err)
+	}
+	if m.TabCount() != 2 || canonicalPath(m.Path()) != canonicalPath(other) {
+		t.Fatalf("after failure tabs=%d path=%s", m.TabCount(), m.Path())
+	}
+	if !strings.Contains(m.StatusText(i18n.EN), "Could not close worktree") {
+		t.Fatalf("status = %q", m.StatusText(i18n.EN))
+	}
+	if !strings.Contains(m.ConsoleText(), "git worktree remove ") || strings.Contains(m.ConsoleText(), "git worktree remove --force") {
+		t.Fatalf("console = %q", m.ConsoleText())
+	}
+
+	m.DoCloseWorktree(feature, true)
+	waitGit(t, &m)
+	if _, err := os.Stat(other); !os.IsNotExist(err) {
+		t.Fatalf("forced remove: %v", err)
+	}
+	if m.TabCount() != 1 || canonicalPath(m.Path()) != canonicalPath(dir) {
+		t.Fatalf("tabs=%d path=%s", m.TabCount(), m.Path())
+	}
+	if !strings.Contains(gitOutput(t, dir, "branch"), "feature") {
+		t.Fatal("branch was deleted")
+	}
+	if !strings.Contains(m.ConsoleText(), "git worktree remove --force --force") {
+		t.Fatalf("console = %q", m.ConsoleText())
+	}
+	if m.StatusText(i18n.EN) != "Closed worktree" {
+		t.Fatalf("status = %q", m.StatusText(i18n.EN))
+	}
+}
+
+func TestCloseWorktreeMovesOnlyTab(t *testing.T) {
+	requireGitBin(t)
+	cfg := t.TempDir()
+	restore := overrideSidebarConfigDir(func() (string, error) { return cfg, nil })
+	t.Cleanup(restore)
+
+	dir := initRepo(t, "main")
+	other := filepath.Join(t.TempDir(), "feature")
+	gitRun(t, dir, "worktree", "add", "-b", "feature", other)
+
+	var m GitModel
+	m.Open(other)
+	waitGit(t, &m)
+	m.DoCloseWorktree(worktreeNamed(m.Snapshot().Worktrees, "feature"), false)
+	waitGit(t, &m)
+	if m.TabCount() != 1 || canonicalPath(m.Path()) != canonicalPath(dir) {
+		t.Fatalf("tabs=%d path=%s", m.TabCount(), m.Path())
+	}
+	if _, err := os.Stat(other); !os.IsNotExist(err) {
+		t.Fatalf("removed: %v", err)
+	}
+	if !strings.Contains(m.ConsoleText(), "git worktree remove ") || strings.Contains(m.ConsoleText(), "git worktree remove --force") {
+		t.Fatalf("console = %q", m.ConsoleText())
+	}
+}
+
+func TestCloseBareParentWorktreeBlanksTab(t *testing.T) {
+	requireGitBin(t)
+	cfg := t.TempDir()
+	restore := overrideSidebarConfigDir(func() (string, error) { return cfg, nil })
+	t.Cleanup(restore)
+
+	seed := initRepo(t, "seed")
+	bare := filepath.Join(t.TempDir(), "bare.git")
+	feature := filepath.Join(t.TempDir(), "feature")
+	gitRun(t, seed, "clone", "--bare", seed, bare)
+	gitRun(t, bare, "worktree", "add", "-b", "feature", feature, "main")
+
+	var m GitModel
+	m.Open(feature)
+	waitGit(t, &m)
+	wt := worktreeNamed(m.Snapshot().Worktrees, "feature")
+	if wt.Path == "" || wt.Main || wt.Bare {
+		t.Fatalf("feature = %+v trees=%+v", wt, m.Snapshot().Worktrees)
+	}
+	m.DoCloseWorktree(wt, false)
+	waitGit(t, &m)
+	if m.TabCount() != 1 || m.Path() != "" {
+		t.Fatalf("tabs=%d path=%q", m.TabCount(), m.Path())
+	}
+	if _, err := os.Stat(feature); !os.IsNotExist(err) {
+		t.Fatalf("feature remains: %v", err)
+	}
+	if strings.Contains(m.Path(), "bare") {
+		t.Fatalf("opened bare path %s", m.Path())
+	}
+	if !strings.Contains(m.ConsoleText(), "git worktree remove") {
+		t.Fatalf("console = %q", m.ConsoleText())
+	}
+	if !strings.Contains(gitOutput(t, bare, "branch"), "feature") {
+		t.Fatal("branch was deleted")
+	}
+}
+
+func worktreeNamed(trees []gitcli.Worktree, branch string) gitcli.Worktree {
+	for _, wt := range trees {
+		if wt.Branch == branch {
+			return wt
+		}
+	}
+	return gitcli.Worktree{}
+}
+
 func writeModelFile(t *testing.T, dir, name, body string) {
 	t.Helper()
 	if err := os.WriteFile(filepath.Join(dir, name), []byte(body), 0o644); err != nil {

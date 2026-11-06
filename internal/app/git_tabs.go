@@ -9,6 +9,7 @@ import (
 	"github.com/guigui-gui/guigui"
 
 	"github.com/nus/dogubako/internal/gitcli"
+	"github.com/nus/dogubako/internal/i18n"
 )
 
 func (m *GitModel) ensure() {
@@ -101,6 +102,29 @@ func (m *GitModel) Open(path string) {
 	}
 	if strings.TrimSpace(m.path) != "" {
 		m.addTab()
+	}
+	m.open(path)
+}
+
+// OpenHere shows path in the current tab.
+// A tab that already has path is selected instead. A new tab is not added.
+func (m *GitModel) OpenHere(path string) {
+	path = canonicalPath(path)
+	if path == "" || path == "." {
+		return
+	}
+	m.ensure()
+	m.rememberRepo(path)
+	if i := m.tabIndex(path); i >= 0 {
+		m.SelectTab(i)
+		s := m.tabs[i]
+		if !s.HasRepo() && !s.Busy() {
+			s.open(path)
+		}
+		return
+	}
+	if m.Busy() {
+		return
 	}
 	m.open(path)
 }
@@ -398,4 +422,238 @@ func (m *GitModel) dedupeTabs() {
 	m.extraGen++
 	m.saveTabs()
 	guigui.RequestRebuild()
+}
+
+// worktreeKey is the tab path for a working tree directory.
+// SSH tabs keep the connection of repoPath. A different host is a different key.
+func worktreeKey(repoPath, dir string) string {
+	loc := gitcli.ParseLoc(repoPath)
+	if loc.IsRemote() {
+		if dir == "" || dir == "." {
+			return ""
+		}
+		loc.Dir = path.Clean(dir)
+		return loc.Key()
+	}
+	return canonicalPath(dir)
+}
+
+// mainWorktree is the main working tree. The bool is false when that tree
+// is bare or missing, so it cannot be opened as a tab.
+func mainWorktree(trees []gitcli.Worktree) (gitcli.Worktree, bool) {
+	for _, wt := range trees {
+		if !wt.Main {
+			continue
+		}
+		if wt.Bare || strings.TrimSpace(wt.Path) == "" {
+			return wt, false
+		}
+		return wt, true
+	}
+	return gitcli.Worktree{}, false
+}
+
+// worktreeTabAction is how tabs change after a linked worktree is removed.
+// Indexes refer to the tab list before the change. -1 means none.
+type worktreeTabAction struct {
+	// Close is the tab showing the removed path, when that tab is removed.
+	Close int
+	// Blank keeps the only tab and clears it, instead of removing it.
+	Blank bool
+	// Reopen is the tab whose path becomes the parent.
+	Reopen int
+	// Select is the parent tab to show when the removed path was active
+	// and the parent was already open. The index is before Close.
+	Select int
+}
+
+// planWorktreeTabs decides where the removed path's tab goes.
+// parentOpen is false when the parent is bare and must not be opened.
+// Tabs on a different connection are left alone because their keys differ.
+func planWorktreeTabs(paths []string, active int, removed, parent string, parentOpen bool) worktreeTabAction {
+	action := worktreeTabAction{Close: -1, Reopen: -1, Select: -1}
+	idx := -1
+	for i, p := range paths {
+		if p != "" && p == removed {
+			idx = i
+			break
+		}
+	}
+	if idx < 0 {
+		return action
+	}
+	if parentOpen && parent != "" && parent != removed {
+		for i, p := range paths {
+			if i != idx && p == parent {
+				action.Close = idx
+				if active == idx {
+					action.Select = i
+				}
+				return action
+			}
+		}
+		action.Reopen = idx
+		return action
+	}
+	if len(paths) == 1 {
+		action.Blank = true
+		action.Close = idx
+		return action
+	}
+	action.Close = idx
+	return action
+}
+
+func (m *GitModel) tabPaths() []string {
+	paths := make([]string, len(m.tabs))
+	for i, s := range m.tabs {
+		paths[i] = canonicalPath(s.path)
+	}
+	return paths
+}
+
+func (m *GitModel) hasSession(s *gitSession) bool {
+	for _, tab := range m.tabs {
+		if tab == s {
+			return true
+		}
+	}
+	return false
+}
+
+// becomeEmpty drops the repository and keeps the console, so the last tab
+// can show the command that closed its worktree.
+func (s *gitSession) becomeEmpty() {
+	s.path = ""
+	s.repo = nil
+	s.snap = gitcli.Snapshot{}
+	s.hidden = nil
+	s.sel = ""
+	s.detail = gitcli.CommitDetail{}
+	s.draft = ""
+	s.stageAll = false
+	s.pendingLoad = nil
+	s.pendingMore = nil
+	s.pendingOp = nil
+	s.pendingDetail = nil
+	s.pendingStatus = nil
+	s.histLimit = 0
+	s.histMore = false
+	s.histGen++
+	s.reveal = ""
+	s.workSlots = [2]gitWorkSlot{}
+	s.wholeSlots = [2]gitWorkSlot{}
+	s.commitWhole = gitWorkSlot{}
+	s.graphRev++
+	s.generation++
+}
+
+// finishCloseWorktree moves tabs off a worktree that was just removed.
+// The status line is set on the tab the user is left looking at.
+func (m *GitModel) finishCloseWorktree(from *gitSession, removedKey, parentKey string, parentOpen bool, okKey i18n.Key) {
+	m.ensure()
+	removedKey = canonicalPath(removedKey)
+	if parentKey != "" {
+		parentKey = canonicalPath(parentKey)
+	}
+	action := planWorktreeTabs(m.tabPaths(), m.active, removedKey, parentKey, parentOpen)
+	show := from
+	switch {
+	case action.Blank:
+		m.tabs[0].becomeEmpty()
+		m.active = 0
+		m.gitSession = m.tabs[0]
+		m.extraGen++
+		m.saveTabs()
+		show = m.tabs[0]
+	case action.Reopen >= 0 && action.Reopen < len(m.tabs):
+		s := m.tabs[action.Reopen]
+		s.openPath(parentKey, true)
+		show = s
+		if m.active != action.Reopen && from != nil && m.hasSession(from) {
+			show = from
+		}
+	case action.Close >= 0:
+		wasActive := m.active == action.Close
+		selectIdx := action.Select
+		if wasActive && from != nil {
+			dest := -1
+			if action.Select >= 0 {
+				dest = action.Select
+			} else if len(m.tabs) > 1 {
+				dest = action.Close
+				if dest >= len(m.tabs)-1 {
+					dest = action.Close - 1
+				}
+			}
+			if dest >= 0 && dest < len(m.tabs) && m.tabs[dest] != from {
+				m.tabs[dest].console.takeLast(&from.console)
+			}
+		}
+		m.CloseTab(action.Close)
+		if selectIdx >= 0 {
+			if selectIdx > action.Close {
+				selectIdx--
+			}
+			m.SelectTab(selectIdx)
+		}
+		if wasActive || action.Select >= 0 {
+			show = m.gitSession
+		} else if from != nil && m.hasSession(from) {
+			show = from
+		}
+	}
+	if show == nil {
+		guigui.RequestRebuild()
+		return
+	}
+	show.SetStatus(okKey)
+	if show.HasRepo() && show.pendingLoad == nil && show.pendingOp == nil && canonicalPath(show.path) != removedKey {
+		show.refresh()
+	}
+	guigui.RequestRebuild()
+}
+
+// worktreeRemoveRepo is the repository that runs git worktree remove.
+// The command is traced on this session. When this session is the tree being
+// removed, the parent directory runs it and the trace stays here.
+func (m *gitSession) worktreeRemoveRepo(targetDir, parentKey string, parentOpen bool) *gitcli.Repo {
+	if m.repo == nil {
+		return nil
+	}
+	if !repoAtDir(m.repo, targetDir) {
+		return m.repo
+	}
+	if parentOpen {
+		if runner := m.parentRunner(parentKey, targetDir); runner != nil {
+			return runner
+		}
+	}
+	return m.repo
+}
+
+func (m *gitSession) parentRunner(parentKey, targetDir string) *gitcli.Repo {
+	if parentKey == "" {
+		return nil
+	}
+	loc := gitcli.ParseLoc(parentKey)
+	if !loc.IsRemote() {
+		loc.Dir = parentKey
+	}
+	if strings.TrimSpace(loc.Dir) == "" || repoAtDir(&gitcli.Repo{Dir: loc.Dir, Dest: loc.Dest, Port: loc.Port}, targetDir) {
+		return nil
+	}
+	runner := &gitcli.Repo{Dir: loc.Dir, Dest: loc.Dest, Port: loc.Port}
+	runner.SetCommandTrace(m.console.onTrace)
+	return runner
+}
+
+func repoAtDir(repo *gitcli.Repo, dir string) bool {
+	if repo == nil || strings.TrimSpace(dir) == "" {
+		return false
+	}
+	if repo.IsRemote() {
+		return path.Clean(repo.Dir) == path.Clean(dir)
+	}
+	return canonicalPath(repo.Dir) == canonicalPath(dir)
 }
