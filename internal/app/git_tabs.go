@@ -33,6 +33,9 @@ func (m *GitModel) Generation() uint64 {
 	for _, s := range m.tabs {
 		g += s.generation
 	}
+	for _, s := range m.parked {
+		g += s.generation
+	}
 	return g
 }
 
@@ -41,8 +44,12 @@ func (m *GitModel) Drain() {
 	for _, s := range m.tabs {
 		s.Drain()
 	}
+	for _, s := range m.parked {
+		s.Drain()
+	}
 	m.drainSSH()
 	m.dedupeTabs()
+	m.mergeWorktreeTabs()
 }
 
 func (m *GitModel) EnsureLoaded() {
@@ -78,6 +85,8 @@ func (m *GitModel) EnsureLoaded() {
 
 // Open shows path in the tab that already has it, fills the current tab when
 // that tab is empty, or adds a tab and opens the repository there.
+// A worktree whose parent is already open, including that parent itself,
+// switches the existing tab instead of adding one.
 // Switching from an empty tab to one that already has the repository closes
 // the empty tab.
 func (m *GitModel) Open(path string) {
@@ -87,23 +96,132 @@ func (m *GitModel) Open(path string) {
 	}
 	m.ensure()
 	m.rememberRepo(path)
-	if i := m.tabIndex(path); i >= 0 {
-		from := m.active
-		closeEmpty := from != i && m.tabs[from].path == "" && !m.tabs[from].Busy()
+	if m.showOpenTab(path) {
+		m.mergeWorktreeTabs()
+		return
+	}
+	if i := m.tabSharingWorktree(path); i >= 0 {
 		m.SelectTab(i)
-		s := m.tabs[i]
+		m.SwitchWorktree(path)
+		return
+	}
+	if s := m.unpark(path); s != nil {
+		m.showSession(s, strings.TrimSpace(m.path) == "")
 		if !s.HasRepo() && !s.Busy() {
 			s.open(path)
 		}
-		if closeEmpty {
-			m.CloseTab(from)
-		}
+		m.mergeWorktreeTabs()
 		return
 	}
 	if strings.TrimSpace(m.path) != "" {
 		m.addTab()
 	}
 	m.open(path)
+	m.mergeWorktreeTabs()
+}
+
+// SwitchWorktree shows path in the current tab.
+// A tab that already has it is selected. Otherwise the current tab changes to
+// that directory and the one it was showing is kept, so a later switch back
+// returns that repository and the screen it had.
+// Tabs that share a parent worktree are folded into one tab.
+func (m *GitModel) SwitchWorktree(path string) {
+	path = canonicalPath(path)
+	if path == "" || path == "." {
+		return
+	}
+	m.ensure()
+	if m.path != "" && canonicalPath(m.path) == path {
+		m.mergeWorktreeTabs()
+		return
+	}
+	m.rememberRepo(path)
+	if m.showOpenTab(path) {
+		m.mergeWorktreeTabs()
+		return
+	}
+	cur := m.gitSession
+	if cur != nil && cur.path != "" {
+		m.park(cur)
+	}
+	s := m.unpark(path)
+	if s == nil {
+		s = &gitSession{owner: m}
+		m.showSession(s, true)
+		s.open(path)
+		m.mergeWorktreeTabs()
+		return
+	}
+	m.showSession(s, true)
+	if !s.HasRepo() && !s.Busy() {
+		s.open(path)
+	}
+	m.mergeWorktreeTabs()
+}
+
+// showSession makes s the active tab. replace puts it in the current slot.
+// Otherwise it is appended and becomes the active tab.
+func (m *GitModel) showSession(s *gitSession, replace bool) {
+	s.owner = m
+	s.lastPoll = time.Time{}
+	if replace {
+		m.ensure()
+		m.tabs[m.active] = s
+	} else {
+		m.tabs = append(m.tabs, s)
+		m.active = len(m.tabs) - 1
+	}
+	m.gitSession = s
+	m.extraGen++
+	m.saveTabs()
+	guigui.RequestRebuild()
+}
+
+func (m *GitModel) park(s *gitSession) {
+	if s == nil || s.path == "" {
+		return
+	}
+	key := canonicalPath(s.path)
+	if key == "" {
+		return
+	}
+	if m.parked == nil {
+		m.parked = map[string]*gitSession{}
+	}
+	m.parked[key] = s
+}
+
+func (m *GitModel) unpark(path string) *gitSession {
+	if len(m.parked) == 0 {
+		return nil
+	}
+	key := canonicalPath(path)
+	s := m.parked[key]
+	if s == nil {
+		return nil
+	}
+	delete(m.parked, key)
+	return s
+}
+
+// showOpenTab selects the tab that already has path and drops an empty tab
+// left behind. It reports whether such a tab existed.
+func (m *GitModel) showOpenTab(path string) bool {
+	i := m.tabIndex(path)
+	if i < 0 {
+		return false
+	}
+	from := m.active
+	closeEmpty := from != i && m.tabs[from].path == "" && !m.tabs[from].Busy()
+	m.SelectTab(i)
+	s := m.tabs[i]
+	if !s.HasRepo() && !s.Busy() {
+		s.open(path)
+	}
+	if closeEmpty {
+		m.CloseTab(from)
+	}
+	return true
 }
 
 // OpenHere shows path in the current tab.
@@ -289,6 +407,11 @@ func (m *GitModel) anyBusy() bool {
 			return true
 		}
 	}
+	for _, s := range m.parked {
+		if s.Busy() || s.pendingMore != nil {
+			return true
+		}
+	}
 	return false
 }
 
@@ -406,6 +529,11 @@ func (m *GitModel) dedupeTabs() {
 		}
 		seen[key] = len(next)
 		next = append(next, s)
+	}
+	for _, s := range next {
+		if s.path != "" {
+			delete(m.parked, canonicalPath(s.path))
+		}
 	}
 	if !changed {
 		return

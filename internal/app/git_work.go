@@ -1044,6 +1044,11 @@ func (d *gitWorkDiff) SetLineMenu(f func(context *guigui.Context, start, end int
 	d.view.SetLineMenu(f)
 }
 
+// holdPlace puts a saved scroll back after the next diff contents land.
+func (d *gitWorkDiff) holdPlace(p gitDiffPlace) {
+	d.view.keep = p
+}
+
 func (d *gitWorkDiff) Build(context *guigui.Context, adder *guigui.ChildAdder) error {
 	d.show = d.body != ""
 	if !d.show {
@@ -1150,6 +1155,10 @@ func (t *GitTool) setWorkDiff(lang i18n.Lang, model *GitModel) {
 		shown = path + "\x00staged"
 	}
 	t.workPanes.diff.Set(body, empty, shown, path)
+	if t.workHold.set {
+		t.workPanes.diff.holdPlace(t.workHold)
+		t.workHold.set = false
+	}
 	t.workPanes.diff.SetSplit(lang, t.diffSplit, t.setDiffSplit)
 	t.workPanes.diff.SetWrap(lang, t.diffWrap, t.setDiffWrap)
 	full, enabled := t.wholeFileDiff(model, body, path, staged, false)

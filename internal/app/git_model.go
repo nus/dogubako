@@ -71,7 +71,10 @@ type gitWorkSlot struct {
 // GitModel holds one repository per tab. The embedded session is the active tab.
 type GitModel struct {
 	*gitSession
-	tabs     []*gitSession
+	tabs []*gitSession
+	// parked keeps a repository the current tab left by switching worktrees.
+	// It is not a tab. Showing it again puts that session back.
+	parked   map[string]*gitSession
 	active   int
 	loaded   bool
 	extraGen uint64
@@ -125,6 +128,9 @@ type gitSession struct {
 	consoleSeen   bool
 	consoleFollow bool
 	consoleOffset float64
+
+	// face is the screen last shown for this repository.
+	face gitFace
 }
 
 type gitStatusResult struct {
@@ -248,7 +254,22 @@ func (m *gitSession) openPath(path string, quiet bool) {
 	if m.Busy() || strings.TrimSpace(path) == "" {
 		return
 	}
-	m.path = canonicalPath(path)
+	next := canonicalPath(path)
+	if next != m.path {
+		// This session is opening a different directory. Drop the previous
+		// repository so its selection and draft are not shown for the new one.
+		m.repo = nil
+		m.snap = gitcli.Snapshot{}
+		m.sel = ""
+		m.detail = gitcli.CommitDetail{}
+		m.draft = ""
+		m.reveal = ""
+		m.workSlots = [2]gitWorkSlot{}
+		m.wholeSlots = [2]gitWorkSlot{}
+		m.commitWhole = gitWorkSlot{}
+		m.graphRev++
+	}
+	m.path = next
 	m.histGen++
 	m.pendingMore = nil
 	m.histLimit = m.historyPage()
