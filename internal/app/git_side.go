@@ -200,7 +200,9 @@ func (t *GitTool) setSideDragPassthrough(context *guigui.Context, pass bool) {
 		&t.branchMenu,
 		&t.commitMenu,
 		&t.tagMenu,
+		&t.worktreeMenu,
 		&t.pushDialog,
+		&t.worktreeDialog,
 		&t.selMenu,
 		&t.changeMenu,
 		&t.confirm,
@@ -210,17 +212,13 @@ func (t *GitTool) setSideDragPassthrough(context *guigui.Context, pass bool) {
 	}
 }
 
+// openWorktree shows dir in the current tab.
+// A tab that already has that directory is selected. A new tab is not added.
 func (t *GitTool) openWorktree(model *GitModel, dir string) {
 	if model == nil || strings.TrimSpace(dir) == "" {
 		return
 	}
-	loc := gitcli.ParseLoc(model.Path())
-	if loc.IsRemote() {
-		loc.Dir = path.Clean(dir)
-	} else {
-		loc.Dir = dir
-	}
-	model.Open(loc.Key())
+	model.OpenHere(worktreeKey(model.Path(), dir))
 }
 
 // worktreeTitle is the sidebar label for a working tree.

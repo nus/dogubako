@@ -42,6 +42,11 @@ type gitOpResult struct {
 	clearDraft bool
 	// openPath is a repository to open after the operation succeeds.
 	openPath string
+	// closedWorktree is the tab key of a linked worktree that was removed.
+	// closedParent is the main tree's tab key when that tree can be opened.
+	closedWorktree string
+	closedParent   string
+	parentOpen     bool
 }
 
 type gitDetailResult struct {
@@ -235,6 +240,11 @@ func (m *gitSession) HistoryLoading() bool {
 func (m *gitSession) LoadMoreHistory() { m.loadMoreHistory() }
 
 func (m *gitSession) open(path string) {
+	m.openPath(path, false)
+}
+
+// openPath loads path into this tab. quiet leaves the status line as it is.
+func (m *gitSession) openPath(path string, quiet bool) {
 	if m.Busy() || strings.TrimSpace(path) == "" {
 		return
 	}
@@ -243,7 +253,9 @@ func (m *gitSession) open(path string) {
 	m.pendingMore = nil
 	m.histLimit = m.historyPage()
 	m.histMore = false
-	m.SetStatus(i18n.StatusGitLoading)
+	if !quiet {
+		m.SetStatus(i18n.StatusGitLoading)
+	}
 	ch := make(chan gitLoadResult, 1)
 	m.pendingLoad = ch
 	m.generation++
@@ -257,11 +269,11 @@ func (m *gitSession) open(path string) {
 		defer cancel()
 		repo, err := gitcli.Open(ctx, path)
 		if err != nil {
-			ch <- gitLoadResult{err: err}
+			ch <- gitLoadResult{err: err, quiet: quiet}
 			return
 		}
 		snap, err := repo.Snapshot(ctx, gitcli.SnapshotOpts{HiddenRemotes: hidden, MaxCommits: limit})
-		ch <- gitLoadResult{repo: repo, snap: snap, err: err}
+		ch <- gitLoadResult{repo: repo, snap: snap, err: err, quiet: quiet}
 	}()
 }
 
@@ -574,6 +586,15 @@ func (m *gitSession) drainOp() {
 		} else {
 			if res.clearDraft {
 				m.SetDraft("")
+			}
+			if res.closedWorktree != "" {
+				if m.owner != nil {
+					m.owner.finishCloseWorktree(m, res.closedWorktree, res.closedParent, res.parentOpen, res.okKey)
+				} else {
+					m.SetStatus(res.okKey)
+				}
+				guigui.RequestRebuild()
+				return
 			}
 			m.SetStatus(res.okKey)
 			m.reload()
@@ -1139,6 +1160,47 @@ func (m *gitSession) DoRenameBranch(ref gitcli.Ref, name string) {
 	m.startOp(i18n.StatusGitRenameOk, i18n.StatusGitRenameFailed, func(ctx context.Context, repo *gitcli.Repo) error {
 		return repo.RenameBranch(ctx, ref, name)
 	})
+}
+
+// DoCloseWorktree removes a linked working tree.
+// force runs git worktree remove --force --force. Without it, a dirty,
+// untracked, or locked tree is left in place and the error is kept.
+// The branch is not deleted. The main tree, including a bare parent, is left alone.
+func (m *gitSession) DoCloseWorktree(wt gitcli.Worktree, force bool) {
+	if !m.HasRepo() || m.Busy() || worktreeCloseDisabled(wt) {
+		return
+	}
+	parent, parentOpen := mainWorktree(m.snap.Worktrees)
+	removedKey := worktreeKey(m.path, wt.Path)
+	parentKey := ""
+	if parentOpen {
+		parentKey = worktreeKey(m.path, parent.Path)
+		if parentKey == "" || parentKey == removedKey {
+			parentOpen = false
+			parentKey = ""
+		}
+	}
+	repo := m.worktreeRemoveRepo(wt.Path, parentKey, parentOpen)
+	if repo == nil {
+		return
+	}
+	target := wt.Path
+	m.SetStatus(i18n.StatusGitWorking)
+	ch := make(chan gitOpResult, 1)
+	m.pendingOp = ch
+	m.generation++
+	go func() {
+		ctx, cancel := context.WithTimeout(context.Background(), gitOpTimeout)
+		defer cancel()
+		err := repo.RemoveWorktree(ctx, target, force)
+		res := gitOpResult{okKey: i18n.StatusGitWorktreeClosed, errKey: i18n.StatusGitWorktreeCloseErr, err: err}
+		if err == nil {
+			res.closedWorktree = removedKey
+			res.closedParent = parentKey
+			res.parentOpen = parentOpen
+		}
+		ch <- res
+	}()
 }
 
 func (m *gitSession) DoDeleteBranch(ref gitcli.Ref) {

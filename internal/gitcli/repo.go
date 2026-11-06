@@ -1163,6 +1163,27 @@ func (r *Repo) pushRemote(ctx context.Context) (string, error) {
 // ErrDeleteCurrent is returned when deleting the branch that HEAD points at.
 var ErrDeleteCurrent = errors.New("cannot delete the checked-out branch")
 
+// RemoveWorktree deletes the linked working tree at worktreePath.
+// The branch is left in place. force passes --force twice, which also
+// removes a locked tree and one that still has changes or untracked files.
+// Without force, those trees stay and git returns an error.
+// The main working tree cannot be removed.
+func (r *Repo) RemoveWorktree(ctx context.Context, worktreePath string, force bool) error {
+	if err := ctx.Err(); err != nil {
+		return err
+	}
+	worktreePath = strings.TrimSpace(worktreePath)
+	if worktreePath == "" {
+		return fmt.Errorf("no worktree")
+	}
+	args := []string{"worktree", "remove"}
+	if force {
+		args = append(args, "--force", "--force")
+	}
+	args = append(args, worktreePath)
+	return r.run(ctx, args...)
+}
+
 // DeleteBranch removes a local branch or a remote-tracking branch.
 // The checked-out branch is left in place.
 func (r *Repo) DeleteBranch(ctx context.Context, ref Ref) error {

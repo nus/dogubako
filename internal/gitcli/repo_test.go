@@ -1950,6 +1950,94 @@ func TestSnapshotListsOtherWorktrees(t *testing.T) {
 	}
 }
 
+func TestRemoveWorktree(t *testing.T) {
+	dir := initRepo(t)
+	writeCommit(t, dir, "README", "root")
+	other := filepath.Join(t.TempDir(), "feature")
+	locked := filepath.Join(t.TempDir(), "locked")
+	gitAt(t, dir, "worktree", "add", "-b", "feature", other)
+	gitAt(t, dir, "worktree", "add", "-b", "locked", locked)
+	gitAt(t, dir, "worktree", "lock", locked)
+
+	ctx, cancel := context.WithTimeout(context.Background(), 20*time.Second)
+	defer cancel()
+	repo, err := Open(ctx, dir)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(filepath.Join(other, "dirty.txt"), []byte("x\n"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	if err := repo.RemoveWorktree(ctx, other, false); err == nil {
+		t.Fatal("dirty worktree was removed")
+	}
+	if _, err := os.Stat(other); err != nil {
+		t.Fatalf("dirty worktree = %v", err)
+	}
+	if err := repo.RemoveWorktree(ctx, locked, false); err == nil {
+		t.Fatal("locked worktree was removed")
+	}
+
+	var traced []string
+	repo.SetCommandTrace(func(begin bool, args []string, _, _ string) {
+		if begin {
+			traced = append(traced, FormatCommand(args))
+		}
+	})
+	if err := repo.RemoveWorktree(ctx, other, true); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := os.Stat(other); !os.IsNotExist(err) {
+		t.Fatalf("forced remove: %v", err)
+	}
+	if err := repo.RemoveWorktree(ctx, locked, true); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := os.Stat(locked); !os.IsNotExist(err) {
+		t.Fatalf("locked remove: %v", err)
+	}
+	branches := gitAt(t, dir, "branch")
+	if !strings.Contains(branches, "feature") || !strings.Contains(branches, "locked") {
+		t.Fatalf("branches = %q", branches)
+	}
+	joined := strings.Join(traced, "\n")
+	if !strings.Contains(joined, "git worktree remove --force --force") {
+		t.Fatalf("trace = %q", joined)
+	}
+	if err := repo.RemoveWorktree(ctx, dir, true); err == nil {
+		t.Fatal("removed the main worktree")
+	}
+	if _, err := os.Stat(dir); err != nil {
+		t.Fatal(err)
+	}
+
+	clean := filepath.Join(t.TempDir(), "clean")
+	gitAt(t, dir, "worktree", "add", "-b", "clean", clean)
+	linked, err := Open(ctx, clean)
+	if err != nil {
+		t.Fatal(err)
+	}
+	traced = nil
+	linked.SetCommandTrace(func(begin bool, args []string, _, _ string) {
+		if begin {
+			traced = append(traced, FormatCommand(args))
+		}
+	})
+	if err := linked.RemoveWorktree(ctx, clean, false); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := os.Stat(clean); !os.IsNotExist(err) {
+		t.Fatalf("clean remove: %v", err)
+	}
+	line := strings.Join(traced, "\n")
+	if !strings.Contains(line, "git worktree remove ") || strings.Contains(line, "--force") {
+		t.Fatalf("clean trace = %q", line)
+	}
+	if !strings.Contains(gitAt(t, dir, "branch"), "clean") {
+		t.Fatal("clean branch was deleted")
+	}
+}
+
 func worktreeByBranch(trees []Worktree, branch string) *Worktree {
 	for i := range trees {
 		if trees[i].Branch == branch {

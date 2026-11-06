@@ -56,6 +56,35 @@ type gitConsoleLog struct {
 	dirty   bool
 }
 
+// takeLast moves the newest command onto this log.
+// Closing a worktree records the command on the tab that started it, then
+// the line follows the tab the user is left looking at.
+func (c *gitConsoleLog) takeLast(src *gitConsoleLog) {
+	if c == nil || src == nil || c == src {
+		return
+	}
+	src.mu.Lock()
+	if len(src.entries) == 0 {
+		src.mu.Unlock()
+		return
+	}
+	last := src.entries[len(src.entries)-1]
+	src.entries = src.entries[:len(src.entries)-1]
+	src.valid = false
+	src.dirty = true
+	src.mu.Unlock()
+
+	c.mu.Lock()
+	c.entries = append(c.entries, last)
+	if len(c.entries) > gitConsoleLimit {
+		drop := len(c.entries) - gitConsoleLimit
+		c.entries = append([]gitConsoleEntry(nil), c.entries[drop:]...)
+	}
+	c.valid = false
+	c.dirty = true
+	c.mu.Unlock()
+}
+
 func (c *gitConsoleLog) onTrace(begin bool, args []string, stdout, stderr string) {
 	if begin {
 		c.begin(args)
@@ -779,7 +808,9 @@ func (t *GitTool) setConsoleDragPassthrough(context *guigui.Context, pass bool) 
 		&t.branchMenu,
 		&t.commitMenu,
 		&t.tagMenu,
+		&t.worktreeMenu,
 		&t.pushDialog,
+		&t.worktreeDialog,
 		&t.selMenu,
 		&t.changeMenu,
 		&t.confirm,
