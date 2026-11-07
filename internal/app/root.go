@@ -67,6 +67,7 @@ func (r *Root) WriteStateKey(context *guigui.Context, w *guigui.StateKeyWriter) 
 	w.WriteString(string(r.model.Mode()))
 	w.WriteString(string(r.model.Lang()))
 	w.WriteBool(r.model.SidebarCollapsed())
+	w.WriteInt(r.model.TextScalePercent())
 	w.WriteUint64(r.model.Image().Generation())
 	w.WriteUint64(r.model.Screenshot().Generation())
 	w.WriteUint64(r.model.Android().Generation())
@@ -107,6 +108,10 @@ func (r *Root) contentWidget() guigui.Widget {
 }
 
 func (r *Root) Build(context *guigui.Context, adder *guigui.ChildAdder) error {
+	// The saved size is also set on RunOptions, so the first frame already
+	// matches. Setting it here keeps a click, and a failed save, on this launch.
+	context.SetAppScale(r.model.TextAppScale())
+
 	adder.AddWidget(&r.background)
 	adder.AddWidget(&r.sidebar)
 	if content := r.contentWidget(); content != nil {
