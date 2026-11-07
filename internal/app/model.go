@@ -73,6 +73,7 @@ type Model struct {
 	lang        i18n.Lang
 	mode        modePref
 	sidebar     sidebarPref
+	textScale   textScalePref
 	image       ImageModel
 	screenshot  ScreenshotModel
 	android     AndroidModel

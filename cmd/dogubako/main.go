@@ -31,6 +31,8 @@ func main() {
 		Title:         i18n.T(i18n.Load(), i18n.AppTitle),
 		WindowSize:    image.Pt(1100, 760),
 		WindowMinSize: image.Pt(800, 560),
+		// Text size is AppScale. The window size and the device scale stay put.
+		AppScale: app.SavedAppScale(),
 	}
 	root := &app.Root{}
 	root.ApplyLaunch(launch)

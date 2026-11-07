@@ -58,6 +58,7 @@ type sidebarContent struct {
 	title  basicwidget.Text
 	toggle sidebarToggle
 	list   basicwidget.List[ToolID]
+	scale  textScaleBar
 	lang   basicwidget.SegmentedControl[i18n.Lang]
 
 	rows      guigui.WidgetSlice[*sidebarToolRow]
@@ -160,6 +161,7 @@ func (s *sidebarContent) Build(context *guigui.Context, adder *guigui.ChildAdder
 
 	adder.AddWidget(&s.title)
 	adder.AddWidget(&s.list)
+	adder.AddWidget(&s.scale)
 	adder.AddWidget(&s.lang)
 
 	s.title.SetValue(i18n.T(lang, i18n.AppTitle))
@@ -217,6 +219,7 @@ func (s *sidebarContent) layout(context *guigui.Context) guigui.LinearLayout {
 			Size: guigui.FixedSize(u),
 		},
 		guigui.LinearLayoutItem{Widget: &s.list, Size: guigui.FlexibleSize(1)},
+		guigui.LinearLayoutItem{Widget: &s.scale, Size: guigui.FixedSize(u)},
 		guigui.LinearLayoutItem{Widget: &s.lang, Size: guigui.FixedSize(u)},
 	)
 	return guigui.LinearLayout{
@@ -228,6 +231,61 @@ func (s *sidebarContent) layout(context *guigui.Context) guigui.LinearLayout {
 
 func (s *sidebarContent) Layout(context *guigui.Context, widgetBounds *guigui.WidgetBounds, layouter *guigui.ChildLayouter) {
 	s.layout(context).LayoutWidgets(context, widgetBounds.Bounds(), layouter)
+}
+
+// textScaleBar is smaller, the current percentage, and larger, in one row.
+// The percentage is a label: clicking it does not change the size.
+type textScaleBar struct {
+	guigui.DefaultWidget
+
+	smaller sidebarToggle
+	label   basicwidget.Text
+	larger  sidebarToggle
+
+	items []guigui.LinearLayoutItem
+}
+
+func (b *textScaleBar) Build(context *guigui.Context, adder *guigui.ChildAdder) error {
+	adder.AddWidget(&b.smaller)
+	adder.AddWidget(&b.label)
+	adder.AddWidget(&b.larger)
+
+	v, ok := context.Env(b, EnvKeyModel)
+	if !ok {
+		return nil
+	}
+	model := v.(*Model)
+	lang := model.Lang()
+	b.smaller.configure("−", i18n.T(lang, i18n.SidebarSmaller), func(ctx *guigui.Context) {
+		model.StepTextScale(-1)
+		ctx.SetAppScale(model.TextAppScale())
+	})
+	b.larger.configure("+", i18n.T(lang, i18n.SidebarLarger), func(ctx *guigui.Context) {
+		model.StepTextScale(1)
+		ctx.SetAppScale(model.TextAppScale())
+	})
+	context.SetEnabled(&b.smaller.button, model.CanShrinkText())
+	context.SetEnabled(&b.larger.button, model.CanGrowText())
+
+	b.label.SetValue(textScaleLabel(model.TextScalePercent()))
+	b.label.SetHorizontalAlign(basicwidget.HorizontalAlignCenter)
+	b.label.SetVerticalAlign(basicwidget.VerticalAlignMiddle)
+	return nil
+}
+
+func (b *textScaleBar) Layout(context *guigui.Context, widgetBounds *guigui.WidgetBounds, layouter *guigui.ChildLayouter) {
+	u := basicwidget.UnitSize(context)
+	b.items = slices.Delete(b.items, 0, len(b.items))
+	b.items = append(b.items,
+		guigui.LinearLayoutItem{Widget: &b.smaller, Size: guigui.FixedSize(u)},
+		guigui.LinearLayoutItem{Widget: &b.label, Size: guigui.FlexibleSize(1)},
+		guigui.LinearLayoutItem{Widget: &b.larger, Size: guigui.FixedSize(u)},
+	)
+	(guigui.LinearLayout{
+		Direction: guigui.LayoutDirectionHorizontal,
+		Items:     b.items,
+		Gap:       u / 8,
+	}).LayoutWidgets(context, widgetBounds.Bounds(), layouter)
 }
 
 func (s *sidebarContent) Measure(context *guigui.Context, constraints guigui.Constraints) image.Point {

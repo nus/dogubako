@@ -9,6 +9,8 @@ const (
 	AppTitle        Key = "app.title"
 	SidebarCollapse Key = "sidebar.collapse"
 	SidebarExpand   Key = "sidebar.expand"
+	SidebarSmaller  Key = "sidebar.text_smaller"
+	SidebarLarger   Key = "sidebar.text_larger"
 	ToolImage       Key = "tool.image"
 	ToolScreenshot  Key = "tool.screenshot"
 	ToolAndroid     Key = "tool.android"
@@ -368,6 +370,8 @@ var catalogs = map[Lang]map[Key]string{
 		AppTitle:                       "道具箱",
 		SidebarCollapse:                "サイドバーを折りたたむ（%s）",
 		SidebarExpand:                  "サイドバーを開く（%s）",
+		SidebarSmaller:                 "文字を小さく",
+		SidebarLarger:                  "文字を大きく",
 		ToolImage:                      "画像",
 		ToolScreenshot:                 "画面キャプチャ",
 		ToolAndroid:                    "Android",
@@ -714,6 +718,8 @@ var catalogs = map[Lang]map[Key]string{
 		AppTitle:                       "Dogubako",
 		SidebarCollapse:                "Collapse sidebar (%s)",
 		SidebarExpand:                  "Expand sidebar (%s)",
+		SidebarSmaller:                 "Smaller text",
+		SidebarLarger:                  "Larger text",
 		ToolImage:                      "Image",
 		ToolScreenshot:                 "Screenshot",
 		ToolAndroid:                    "Android",
