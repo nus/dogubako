@@ -117,26 +117,27 @@ type GitTool struct {
 	commitItems []basicwidget.ListItem[string]
 	// commitReady reports that commitRows already show commitRev for commitPath.
 	// A resize or scroll rebuilds the tree, and those stay cheap while this matches.
-	commitReady    bool
-	commitRev      uint64
-	commitPath     string
-	commitLang     i18n.Lang
-	commitOpen     string
-	commitSel      string
-	commitOpenAt   int
-	expandSet      bool
-	expandRev      uint64
-	expandLang     i18n.Lang
-	expandOpen     string
-	expandFile     string
-	expandDetail   string
-	expandDetached bool
-	expandLanes    int
-	graphEmpty     basicwidget.Text
-	showEmpty      bool
-	openHash       string
-	openShown      string
-	openFromSelect bool
+	commitReady     bool
+	commitRev       uint64
+	commitPath      string
+	commitLang      i18n.Lang
+	commitOpen      string
+	commitSel       string
+	commitOpenAt    int
+	expandSet       bool
+	expandRev       uint64
+	expandLang      i18n.Lang
+	expandOpen      string
+	expandFile      string
+	expandDetail    string
+	expandDetailRev uint64
+	expandDetached  bool
+	expandLanes     int
+	graphEmpty      basicwidget.Text
+	showEmpty       bool
+	openHash        string
+	openShown       string
+	openFromSelect  bool
 	// hitCommit is the commit row that received the left click.
 	// A rectangle behind the console icon or its balloon does not count.
 	hitCommit     string
@@ -616,6 +617,7 @@ func (t *GitTool) Build(context *guigui.Context, adder *guigui.ChildAdder) error
 			if t.keepOpenDetail {
 				return
 			}
+			already := item.Value == model.Selected()
 			model.SelectCommit(item.Value)
 			if t.building {
 				return
@@ -628,6 +630,10 @@ func (t *GitTool) Build(context *guigui.Context, adder *guigui.ChildAdder) error
 			t.openHash = next
 			if next != "" && !arrow {
 				t.openFromSelect = true
+				// The selection was already here, so SelectCommit did not start a read.
+				if already {
+					model.ReadCommit(next)
+				}
 			}
 		})
 		context.SetEnabled(&t.commitList, !busy)
@@ -1085,10 +1091,12 @@ func (t *GitTool) syncExpand(lang i18n.Lang, model *GitModel, row gitcli.GraphRo
 	t.expand.graphUnits = t.graphUnits
 	t.expand.tool = t
 	detail := ""
+	var detailRev uint64
 	if model != nil {
 		detail = model.Detail().Hash
+		detailRev = model.DetailRev()
 	}
-	if t.expandSet && t.expandRev == model.GraphRev() && t.expandLang == lang && t.expandOpen == row.Commit.Hash && t.expandFile == t.histFile && t.expandDetail == detail && t.expandDetached == detached && t.expandLanes == lanes {
+	if t.expandSet && t.expandRev == model.GraphRev() && t.expandLang == lang && t.expandOpen == row.Commit.Hash && t.expandFile == t.histFile && t.expandDetail == detail && t.expandDetailRev == detailRev && t.expandDetached == detached && t.expandLanes == lanes {
 		return
 	}
 	t.expand.Set(lang, model, row, lanes, t.histFile, func(hash string) {
@@ -1105,6 +1113,7 @@ func (t *GitTool) syncExpand(lang i18n.Lang, model *GitModel, row gitcli.GraphRo
 	t.expandOpen = row.Commit.Hash
 	t.expandFile = t.histFile
 	t.expandDetail = detail
+	t.expandDetailRev = detailRev
 	t.expandDetached = detached
 	t.expandLanes = lanes
 }
@@ -1120,9 +1129,9 @@ func (t *GitTool) syncHistFile() {
 // commitOpenFromClick is a left click on a commit row that was actually hit.
 // onControl means the console icon or its balloon is under the cursor, so the
 // row behind it stays as it is. fromSelect means the list already opened the
-// commit and started loading it. The bool reports that the caller should load
-// the returned commit; a cursor-only open never does, and the detail would
-// stay on the loading text.
+// commit and started loading it. The bool reports that the caller should read
+// the returned commit, even when that commit is already selected. Skipping
+// the read leaves the detail on the loading text.
 func commitOpenFromClick(openHash, hit string, onControl, fromSelect bool) (string, bool) {
 	if onControl || fromSelect || hit == "" || hit == gitcli.Uncommitted {
 		return openHash, false
@@ -1347,7 +1356,7 @@ func (t *GitTool) Tick(context *guigui.Context, widgetBounds *guigui.WidgetBound
 		if next != t.openHash {
 			t.openHash = next
 			if load {
-				model.SelectCommit(next)
+				model.ReadCommit(next)
 			}
 			guigui.RequestRebuild()
 		}

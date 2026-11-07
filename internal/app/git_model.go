@@ -92,14 +92,22 @@ type gitSession struct {
 	// alone, so the list can keep the rows already on screen.
 	graphRev uint64
 
-	path     string
-	repo     *gitcli.Repo
-	snap     gitcli.Snapshot
-	hidden   map[string]bool
-	sel      string
-	detail   gitcli.CommitDetail
-	draft    string
-	stageAll bool
+	path   string
+	repo   *gitcli.Repo
+	snap   gitcli.Snapshot
+	hidden map[string]bool
+	sel    string
+	detail gitcli.CommitDetail
+	// detailErrHash is the commit whose latest read failed. detailErr is that error.
+	// detailRev changes when a record arrives, a read fails, or a retry starts.
+	// detailStatus is the message replaced by that failure, so a retry can put it back.
+	detailErrHash    string
+	detailErr        error
+	detailRev        uint64
+	detailStatus     statusMsg
+	detailStatusHeld bool
+	draft            string
+	stageAll         bool
 
 	status statusMsg
 
@@ -171,7 +179,18 @@ func (m *gitSession) Selected() string { return m.sel }
 func (m *gitSession) Detail() gitcli.CommitDetail {
 	return m.detail
 }
-func (m *gitSession) Draft() string { return m.draft }
+
+// DetailError is the failed read for hash. A later read of that commit clears it.
+func (m *gitSession) DetailError(hash string) error {
+	if hash == "" || hash != m.detailErrHash {
+		return nil
+	}
+	return m.detailErr
+}
+
+// DetailRev changes when a commit record arrives, its read fails, or a retry starts.
+func (m *gitSession) DetailRev() uint64 { return m.detailRev }
+func (m *gitSession) Draft() string     { return m.draft }
 func (m *gitSession) SetDraft(s string) {
 	if m.draft == s {
 		return
@@ -635,10 +654,27 @@ func (m *gitSession) drainDetail() {
 	select {
 	case res := <-m.pendingDetail:
 		m.pendingDetail = nil
-		if res.err != nil || res.hash != m.sel {
+		if res.hash == "" {
 			return
 		}
+		// The highlight can move while this read is in flight. The result still
+		// belongs to the commit that was opened, so it is not dropped.
+		if res.err != nil {
+			m.detailErrHash = res.hash
+			m.detailErr = res.err
+			m.detailRev++
+			m.showDetailFailure(res.err)
+			m.generation++
+			guigui.RequestRebuild()
+			return
+		}
+		if m.detailErrHash == res.hash {
+			m.detailErrHash = ""
+			m.detailErr = nil
+		}
 		m.detail = res.detail
+		m.detailRev++
+		m.restoreDetailStatus()
 		m.generation++
 		guigui.RequestRebuild()
 	default:
@@ -654,6 +690,21 @@ func (m *gitSession) SelectCommit(hash string) {
 	if hash == gitcli.Uncommitted {
 		m.pendingDetail = nil
 		m.detail = gitcli.CommitDetail{}
+		return
+	}
+	m.startDetail(hash)
+}
+
+// ReadCommit selects hash and reads its record.
+// A commit that is already selected is read again. Page, Home, and End only
+// move the highlight, and a failed read leaves the selection where it is,
+// so opening that row has to ask again. The uncommitted row has no record.
+func (m *gitSession) ReadCommit(hash string) {
+	if hash == "" || hash == gitcli.Uncommitted {
+		return
+	}
+	if hash != m.sel {
+		m.SelectCommit(hash)
 		return
 	}
 	m.startDetail(hash)
@@ -691,6 +742,7 @@ func (m *gitSession) startDetail(hash string) {
 	if m.repo == nil || hash == "" {
 		return
 	}
+	m.clearDetailFailure()
 	ch := make(chan gitDetailResult, 1)
 	m.pendingDetail = ch
 	repo := m.repo
@@ -700,6 +752,48 @@ func (m *gitSession) startDetail(hash string) {
 		d, err := repo.Detail(ctx, hash)
 		ch <- gitDetailResult{hash: hash, detail: d, err: err}
 	}()
+}
+
+// showDetailFailure reports err on the status line when that line is still the
+// idle loading or opened message. A later operation keeps its own message.
+func (m *gitSession) showDetailFailure(err error) {
+	switch m.status.key {
+	case "", i18n.StatusGitLoading, i18n.StatusGitOpened, i18n.StatusGitDetailFailed:
+	default:
+		return
+	}
+	if m.status.key != i18n.StatusGitDetailFailed {
+		m.detailStatus = m.status
+		if len(m.status.args) > 0 {
+			m.detailStatus.args = append([]any(nil), m.status.args...)
+		}
+		m.detailStatusHeld = true
+	}
+	m.SetStatus(i18n.StatusGitDetailFailed, err)
+}
+
+// clearDetailFailure drops a failed read so the next one can start.
+// The status line goes back to the message from before that failure.
+func (m *gitSession) clearDetailFailure() {
+	if m.detailErrHash == "" && m.status.key != i18n.StatusGitDetailFailed {
+		return
+	}
+	m.detailErrHash = ""
+	m.detailErr = nil
+	m.detailRev++
+	m.restoreDetailStatus()
+}
+
+// restoreDetailStatus puts back the message that was showing before the
+// failure, when that failure is still the message on screen.
+func (m *gitSession) restoreDetailStatus() {
+	if m.status.key != i18n.StatusGitDetailFailed || !m.detailStatusHeld {
+		m.detailStatusHeld = false
+		return
+	}
+	prev := m.detailStatus
+	m.detailStatusHeld = false
+	m.SetStatus(prev.key, prev.args...)
 }
 
 func (m *gitSession) SelectedCommit() (gitcli.Commit, bool) {

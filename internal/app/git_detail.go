@@ -39,6 +39,7 @@ type gitCommitExpand struct {
 	graphUnits  float64
 	loading     bool
 	showFiles   bool
+	rev         uint64
 	metaValue   string
 	fileMessage string
 	ranges      []basicwidget.TextRange
@@ -59,14 +60,21 @@ func (e *gitCommitExpand) Set(lang i18n.Lang, model *GitModel, row gitcli.GraphR
 	e.bridge.Set(lanes, row.Outgoing)
 
 	var detail gitcli.CommitDetail
+	var failed error
 	if model != nil && model.HasRepo() {
 		detail = model.Detail()
+		failed = model.DetailError(row.Commit.Hash)
+		e.rev = model.DetailRev()
 	}
 	ready := detail.Hash != "" && detail.Hash == row.Commit.Hash
 	if !ready {
-		e.loading = true
+		e.loading = failed == nil
 		e.showFiles = false
-		e.metaValue = i18n.T(lang, i18n.StatusGitLoading)
+		if failed != nil {
+			e.metaValue = i18n.T(lang, i18n.StatusGitDetailFailed, failed)
+		} else {
+			e.metaValue = i18n.T(lang, i18n.StatusGitLoading)
+		}
 		e.fileMessage = ""
 		e.ranges = nil
 		e.hashes = nil
@@ -108,6 +116,7 @@ func (e *gitCommitExpand) WriteStateKey(context *guigui.Context, w *guigui.State
 	w.WriteString(e.hash)
 	w.WriteString(e.seen)
 	w.WriteString(e.file)
+	w.WriteUint64(e.rev)
 	w.WriteBool(e.loading)
 	w.WriteBool(e.showFiles)
 	w.WriteInt(e.files.Len())
