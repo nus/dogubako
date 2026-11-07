@@ -1,6 +1,7 @@
 package app
 
 import (
+	"fmt"
 	"os"
 	"os/exec"
 	"path/filepath"
@@ -982,6 +983,210 @@ func gitOutput(t *testing.T, dir string, args ...string) string {
 		t.Fatalf("git %s: %v\n%s", strings.Join(args, " "), err, out)
 	}
 	return strings.TrimSpace(string(out))
+}
+
+func TestReadCommitRereadsSelection(t *testing.T) {
+	m := &gitSession{repo: &gitcli.Repo{Dir: t.TempDir()}, path: "/repo", sel: "aaa"}
+	m.SelectCommit("aaa")
+	if m.pendingDetail != nil {
+		t.Fatal("selecting the current commit started a read")
+	}
+	m.ReadCommit("")
+	m.ReadCommit(gitcli.Uncommitted)
+	if m.Selected() != "aaa" || m.pendingDetail != nil {
+		t.Fatal("empty commit started a read")
+	}
+	m.ReadCommit("aaa")
+	if m.Selected() != "aaa" || m.pendingDetail == nil {
+		t.Fatal("opening the selected commit did not read it")
+	}
+	waitSessionDetail(t, m)
+	err := m.DetailError("aaa")
+	if err == nil || m.Detail().Hash != "" {
+		t.Fatalf("detail=%s err=%v", m.Detail().Hash, err)
+	}
+	if got := m.StatusText(i18n.JA); got != i18n.T(i18n.JA, i18n.StatusGitDetailFailed, err) {
+		t.Fatalf("status = %q", got)
+	}
+	if got := m.StatusText(i18n.EN); got != i18n.T(i18n.EN, i18n.StatusGitDetailFailed, err) {
+		t.Fatalf("en status = %q", got)
+	}
+	if m.DetailError("bbb") != nil {
+		t.Fatal("failure attached to another commit")
+	}
+	m.ReadCommit("aaa")
+	if m.pendingDetail == nil || m.DetailError("aaa") != nil {
+		t.Fatal("opening the failed commit did not read it again")
+	}
+	if strings.Contains(m.StatusText(i18n.JA), "読み込めません") {
+		t.Fatal("retry left the failure in the status")
+	}
+	waitSessionDetail(t, m)
+}
+
+func TestReadCommitAfterHighlight(t *testing.T) {
+	m := &gitSession{
+		repo:   &gitcli.Repo{Dir: t.TempDir()},
+		path:   "/repo",
+		sel:    "aaa",
+		detail: gitcli.CommitDetail{Commit: gitcli.Commit{Hash: "aaa"}},
+	}
+	m.HighlightCommit("bbb")
+	if m.Selected() != "bbb" || m.pendingDetail != nil || m.Detail().Hash != "aaa" {
+		t.Fatalf("sel=%s detail=%s pending=%v", m.Selected(), m.Detail().Hash, m.pendingDetail != nil)
+	}
+	m.ReadCommit("bbb")
+	if m.Selected() != "bbb" || m.pendingDetail == nil {
+		t.Fatal("click after highlighting did not read the commit")
+	}
+	waitSessionDetail(t, m)
+}
+
+func TestDrainDetailKeepsRecordWhenHighlightMoves(t *testing.T) {
+	ch := make(chan gitDetailResult, 1)
+	m := &gitSession{sel: "aaa", pendingDetail: ch, path: "/repo"}
+	m.HighlightCommit("bbb")
+	ch <- gitDetailResult{
+		hash: "aaa",
+		detail: gitcli.CommitDetail{Commit: gitcli.Commit{
+			Hash: "aaa", Author: "Ann", Email: "ann@example.com",
+		}, Body: "hello"},
+	}
+	m.drainDetail()
+	if m.Selected() != "bbb" || m.Detail().Hash != "aaa" || m.Detail().Author != "Ann" || m.Detail().Body != "hello" {
+		t.Fatalf("sel=%s detail=%+v", m.Selected(), m.Detail())
+	}
+	if m.pendingDetail != nil || m.DetailError("aaa") != nil {
+		t.Fatal("kept a failure for a record that arrived")
+	}
+}
+
+func TestDrainDetailReportsFailure(t *testing.T) {
+	ch := make(chan gitDetailResult, 1)
+	m := &gitSession{sel: "bbb", pendingDetail: ch, path: "/repo"}
+	m.SetStatus(i18n.StatusGitOpened, "/repo", 2)
+	ch <- gitDetailResult{hash: "aaa", err: fmt.Errorf("missing")}
+	m.drainDetail()
+	if m.pendingDetail != nil || m.Detail().Hash != "" {
+		t.Fatal("a failed read replaced the record")
+	}
+	err := m.DetailError("aaa")
+	if err == nil || m.DetailError("bbb") != nil {
+		t.Fatalf("aaa=%v bbb=%v", err, m.DetailError("bbb"))
+	}
+	if got := m.StatusText(i18n.EN); got != i18n.T(i18n.EN, i18n.StatusGitDetailFailed, err) {
+		t.Fatalf("status = %q", got)
+	}
+	ok := make(chan gitDetailResult, 1)
+	m.pendingDetail = ok
+	m.sel = "aaa"
+	m.SetStatus(i18n.StatusGitFetchOk)
+	ok <- gitDetailResult{hash: "aaa", detail: gitcli.CommitDetail{Commit: gitcli.Commit{Hash: "aaa"}}}
+	m.drainDetail()
+	if m.Detail().Hash != "aaa" || m.DetailError("aaa") != nil {
+		t.Fatalf("detail=%s err=%v", m.Detail().Hash, m.DetailError("aaa"))
+	}
+	if m.StatusText(i18n.EN) != "Fetched" {
+		t.Fatalf("status = %q", m.StatusText(i18n.EN))
+	}
+}
+
+func TestDrainDetailKeepsNewerStatus(t *testing.T) {
+	ch := make(chan gitDetailResult, 1)
+	m := &gitSession{sel: "aaa", pendingDetail: ch, path: "/repo"}
+	m.SetStatus(i18n.StatusGitWorktreeClosed)
+	ch <- gitDetailResult{hash: "aaa", err: fmt.Errorf("missing")}
+	m.drainDetail()
+	if m.StatusText(i18n.EN) != "Closed worktree" {
+		t.Fatalf("status = %q", m.StatusText(i18n.EN))
+	}
+	if m.DetailError("aaa") == nil {
+		t.Fatal("the detail lost the failure")
+	}
+	ok := make(chan gitDetailResult, 1)
+	m.pendingDetail = ok
+	m.SetStatus(i18n.StatusGitOpened, "/repo", 4)
+	m.detailErrHash = ""
+	m.detailErr = nil
+	ok <- gitDetailResult{hash: "aaa", err: fmt.Errorf("missing")}
+	m.drainDetail()
+	if m.StatusText(i18n.EN) != i18n.T(i18n.EN, i18n.StatusGitDetailFailed, m.DetailError("aaa")) {
+		t.Fatalf("status = %q", m.StatusText(i18n.EN))
+	}
+	done := make(chan gitDetailResult, 1)
+	m.pendingDetail = done
+	done <- gitDetailResult{hash: "aaa", detail: gitcli.CommitDetail{Commit: gitcli.Commit{Hash: "aaa"}}}
+	m.drainDetail()
+	if m.Detail().Hash != "aaa" || m.DetailError("aaa") != nil {
+		t.Fatalf("detail=%s err=%v", m.Detail().Hash, m.DetailError("aaa"))
+	}
+	if m.StatusText(i18n.EN) != "Opened /repo (4 commits)" {
+		t.Fatalf("restored status = %q", m.StatusText(i18n.EN))
+	}
+}
+
+func TestExpandShowsCommitRecord(t *testing.T) {
+	when := time.Date(2020, 1, 2, 3, 4, 5, 0, time.UTC)
+	detail := gitcli.CommitDetail{
+		Commit: gitcli.Commit{
+			Hash: "abc123", Author: "Ann", Email: "ann@example.com", When: when,
+			Parents: []string{"parent123"},
+		},
+		Body: "hello from the commit",
+		Diff: "diff --git a/a.txt b/a.txt\n" +
+			"--- a/a.txt\n" +
+			"+++ b/a.txt\n" +
+			"@@ -1 +1 @@\n" +
+			"-old\n" +
+			"+new\n",
+	}
+	m := &GitModel{gitSession: &gitSession{
+		path:   "/repo",
+		repo:   &gitcli.Repo{Dir: t.TempDir()},
+		detail: detail,
+	}}
+	var expand gitCommitExpand
+	row := gitcli.GraphRow{Commit: gitcli.Commit{Hash: "abc123"}}
+	expand.Set(i18n.EN, m, row, 1, "", nil, nil)
+	if expand.loading || !expand.showFiles {
+		t.Fatalf("loading=%v files=%v", expand.loading, expand.showFiles)
+	}
+	for _, part := range []string{"abc123", "Ann", "ann@example.com", "2020", "hello from the commit", "parent123"} {
+		if !strings.Contains(expand.metaValue, part) {
+			t.Fatalf("record missing %q in %q", part, expand.metaValue)
+		}
+	}
+	if strings.Contains(expand.metaValue, "Loading") {
+		t.Fatalf("record still loading: %q", expand.metaValue)
+	}
+
+	m.detail = gitcli.CommitDetail{}
+	m.detailErrHash = "abc123"
+	m.detailErr = fmt.Errorf("missing")
+	m.detailRev++
+	expand.Set(i18n.JA, m, row, 1, "", nil, nil)
+	if expand.loading || expand.showFiles {
+		t.Fatalf("failed loading=%v files=%v", expand.loading, expand.showFiles)
+	}
+	if expand.metaValue != i18n.T(i18n.JA, i18n.StatusGitDetailFailed, m.detailErr) {
+		t.Fatalf("failure text = %q", expand.metaValue)
+	}
+	if strings.Contains(expand.metaValue, "読み込んでいます") {
+		t.Fatalf("failure still loading: %q", expand.metaValue)
+	}
+}
+
+func waitSessionDetail(t *testing.T, m *gitSession) {
+	t.Helper()
+	deadline := time.Now().Add(8 * time.Second)
+	for time.Now().Before(deadline) {
+		m.drainDetail()
+		if m.pendingDetail == nil {
+			return
+		}
+		time.Sleep(10 * time.Millisecond)
+	}
+	t.Fatal("detail still pending")
 }
 
 func TestHighlightCommitLeavesDetail(t *testing.T) {

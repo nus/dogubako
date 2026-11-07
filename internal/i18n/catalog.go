@@ -290,6 +290,7 @@ const (
 	StatusMTPSelectOnline          Key = "status.mtp_select_online"
 
 	StatusGitLoading          Key = "status.git_loading"
+	StatusGitDetailFailed     Key = "status.git_detail_failed"
 	StatusGitOpened           Key = "status.git_opened"
 	StatusGitOpenFailed       Key = "status.git_open_failed"
 	StatusGitSubmoduleInit    Key = "status.git_submodule_init"
@@ -642,6 +643,7 @@ var catalogs = map[Lang]map[Key]string{
 		StatusMTPNoSelection:           "コピーするファイルまたはフォルダを選んでください",
 		StatusMTPSelectOnline:          "ストレージまたはフォルダを選んでください",
 		StatusGitLoading:               "読み込んでいます…",
+		StatusGitDetailFailed:          "コミットの詳細を読み込めません: %v",
 		StatusGitOpened:                "%s を開きました（コミット %d 件）",
 		StatusGitOpenFailed:            "リポジトリを開けません: %v",
 		StatusGitSubmoduleInit:         "サブモジュールを準備しています…",
@@ -990,6 +992,7 @@ var catalogs = map[Lang]map[Key]string{
 		StatusMTPNoSelection:           "Select a file or folder to copy",
 		StatusMTPSelectOnline:          "Select a storage or folder",
 		StatusGitLoading:               "Loading…",
+		StatusGitDetailFailed:          "Could not read the commit: %v",
 		StatusGitOpened:                "Opened %s (%d commits)",
 		StatusGitOpenFailed:            "Could not open the repository: %v",
 		StatusGitSubmoduleInit:         "Preparing the submodule…",
