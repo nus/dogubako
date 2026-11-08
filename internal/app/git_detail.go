@@ -396,9 +396,11 @@ func (n *gitFileNode) hasDirectFile() bool {
 }
 
 // fileTreeLines groups file stats into a folder tree. folded paths are collapsed.
-// A directory with no changed file of its own is not a row. Its name is joined
-// onto the descendant that does contain files, so internal/app/git.go shows as
-// the folder internal/app and the file git.go. Fold keys use that joined path.
+// A directory with exactly one child and no changed file of its own is not a
+// row: its name is joined onto that child, so internal/app/git.go shows as the
+// folder internal/app and the file git.go. A directory with two or more
+// children is a row even without a file of its own, and those children do not
+// repeat its name. Fold keys are directory paths.
 func fileTreeLines(stats []gitPathStat, folded map[string]bool) []gitTreeLine {
 	order := append([]gitPathStat(nil), stats...)
 	sort.Slice(order, func(i, j int) bool { return order[i].Path < order[j].Path })
@@ -438,7 +440,7 @@ func fileTreeLines(stats []gitPathStat, folded map[string]bool) []gitTreeLine {
 			if prefix != "" {
 				name = prefix + "/" + name
 			}
-			if len(c.kids) > 0 && !c.hasDirectFile() {
+			if len(c.kids) == 1 && !c.hasDirectFile() {
 				walk(c, depth, name)
 				continue
 			}

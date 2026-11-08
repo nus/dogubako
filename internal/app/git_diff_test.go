@@ -95,17 +95,63 @@ func TestFileTreeLines(t *testing.T) {
 
 func TestFileTreeLinesCompactsDirsWithoutFiles(t *testing.T) {
 	branches := fileTreeLines([]gitPathStat{
-		{Path: "internal/gitcli/parse.go"},
-		{Path: "internal/app/git.go"},
+		{Path: "internal/gitcli/parse.go", Add: 4, Del: 1},
+		{Path: "internal/app/git.go", Add: 2, Del: 3},
 	}, nil)
-	if got := treeLineNames(branches); strings.Join(got, ",") != "internal/app,git.go,internal/gitcli,parse.go" {
+	if got := treeLineNames(branches); strings.Join(got, ",") != "internal,app,git.go,gitcli,parse.go" {
 		t.Fatalf("branches = %v", got)
 	}
-	if branches[0].Depth != 0 || branches[1].Depth != 1 || branches[2].Depth != 0 || branches[3].Depth != 1 {
+	if branches[0].Depth != 0 || branches[1].Depth != 1 || branches[2].Depth != 2 || branches[3].Depth != 1 || branches[4].Depth != 2 {
 		t.Fatalf("branch depths = %+v", branches)
 	}
-	if branches[1].Path != "internal/app/git.go" || branches[3].Path != "internal/gitcli/parse.go" {
-		t.Fatalf("branch paths = %+v", branches)
+	if !branches[0].Folder || branches[0].Path != "internal" || branches[0].Add != 0 || branches[0].Del != 0 {
+		t.Fatalf("shared parent = %+v", branches[0])
+	}
+	if branches[1].Name != "app" || branches[1].Path != "internal/app" || branches[2].Path != "internal/app/git.go" || branches[2].Add != 2 || branches[2].Del != 3 {
+		t.Fatalf("app branch = %+v", branches[:3])
+	}
+	if branches[3].Name != "gitcli" || branches[4].Path != "internal/gitcli/parse.go" || branches[4].Add != 4 || branches[4].Del != 1 || branches[3].Add != 0 {
+		t.Fatalf("gitcli branch = %+v", branches[3:])
+	}
+	foldedParent := fileTreeLines([]gitPathStat{
+		{Path: "internal/gitcli/parse.go"},
+		{Path: "internal/app/git.go"},
+	}, map[string]bool{"internal": true})
+	if len(foldedParent) != 1 || foldedParent[0].Name != "internal" || !foldedParent[0].Collapsed || foldedParent[0].Path != "internal" {
+		t.Fatalf("folded parent = %+v", foldedParent)
+	}
+	foldedChild := fileTreeLines([]gitPathStat{
+		{Path: "internal/gitcli/parse.go"},
+		{Path: "internal/app/git.go"},
+	}, map[string]bool{"internal/app": true})
+	if got := treeLineNames(foldedChild); strings.Join(got, ",") != "internal,app,gitcli,parse.go" {
+		t.Fatalf("folded child = %v", got)
+	}
+	if !foldedChild[1].Collapsed || foldedChild[1].Path != "internal/app" || foldedChild[3].Path != "internal/gitcli/parse.go" {
+		t.Fatalf("folded child lines = %+v", foldedChild)
+	}
+
+	split := fileTreeLines([]gitPathStat{
+		{Path: "a/b/d/y.go"},
+		{Path: "a/b/c/x.go"},
+	}, nil)
+	if got := treeLineNames(split); strings.Join(got, ",") != "a/b,c,x.go,d,y.go" {
+		t.Fatalf("split = %v", got)
+	}
+	if split[0].Path != "a/b" || split[0].Depth != 0 || split[1].Path != "a/b/c" || split[1].Depth != 1 || split[2].Path != "a/b/c/x.go" || split[2].Depth != 2 || split[3].Path != "a/b/d" || split[4].Path != "a/b/d/y.go" {
+		t.Fatalf("split lines = %+v", split)
+	}
+
+	upper := fileTreeLines([]gitPathStat{
+		{Path: "a/e/z.go"},
+		{Path: "a/b/d/y.go"},
+		{Path: "a/b/c/x.go"},
+	}, nil)
+	if got := treeLineNames(upper); strings.Join(got, ",") != "a,b,c,x.go,d,y.go,e,z.go" {
+		t.Fatalf("upper = %v", got)
+	}
+	if upper[0].Path != "a" || upper[0].Depth != 0 || upper[1].Path != "a/b" || upper[1].Depth != 1 || upper[2].Path != "a/b/c" || upper[2].Depth != 2 || upper[6].Path != "a/e" || upper[6].Depth != 1 || upper[7].Path != "a/e/z.go" || upper[7].Depth != 2 {
+		t.Fatalf("upper lines = %+v", upper)
 	}
 
 	mixed := fileTreeLines([]gitPathStat{
