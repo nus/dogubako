@@ -1004,6 +1004,10 @@ func (d *gitWorkDiff) Set(body, empty, shown, path string) {
 	}
 }
 
+func (d *gitWorkDiff) SetColFrac(frac float64, onColFrac func(float64)) {
+	d.view.SetColFrac(frac, onColFrac)
+}
+
 func (d *gitWorkDiff) SetSplit(lang i18n.Lang, split bool, onSplit func(bool)) {
 	d.lang = lang
 	d.mode.Set(lang, split, onSplit)
@@ -1160,6 +1164,7 @@ func (t *GitTool) setWorkDiff(lang i18n.Lang, model *GitModel) {
 		t.workHold.set = false
 	}
 	t.workPanes.diff.SetSplit(lang, t.diffSplit, t.setDiffSplit)
+	t.workPanes.diff.SetColFrac(t.diffColFrac, t.setDiffColFrac)
 	t.workPanes.diff.SetWrap(lang, t.diffWrap, t.setDiffWrap)
 	full, enabled := t.wholeFileDiff(model, body, path, staged, false)
 	t.workPanes.diff.SetWhole(lang, t.diffWhole, full, enabled, t.setDiffWhole)

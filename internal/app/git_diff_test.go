@@ -1258,6 +1258,27 @@ func TestDiffWheelAxes(t *testing.T) {
 	}
 }
 
+func TestGitDiffColumnSplit(t *testing.T) {
+	const total, splitW, minCol = 400, 8, 48
+	half := gitDiffColWidth(total, splitW, 0, minCol)
+	if half != gitDiffColWidth(total, splitW, 0.5, minCol) {
+		t.Fatalf("unset width = %d, half = %d", half, gitDiffColWidth(total, splitW, 0.5, minCol))
+	}
+	if half < minCol || total-splitW-half < minCol {
+		t.Fatalf("equal columns = %d", half)
+	}
+	wideFrac := gitDiffColFrac(total, splitW, 10000, minCol)
+	wide := gitDiffColWidth(total, splitW, wideFrac, minCol)
+	if wide != total-splitW-minCol || total-splitW-wide < minCol {
+		t.Fatalf("widest left = %d, right = %d", wide, total-splitW-wide)
+	}
+	narrowFrac := gitDiffColFrac(total, splitW, 0, minCol)
+	narrow := gitDiffColWidth(total, splitW, narrowFrac, minCol)
+	if narrow != minCol {
+		t.Fatalf("narrowest left = %d", narrow)
+	}
+}
+
 func TestClampScrollOffset(t *testing.T) {
 	if got := clampScrollOffset(-20, 100, 250); got != -20 {
 		t.Fatalf("inside range: %v", got)

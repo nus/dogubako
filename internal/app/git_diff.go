@@ -27,6 +27,8 @@ type gitFileDiff struct {
 // The code in each column scrolls horizontally on its own, so a line that
 // runs past the pane can be brought into view. Line numbers and markers stay
 // at the left. Vertical scrolling stays in step.
+// The boundary between the columns can be dragged to change their widths.
+// Compact view has no boundary.
 // With wrapping on, long lines break inside the pane and the number and marker
 // columns grow so each source line stays beside its text.
 // Whole-file mode fills the lines the hunks skip. Selections still refer to the
@@ -50,6 +52,7 @@ type gitDiffView struct {
 	compact  gitDiffSide
 	left     gitDiffSide
 	right    gitDiffSide
+	colSplit gitDiffColSplit
 	overview diffOverviewBar
 
 	text  string
@@ -81,6 +84,13 @@ type gitDiffView struct {
 	leftY, rightY         float64
 	// keep is a scroll to put back after the diff text is replaced.
 	keep gitDiffPlace
+
+	// colFrac is the left column's share of the width beside the boundary.
+	// Zero keeps the columns equal. colDrag is that boundary following the pointer.
+	colFrac   float64
+	colDrag   bool
+	pane      image.Rectangle
+	onColFrac func(float64)
 }
 
 func (v *gitDiffView) Set(text string, dark, split, wrap, whole bool, full string) {
@@ -215,6 +225,7 @@ func (v *gitDiffView) syncFromRight(y float64) {
 }
 
 func (v *gitDiffView) Build(context *guigui.Context, adder *guigui.ChildAdder) error {
+	v.finishColDrag(context)
 	drop := func() { v.keep.set = false }
 	v.compact.onUserScroll = drop
 	v.left.onUserScroll = drop
@@ -231,6 +242,8 @@ func (v *gitDiffView) Build(context *guigui.Context, adder *guigui.ChildAdder) e
 		v.bindMenu(&v.left.body, true)
 		v.bindMenu(&v.right.body, false)
 		v.attachOverview(adder)
+		v.colSplit.view = v
+		adder.AddWidget(&v.colSplit)
 		return nil
 	}
 	bodyStyle := v.compactBodyStyle()
@@ -252,21 +265,22 @@ func (v *gitDiffView) Layout(context *guigui.Context, widgetBounds *guigui.Widge
 		layouter.LayoutWidget(&v.compact, bounds)
 		return
 	}
-	gap := basicwidget.UnitSize(context) / 8
-	if gap < 1 {
-		gap = 1
+	v.pane = bounds
+	u := basicwidget.UnitSize(context)
+	splitW := gitWorkSplitWidth(u)
+	leftW := gitDiffColWidth(bounds.Dx(), splitW, v.colFrac, gitDiffMinCol(u))
+	leftB := image.Rect(bounds.Min.X, bounds.Min.Y, bounds.Min.X+leftW, bounds.Max.Y)
+	splitB := image.Rect(leftB.Max.X, bounds.Min.Y, leftB.Max.X+splitW, bounds.Max.Y)
+	if splitB.Max.X > bounds.Max.X {
+		splitB.Max.X = bounds.Max.X
 	}
-	mid := bounds.Min.X + bounds.Dx()/2
-	leftMax := mid - gap
-	rightMin := mid + gap
-	if leftMax < bounds.Min.X {
-		leftMax = bounds.Min.X
+	rightB := image.Rect(splitB.Max.X, bounds.Min.Y, bounds.Max.X, bounds.Max.Y)
+	if rightB.Min.X > rightB.Max.X {
+		rightB.Min.X = rightB.Max.X
 	}
-	if rightMin > bounds.Max.X {
-		rightMin = bounds.Max.X
-	}
-	layouter.LayoutWidget(&v.left, image.Rect(bounds.Min.X, bounds.Min.Y, leftMax, bounds.Max.Y))
-	layouter.LayoutWidget(&v.right, image.Rect(rightMin, bounds.Min.Y, bounds.Max.X, bounds.Max.Y))
+	layouter.LayoutWidget(&v.left, leftB)
+	layouter.LayoutWidget(&v.colSplit, splitB)
+	layouter.LayoutWidget(&v.right, rightB)
 }
 
 func (v *gitDiffView) Measure(context *guigui.Context, constraints guigui.Constraints) image.Point {
