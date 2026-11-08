@@ -37,16 +37,12 @@ func TestSyntaxGoTokens(t *testing.T) {
 	pal := syntaxPalette(false)
 	meta := diffPalette(false)
 
-	if got := lineFragColor(t, styles, body, "package main", "package"); got != pal.keyword {
-		t.Fatalf("package = %v", got)
+	for _, line := range []string{"package main", "/* open", "close */"} {
+		if got := lineFragColor(t, styles, body, line, line); got != (color.NRGBA{}) {
+			t.Fatalf("unchanged %s = %v", line, got)
+		}
 	}
-	if got := lineFragColor(t, styles, body, "package main", "main"); got != (color.NRGBA{}) {
-		t.Fatalf("plain name = %v", got)
-	}
-	if got := lineFragColor(t, styles, body, "package main", " "); got != (color.NRGBA{}) {
-		t.Fatalf("space = %v", got)
-	}
-	for _, line := range []string{"inside", "inside new", "/* open", "close */"} {
+	for _, line := range []string{"inside", "inside new"} {
 		if got := lineFragColor(t, styles, body, line, line); got != pal.comment {
 			t.Fatalf("%s = %v, want comment", line, got)
 		}
@@ -91,14 +87,17 @@ func TestSyntaxGoTokens(t *testing.T) {
 
 	dark := openSyntax(goDiff, true, false, false, false, "", "")
 	darkPal := syntaxPalette(true)
-	if got := lineFragColor(t, dark.compactBodyStyle(), dark.compactBody, "package main", "package"); got != darkPal.keyword {
-		t.Fatalf("dark package = %v", got)
+	if got := lineFragColor(t, dark.compactBodyStyle(), dark.compactBody, "func Old() int { return 1 }", "func"); got != darkPal.keyword {
+		t.Fatalf("dark func = %v", got)
+	}
+	if got := lineFragColor(t, dark.compactBodyStyle(), dark.compactBody, "package main", "package"); got != (color.NRGBA{}) {
+		t.Fatalf("dark unchanged = %v", got)
 	}
 	if darkPal.keyword == pal.keyword {
 		t.Fatal("light and dark keyword colors match")
 	}
 	v.Set(goDiff, true, false, false, false, "")
-	if got := lineFragColor(t, v.compactBodyStyle(), v.compactBody, "package main", "package"); got != darkPal.keyword {
+	if got := lineFragColor(t, v.compactBodyStyle(), v.compactBody, "func Old() int { return 1 }", "func"); got != darkPal.keyword {
 		t.Fatalf("theme switch = %v", got)
 	}
 
@@ -124,17 +123,19 @@ func TestSyntaxLayoutsMatch(t *testing.T) {
 	if !slices.Equal(compact.syntax.compact, wrapped.syntax.compact) {
 		t.Fatal("wrapping changed tokens")
 	}
-	pkg := lineFragColor(t, cStyles, compact.compactBody, "package main", "package")
-	if pkg != light.keyword || lineFragColor(t, wStyles, wrapped.compactBody, "package main", "package") != pkg {
-		t.Fatal("compact and wrapped package colors differ")
+	if got := lineFragColor(t, cStyles, compact.compactBody, "package main", "package"); got != (color.NRGBA{}) {
+		t.Fatalf("compact context = %v", got)
+	}
+	if lineFragColor(t, wStyles, wrapped.compactBody, "package main", "package") != (color.NRGBA{}) {
+		t.Fatal("wrapping colored an unchanged line")
 	}
 	left := split.splitBodyStyle(true)
 	right := split.splitBodyStyle(false)
-	if lineFragColor(t, left, split.leftBody, "package main", "package") != pkg {
-		t.Fatal("split left package color differs")
+	if lineFragColor(t, left, split.leftBody, "package main", "package") != light.keyword {
+		t.Fatal("split left context lost its color")
 	}
-	if lineFragColor(t, right, split.rightBody, "package main", "package") != pkg {
-		t.Fatal("split right package color differs")
+	if lineFragColor(t, right, split.rightBody, "package main", "package") != light.keyword {
+		t.Fatal("split right context lost its color")
 	}
 	oldLine := "func Old() int { return 1 }"
 	if lineFragColor(t, left, split.leftBody, oldLine, "int") != light.typ ||
@@ -176,10 +177,13 @@ func TestSyntaxLayoutsMatch(t *testing.T) {
 	hStyles := hunk.compactBodyStyle()
 	wStyles = whole.compactBodyStyle()
 	if lineFragColor(t, hStyles, hunk.compactBody, "var old = 1", "var") != light.keyword ||
-		lineFragColor(t, wStyles, whole.compactBody, "var old = 1", "var") != light.keyword ||
-		lineFragColor(t, wStyles, whole.compactBody, "package main", "package") != light.keyword ||
-		lineFragColor(t, wStyles, whole.compactBody, "func Keep() {}", "Keep") != light.ident {
-		t.Fatal("whole-file tokens")
+		lineFragColor(t, wStyles, whole.compactBody, "var old = 1", "var") != light.keyword {
+		t.Fatal("whole-file changed tokens")
+	}
+	if lineFragColor(t, wStyles, whole.compactBody, "package main", "package") != (color.NRGBA{}) ||
+		lineFragColor(t, wStyles, whole.compactBody, "func Keep() {}", "func") != (color.NRGBA{}) ||
+		lineFragColor(t, wStyles, whole.compactBody, "func Keep() {}", "Keep") != (color.NRGBA{}) {
+		t.Fatal("whole-file unchanged lines were colored")
 	}
 	ws := wholeSplit.splitBodyStyle(true)
 	wr := wholeSplit.splitBodyStyle(false)
@@ -204,8 +208,8 @@ func TestSyntaxKnownNames(t *testing.T) {
 		"+# note\n"
 	mv := openSyntax(makeDiff, false, false, false, false, "", "")
 	ms := mv.compactBodyStyle()
-	if got := lineFragColor(t, ms, mv.compactBody, "build:", "build"); got != pal.ident {
-		t.Fatalf("make target = %v", got)
+	if got := lineFragColor(t, ms, mv.compactBody, "build:", "build"); got != (color.NRGBA{}) {
+		t.Fatalf("unchanged make target = %v", got)
 	}
 	if got := lineFragColor(t, ms, mv.compactBody, "# note", "# note"); got != pal.comment {
 		t.Fatalf("make comment = %v", got)

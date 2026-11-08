@@ -636,6 +636,74 @@ func TestDiffWholeGlyph(t *testing.T) {
 	}
 }
 
+func TestWholeFileGutterFollowsShownLines(t *testing.T) {
+	original := "" +
+		"diff --git a/CMakeLists.txt b/CMakeLists.txt\n" +
+		"--- a/CMakeLists.txt\n" +
+		"+++ b/CMakeLists.txt\n" +
+		"@@ -8,6 +8,6 @@\n" +
+		" c1\n" +
+		" c2\n" +
+		" c3\n" +
+		"-d1\n" +
+		"-d2\n" +
+		"+a1\n" +
+		"+a2\n" +
+		" c4\n"
+	full := "" +
+		"diff --git a/CMakeLists.txt b/CMakeLists.txt\n" +
+		"--- a/CMakeLists.txt\n" +
+		"+++ b/CMakeLists.txt\n" +
+		"@@ -1,12 +1,12 @@\n" +
+		" p1\n" +
+		" p2\n" +
+		" p3\n" +
+		" p4\n" +
+		" p5\n" +
+		" p6\n" +
+		" p7\n" +
+		" c1\n" +
+		" c2\n" +
+		" c3\n" +
+		"-d1\n" +
+		"-d2\n" +
+		"+a1\n" +
+		"+a2\n" +
+		" c4\n"
+	v := &gitDiffView{}
+	v.Set(original, false, false, false, true, full)
+	styles := v.compactGutterStyle()
+	pal := diffPalette(false)
+	for _, line := range []string{"p4", "p5", "p6", "p7", "c1"} {
+		assertGutterLineBG(t, styles, v.gutter, full, " "+line, pal.numBg)
+	}
+	assertGutterLineBG(t, styles, v.gutter, full, "-d1", pal.delBg)
+	assertGutterLineBG(t, styles, v.gutter, full, "-d2", pal.delBg)
+	assertGutterLineBG(t, styles, v.gutter, full, "+a1", pal.addBg)
+	assertGutterLineBG(t, styles, v.gutter, full, "+a2", pal.addBg)
+}
+
+func assertGutterLineBG(t *testing.T, styles basicwidget.TextStyles, gutter, diff, line string, want color.NRGBA) {
+	t.Helper()
+	at := strings.Index(diff, line+"\n")
+	if at < 0 {
+		t.Fatalf("missing %q", line)
+	}
+	n := strings.Count(diff[:at], "\n")
+	start := 0
+	for range n {
+		next := strings.IndexByte(gutter[start:], '\n')
+		if next < 0 {
+			t.Fatalf("gutter has no line %d for %q", n, line)
+		}
+		start += next + 1
+	}
+	got, set := styleBackground(styles, start)
+	if !set || got != want {
+		t.Fatalf("gutter %q background = %v set=%v, want %v", line, got, set, want)
+	}
+}
+
 func TestWholeFileKeepsOriginalPatchLines(t *testing.T) {
 	original := "" +
 		"diff --git a/a.txt b/a.txt\n" +

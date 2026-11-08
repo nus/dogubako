@@ -34,9 +34,11 @@ type gitFileDiff struct {
 // The overview bar on the right is that mode's scrollbar. Additions and deletions
 // are marked in the diff colors in one band that continues under the thumb.
 // The thumb is the part on screen.
-// Source lines of a known language are colored by token. Line numbers, markers,
-// hunks, and meta lines keep their own colors, and the coloring does not change
-// which bytes a selection can stage.
+// Source lines of a known language are colored by token. In the compact
+// layout, a line that is neither an addition nor a deletion stays the
+// default color. Line numbers, markers, hunks, and meta lines keep their
+// own colors, and the coloring does not change which bytes a selection
+// can stage.
 // Inside a paired deletion and addition, the characters that differ are a
 // darker red or green than the line. The rest of the line keeps the line
 // color. Equal counts pair from the top. Unequal counts pair only lines
@@ -238,7 +240,7 @@ func (v *gitDiffView) Build(context *guigui.Context, adder *guigui.ChildAdder) e
 	}
 	adder.AddWidget(&v.compact)
 	v.compact.setWrap(v.wrap)
-	v.compact.prepareMarked(v.gutter, v.compactMarks, v.compactBody, styleDiffGutter(v.gutter, v.text, v.dark), markStyle, bodyStyle, v.compactKinds, v.compactKinds, v.dark)
+	v.compact.prepareMarked(v.gutter, v.compactMarks, v.compactBody, v.compactGutterStyle(), markStyle, bodyStyle, v.compactKinds, v.compactKinds, v.dark)
 	v.bindMenu(&v.compact.body, false)
 	v.attachOverview(adder)
 	return nil
@@ -447,6 +449,13 @@ func styleDiff(text string, dark bool) basicwidget.TextStyles {
 		start = end
 	}
 	return styles
+}
+
+// compactGutterStyle colors the line-number column from the diff on screen.
+// Whole-file mode shows more lines than the original patch. The numbers
+// follow that text, so a short patch must not decide which rows are colored.
+func (v *gitDiffView) compactGutterStyle() basicwidget.TextStyles {
+	return styleDiffGutter(v.gutter, v.shown, v.dark)
 }
 
 func styleDiffGutter(gutter, diff string, dark bool) basicwidget.TextStyles {
