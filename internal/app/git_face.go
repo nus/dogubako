@@ -22,6 +22,7 @@ type gitFace struct {
 	diffSplit      bool
 	diffWrap       bool
 	diffWhole      bool
+	diffColFrac    float64
 	workDiff       gitDiffPlace
 	histDiff       gitDiffPlace
 }
@@ -112,6 +113,7 @@ func (t *GitTool) captureFace() gitFace {
 		diffSplit:      t.diffSplit,
 		diffWrap:       t.diffWrap,
 		diffWhole:      t.diffWhole,
+		diffColFrac:    t.diffColFrac,
 		workDiff:       work,
 		histDiff:       hist,
 	}
@@ -143,6 +145,7 @@ func (t *GitTool) applyFace(m *GitModel, f gitFace) {
 	t.diffSplit = f.diffSplit
 	t.diffWrap = f.diffWrap
 	t.diffWhole = f.diffWhole
+	t.diffColFrac = f.diffColFrac
 	t.faceGraph = f.graph
 	t.faceGraphOn = true
 	t.sidePane.panel.ForceSetScrollOffset(f.sideX, f.sideY)
@@ -155,7 +158,7 @@ func (t *GitTool) applyFace(m *GitModel, f gitFace) {
 }
 
 // resetFace is the screen of a repository that has not been shown before.
-// Diff split, wrap, and whole-file stay as they are.
+// Diff split, wrap, whole-file, and the split-column width stay as they are.
 func (t *GitTool) resetFace(m *GitModel) {
 	t.commitView = false
 	t.openHash = ""

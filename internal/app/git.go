@@ -218,6 +218,9 @@ type GitTool struct {
 	diffSplit   bool
 	diffWrap    bool
 	diffWhole   bool
+	// diffColFrac is the left column's share of a split diff.
+	// Zero keeps the columns equal. Working copy and history share it.
+	diffColFrac float64
 	workPanes   gitWorkPanes
 	msgInput    guigui.WidgetWithSize[*basicwidget.TextInput]
 	status      basicwidget.Text
@@ -1835,6 +1838,7 @@ func (t *GitTool) setHistDiff(lang i18n.Lang, model *GitModel) {
 		t.histHold.set = false
 	}
 	t.histStack.diff.SetSplit(lang, t.diffSplit, t.setDiffSplit)
+	t.histStack.diff.SetColFrac(t.diffColFrac, t.setDiffColFrac)
 	t.histStack.diff.SetWrap(lang, t.diffWrap, t.setDiffWrap)
 	full, enabled := t.wholeFileDiff(model, body, t.histFile, false, true)
 	t.histStack.diff.SetWhole(lang, t.diffWhole, full, enabled, t.setDiffWhole)
@@ -1860,6 +1864,10 @@ func (t *GitTool) wholeFileDiff(model *GitModel, body, path string, staged, comm
 		return "", enabled
 	}
 	return text, enabled
+}
+
+func (t *GitTool) setDiffColFrac(frac float64) {
+	t.diffColFrac = frac
 }
 
 func (t *GitTool) setDiffSplit(split bool) {

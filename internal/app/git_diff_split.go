@@ -8,6 +8,7 @@ import (
 	"strings"
 
 	"github.com/hajimehoshi/ebiten/v2"
+	"github.com/hajimehoshi/ebiten/v2/inpututil"
 	"github.com/hajimehoshi/ebiten/v2/vector"
 
 	"github.com/guigui-gui/guigui"
@@ -780,6 +781,169 @@ func (p *diffScrollPad) HandlePointingInput(context *guigui.Context, widgetBound
 		return guigui.HandleInputByWidget(p)
 	}
 	return guigui.HandleInputResult{}
+}
+
+// gitDiffMinCol is the narrowest a split column may be while the boundary moves.
+func gitDiffMinCol(u int) int {
+	if u < 1 {
+		u = 1
+	}
+	return 6 * u
+}
+
+// gitDiffColWidth is the left column's width. frac is its share of the space
+// beside the boundary. Zero keeps the two columns equal.
+func gitDiffColWidth(total, splitW int, frac float64, minCol int) int {
+	if frac <= 0 || frac >= 1 {
+		frac = 0.5
+	}
+	return gitWorkFilesWidth(total, splitW, frac, minCol, minCol)
+}
+
+// gitDiffColFrac is the left column's share after the boundary moves.
+// leftW is the width to the left of the boundary. Each column keeps gitDiffMinCol.
+func gitDiffColFrac(total, splitW, leftW, minCol int) float64 {
+	avail := total - splitW
+	if avail <= 1 {
+		return 0.5
+	}
+	if minCol > avail-1 {
+		minCol = avail / 2
+		if minCol < 1 {
+			minCol = 1
+		}
+	}
+	maxLeft := avail - minCol
+	if maxLeft < minCol {
+		maxLeft = minCol
+	}
+	if leftW < minCol {
+		leftW = minCol
+	}
+	if leftW > maxLeft {
+		leftW = maxLeft
+	}
+	return float64(leftW) / float64(avail)
+}
+
+// SetColFrac records the shared left-column share. A drag in progress keeps
+// the width under the pointer instead of taking a value from the other diff.
+func (v *gitDiffView) SetColFrac(frac float64, onColFrac func(float64)) {
+	v.onColFrac = onColFrac
+	if v.colDrag {
+		return
+	}
+	v.colFrac = frac
+}
+
+func (v *gitDiffView) setColDragPassthrough(context *guigui.Context, pass bool) {
+	context.SetPassthrough(&v.left, pass)
+	context.SetPassthrough(&v.right, pass)
+	context.SetPassthrough(&v.overview, pass)
+	context.SetPassthrough(&v.compact, pass)
+}
+
+func (v *gitDiffView) finishColDrag(context *guigui.Context) {
+	if !v.colDrag {
+		return
+	}
+	if v.split && ebiten.IsMouseButtonPressed(ebiten.MouseButtonLeft) {
+		v.setColDragPassthrough(context, true)
+		return
+	}
+	v.colDrag = false
+	v.setColDragPassthrough(context, false)
+}
+
+func (v *gitDiffView) setColFracFromCursor(x, u int) {
+	splitW := gitWorkSplitWidth(u)
+	leftW := x - v.pane.Min.X - splitW/2
+	frac := gitDiffColFrac(v.pane.Dx(), splitW, leftW, gitDiffMinCol(u))
+	if frac == v.colFrac {
+		return
+	}
+	v.colFrac = frac
+	if v.onColFrac != nil {
+		v.onColFrac(frac)
+	}
+}
+
+func (v *gitDiffView) dragColSplit(context *guigui.Context) guigui.HandleInputResult {
+	u := basicwidget.UnitSize(context)
+	if !v.colDrag {
+		if !v.split || !inpututil.IsMouseButtonJustPressed(ebiten.MouseButtonLeft) {
+			return guigui.HandleInputResult{}
+		}
+		v.colDrag = true
+	}
+	v.setColFracFromCursor(image.Pt(ebiten.CursorPosition()).X, u)
+	v.setColDragPassthrough(context, true)
+	if !ebiten.IsMouseButtonPressed(ebiten.MouseButtonLeft) {
+		v.colDrag = false
+		v.setColDragPassthrough(context, false)
+	}
+	guigui.RequestRebuild()
+	return guigui.HandleInputByWidget(v)
+}
+
+func (v *gitDiffView) HandlePointingInput(context *guigui.Context, widgetBounds *guigui.WidgetBounds) guigui.HandleInputResult {
+	if !v.colDrag {
+		return guigui.HandleInputResult{}
+	}
+	return v.dragColSplit(context)
+}
+
+func (v *gitDiffView) Tick(context *guigui.Context, widgetBounds *guigui.WidgetBounds) error {
+	if !v.colDrag {
+		return nil
+	}
+	if !ebiten.IsMouseButtonPressed(ebiten.MouseButtonLeft) {
+		v.colDrag = false
+		v.setColDragPassthrough(context, false)
+		return nil
+	}
+	ebiten.SetCursorShape(ebiten.CursorShapeEWResize)
+	return nil
+}
+
+func (v *gitDiffView) CursorShape(context *guigui.Context, widgetBounds *guigui.WidgetBounds) (ebiten.CursorShapeType, bool) {
+	if v.colDrag {
+		return ebiten.CursorShapeEWResize, true
+	}
+	return 0, false
+}
+
+// gitDiffColSplit is the draggable boundary between the old and new columns.
+type gitDiffColSplit struct {
+	guigui.DefaultWidget
+
+	view *gitDiffView
+}
+
+func (s *gitDiffColSplit) HandlePointingInput(context *guigui.Context, widgetBounds *guigui.WidgetBounds) guigui.HandleInputResult {
+	if s.view == nil {
+		return guigui.HandleInputResult{}
+	}
+	if s.view.colDrag || widgetBounds.IsHitAtCursor() && inpututil.IsMouseButtonJustPressed(ebiten.MouseButtonLeft) {
+		return s.view.dragColSplit(context)
+	}
+	return guigui.HandleInputResult{}
+}
+
+func (s *gitDiffColSplit) CursorShape(context *guigui.Context, widgetBounds *guigui.WidgetBounds) (ebiten.CursorShapeType, bool) {
+	if s.view != nil && s.view.colDrag || widgetBounds.IsHitAtCursor() {
+		return ebiten.CursorShapeEWResize, true
+	}
+	return 0, false
+}
+
+func (s *gitDiffColSplit) Draw(context *guigui.Context, widgetBounds *guigui.WidgetBounds, dst *ebiten.Image) {
+	b := widgetBounds.Bounds()
+	if b.Empty() {
+		return
+	}
+	x := b.Min.X + b.Dx()/2
+	fillRect(dst, image.Rect(x, b.Min.Y, x+1, b.Max.Y), gitHistSplitColor(context.ColorMode()))
 }
 
 // gitDiffModeBar switches the diff between the compact and split layouts.
