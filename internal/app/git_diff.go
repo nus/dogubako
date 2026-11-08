@@ -32,7 +32,8 @@ type gitFileDiff struct {
 // Whole-file mode fills the lines the hunks skip. Selections still refer to the
 // original patch, so staging a line stages that patch line.
 // The overview bar on the right is that mode's scrollbar. Additions and deletions
-// are marked in the diff colors, and the thumb beside them is the part on screen.
+// are marked in the diff colors in one band that continues under the thumb.
+// The thumb is the part on screen.
 // Source lines of a known language are colored by token. Line numbers, markers,
 // hunks, and meta lines keep their own colors, and the coloring does not change
 // which bytes a selection can stage.

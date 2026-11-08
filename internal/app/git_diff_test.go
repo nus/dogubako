@@ -800,8 +800,36 @@ func TestOverviewScrollAndMarkRect(t *testing.T) {
 	}
 }
 
+func TestOverviewMarkRectsKeepDeletions(t *testing.T) {
+	track := image.Rect(0, 0, 25, 300)
+	marks := []diffOverviewMark{
+		{start: 400.0 / 1200, end: 402.0 / 1200, del: true},
+		{start: 402.0 / 1200, end: 403.0 / 1200, add: true},
+	}
+	rawDel := diffOverviewMarkRect(track, marks[0].start, marks[0].end, 4)
+	rawAdd := diffOverviewMarkRect(track, marks[1].start, marks[1].end, 4)
+	if rawAdd.Min.Y > rawDel.Min.Y || rawAdd.Max.Y < rawDel.Max.Y {
+		t.Fatalf("fixture should cover the deletion: del %v add %v", rawDel, rawAdd)
+	}
+	rects := overviewMarkRects(track, marks, 4)
+	if rects[0].Dy() < 1 || rects[1].Dy() < 1 || rects[0].Max.Y > rects[1].Min.Y {
+		t.Fatalf("deletion should stay visible beside the addition: %v", rects)
+	}
+}
+
 func TestDiffOverviewLanes(t *testing.T) {
 	markW, gap, thumbW := diffOverviewParts(1)
+	if markW != 12 || thumbW != 12 || gap != 1 || markW < 8 {
+		t.Fatalf("scale 1 parts mark=%d gap=%d thumb=%d", markW, gap, thumbW)
+	}
+	wideMark, wideGap, wideThumb := diffOverviewParts(2)
+	if wideMark != 24 || wideThumb != 24 || wideGap != 2 {
+		t.Fatalf("scale 2 parts mark=%d gap=%d thumb=%d", wideMark, wideGap, wideThumb)
+	}
+	floorMark, floorGap, floorThumb := diffOverviewParts(0.5)
+	if floorMark != markW || floorGap != gap || floorThumb != thumbW {
+		t.Fatalf("small scale parts mark=%d gap=%d thumb=%d", floorMark, floorGap, floorThumb)
+	}
 	track := image.Rect(10, 20, 10+markW+gap+thumbW, 120)
 	marks, thumb := diffOverviewLanes(track, 1)
 	if marks.Dx() != markW || thumb.Dx() != thumbW || marks.Max.X+gap != thumb.Min.X {
@@ -812,6 +840,22 @@ func TestDiffOverviewLanes(t *testing.T) {
 	}
 	if thumb.Overlaps(marks) {
 		t.Fatal("the scrollbar should sit beside the change marks")
+	}
+	lane := diffOverviewMarkLane(marks, thumb)
+	if lane.Min != marks.Min || lane.Max != thumb.Max || lane.Dx() != markW+gap+thumbW {
+		t.Fatalf("highlight lane = %v", lane)
+	}
+	narrow := image.Rect(0, 0, 10, 40)
+	nMarks, nThumb := diffOverviewLanes(narrow, 1)
+	if nMarks.Dx() < 1 || nMarks.Dx() >= markW || nThumb.Dx() < 1 {
+		t.Fatalf("squeezed marks=%v thumb=%v", nMarks, nThumb)
+	}
+	if nMarks.Max.X != nThumb.Min.X || nThumb.Max.X != narrow.Max.X {
+		t.Fatalf("a narrow track should keep the marks and give the rest to the thumb: marks=%v thumb=%v", nMarks, nThumb)
+	}
+	narrowLane := diffOverviewMarkLane(nMarks, nThumb)
+	if narrowLane.Min.X != narrow.Min.X || narrowLane.Max.X != narrow.Max.X {
+		t.Fatalf("squeezed highlight lane = %v", narrowLane)
 	}
 }
 

@@ -505,14 +505,11 @@ func diffOverviewWidth(context *guigui.Context) int {
 }
 
 // diffOverviewParts is the mark lane, the gap, and the scrollbar lane.
-// The scrollbar lane matches the width of the app's other scrollbars.
+// The mark lane is as wide as the scrollbar lane. The scrollbar lane
+// matches the width of the app's other scrollbars.
 func diffOverviewParts(scale float64) (markW, gap, thumbW int) {
 	if scale < 1 {
 		scale = 1
-	}
-	markW = int(4 * scale)
-	if markW < 3 {
-		markW = 3
 	}
 	gap = int(scale)
 	if gap < 1 {
@@ -522,6 +519,7 @@ func diffOverviewParts(scale float64) (markW, gap, thumbW int) {
 	if thumbW < 8 {
 		thumbW = 8
 	}
+	markW = thumbW
 	return markW, gap, thumbW
 }
 
@@ -545,6 +543,19 @@ func diffOverviewLanes(track image.Rectangle, scale float64) (marks, thumb image
 		thumb.Min.X = thumb.Max.X
 	}
 	return marks, thumb
+}
+
+// diffOverviewMarkLane is the width of one highlight. It runs from the mark
+// lane through the scrollbar, so the color is a single band and the thumb
+// sits on its right side.
+func diffOverviewMarkLane(marks, thumb image.Rectangle) image.Rectangle {
+	if marks.Empty() {
+		return thumb
+	}
+	if thumb.Empty() {
+		return marks
+	}
+	return marks.Union(thumb)
 }
 
 func (v *gitDiffView) overviewMarks() []diffOverviewMark {
@@ -952,6 +963,19 @@ func overviewThumbRect(track image.Rectangle, scrollY float64, viewH, contentH, 
 	return image.Rect(track.Min.X, y0, track.Max.X, y0+h)
 }
 
+// diffOverviewMarkColors are the scrollbar's addition and deletion marks.
+// The line washes are too close to the track to read, so a run of deleted
+// lines disappears into the background. These stay red and green, dark
+// enough to show on the track and under the translucent thumb.
+func diffOverviewMarkColors(dark bool) (add, del color.NRGBA) {
+	if dark {
+		return color.NRGBA{R: 0x3f, G: 0xb9, B: 0x50, A: 0xff},
+			color.NRGBA{R: 0xf8, G: 0x51, B: 0x49, A: 0xff}
+	}
+	return color.NRGBA{R: 0x1a, G: 0x7f, B: 0x37, A: 0xff},
+		color.NRGBA{R: 0xcf, G: 0x22, B: 0x2e, A: 0xff}
+}
+
 func diffOverviewThumbColor(dark bool) color.NRGBA {
 	// Same strength as the app's scrollbar when it is fully shown:
 	// foreground at 0.8, then the shown opacity of 0.75.
@@ -962,8 +986,9 @@ func diffOverviewThumbColor(dark bool) color.NRGBA {
 }
 
 // diffOverviewBar is the whole-file scrollbar.
-// Change marks use the diff's addition and deletion colors. Dragging scrolls the file
-// so the point under the cursor stays in view.
+// Change marks use the diff's addition and deletion colors in one band wide
+// enough to run under the thumb. Dragging scrolls the file so the point under
+// the cursor stays in view.
 type diffOverviewBar struct {
 	guigui.DefaultWidget
 
@@ -1055,6 +1080,12 @@ func (b *diffOverviewBar) Draw(context *guigui.Context, widgetBounds *guigui.Wid
 		inner.Min.X += pad
 		inner.Max.X -= pad
 	}
+	minMark := int(2 * context.Scale())
+	if minMark < 2 {
+		minMark = 2
+	}
+	marks := b.view.overviewMarks()
+	drawDiffOverviewMarks(dst, diffOverviewMarkLane(marksLane, thumbLane), marks, b.view.dark, minMark)
 	if thumb := overviewThumbRect(inner, scrollY, viewH, contentH, minThumb); !thumb.Empty() {
 		radius := thumb.Dx() / 2
 		if radius < 1 {
@@ -1062,12 +1093,17 @@ func (b *diffOverviewBar) Draw(context *guigui.Context, widgetBounds *guigui.Wid
 		}
 		basicwidgetdraw.DrawRoundedRect(context, dst, thumb, diffOverviewThumbColor(b.view.dark), radius)
 	}
-	minMark := int(2 * context.Scale())
-	if minMark < 2 {
-		minMark = 2
-	}
-	for _, mark := range b.view.overviewMarks() {
-		r := diffOverviewMarkRect(marksLane, mark.start, mark.end, minMark)
+}
+
+// drawDiffOverviewMarks paints addition and deletion spans in lane.
+// A line that is both is red on the left and green on the right.
+// A short mark grows to minMark, then gives overlapping pixels back so a
+// deletion is not painted over by the addition beside it.
+func drawDiffOverviewMarks(dst *ebiten.Image, lane image.Rectangle, marks []diffOverviewMark, dark bool, minMark int) {
+	add, del := diffOverviewMarkColors(dark)
+	rects := overviewMarkRects(lane, marks, minMark)
+	for i, mark := range marks {
+		r := rects[i]
 		switch {
 		case mark.del && mark.add:
 			mid := r.Min.X + r.Dx()/2
@@ -1077,12 +1113,49 @@ func (b *diffOverviewBar) Draw(context *guigui.Context, widgetBounds *guigui.Wid
 			if mid >= r.Max.X {
 				mid = r.Max.X
 			}
-			fillRect(dst, image.Rect(r.Min.X, r.Min.Y, mid, r.Max.Y), pal.delBg)
-			fillRect(dst, image.Rect(mid, r.Min.Y, r.Max.X, r.Max.Y), pal.addBg)
+			fillRect(dst, image.Rect(r.Min.X, r.Min.Y, mid, r.Max.Y), del)
+			fillRect(dst, image.Rect(mid, r.Min.Y, r.Max.X, r.Max.Y), add)
 		case mark.del:
-			fillRect(dst, r, pal.delBg)
+			fillRect(dst, r, del)
 		case mark.add:
-			fillRect(dst, r, pal.addBg)
+			fillRect(dst, r, add)
 		}
+	}
+}
+
+// overviewMarkRects is where each mark is painted. Minimum height can land
+// two neighboring marks on the same pixels; the later one would erase the
+// earlier, which hides a short run of deletions under the following addition.
+func overviewMarkRects(track image.Rectangle, marks []diffOverviewMark, minH int) []image.Rectangle {
+	rects := make([]image.Rectangle, len(marks))
+	for i, mark := range marks {
+		rects[i] = diffOverviewMarkRect(track, mark.start, mark.end, minH)
+	}
+	separateOverviewMarkRects(rects)
+	return rects
+}
+
+// separateOverviewMarkRects splits vertical overlaps so each mark keeps a row.
+func separateOverviewMarkRects(rects []image.Rectangle) {
+	for i := 0; i+1 < len(rects); i++ {
+		a := &rects[i]
+		b := &rects[i+1]
+		if a.Empty() || b.Empty() || a.Max.Y <= b.Min.Y || b.Max.Y <= a.Min.Y {
+			continue
+		}
+		top := max(a.Min.Y, b.Min.Y)
+		bot := min(a.Max.Y, b.Max.Y)
+		mid := top + (bot-top)/2
+		if mid <= a.Min.Y {
+			mid = a.Min.Y + 1
+		}
+		if mid >= b.Max.Y {
+			mid = b.Max.Y - 1
+		}
+		if mid <= a.Min.Y || mid >= b.Max.Y {
+			continue
+		}
+		a.Max.Y = mid
+		b.Min.Y = mid
 	}
 }
