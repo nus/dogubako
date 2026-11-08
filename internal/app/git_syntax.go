@@ -272,10 +272,10 @@ func syntaxSpans(body string, kinds []byte, oldPath, newPath string, side syntax
 	case syntaxNew:
 		return highlightSide(body, kinds, newLex, keepNew, emitKept)
 	default:
-		// Deletions take the old file's tokens. Context and additions take the
-		// new file's. Context is still fed to the old lexer so a comment that
-		// opens above a deletion stays a comment, but those bytes are colored
-		// from the new file, which is the copy the compact line shows.
+		// Deletions take the old file's tokens. Additions take the new file's.
+		// Context is fed to both lexers so a comment that opens on an unchanged
+		// line stays a comment on a following deletion or addition. The
+		// unchanged line itself keeps the default color.
 		dels := highlightSide(body, kinds, oldLex, keepOld, emitDel)
 		adds := highlightSide(body, kinds, newLex, keepNew, emitNew)
 		return append(dels, adds...)
@@ -286,7 +286,7 @@ func keepOld(kind byte) bool { return kind == ' ' || kind == '-' }
 func keepNew(kind byte) bool { return kind == ' ' || kind == '+' }
 func emitKept(byte) bool     { return true }
 func emitDel(kind byte) bool { return kind == '-' }
-func emitNew(kind byte) bool { return kind == ' ' || kind == '+' }
+func emitNew(kind byte) bool { return kind == '+' }
 
 func lexerFor(path, fallback string) chroma.Lexer {
 	if path != "" {
